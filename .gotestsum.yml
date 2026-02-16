@@ -1,0 +1,26 @@
+# Default format for test output
+format: pkgname-and-test-fails
+
+# Show summary of test results
+summary:
+  - fail
+  - skip
+  - errors
+
+# Maximum number of test failures to print in the summary
+max-fails: 10
+
+# Show timing for slow tests (over 1 second)
+slow-threshold: 1s
+
+# Watch mode settings
+watch:
+  # Packages to watch for changes
+  dirs:
+    - ./internal
+    - ./cmd
+  # Ignore patterns
+  ignore:
+    - "*.md"
+    - ".git"
+    - "vendor"
