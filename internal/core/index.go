@@ -1,10 +1,21 @@
 package core
 
-import "sync"
+import (
+	"errors"
+	"sort"
+	"sync"
+)
 
 type VectorIndex struct {
 	mu    sync.RWMutex
 	Store map[string]*VectorNode
+}
+
+// SearchResult represents a single match
+type SearchResult struct {
+	ID    string
+	Score float32
+	Meta  map[string]interface{} // Return metadata so user sees what it is
 }
 
 func NewVectorIndex() *VectorIndex {
@@ -22,4 +33,36 @@ func (idx *VectorIndex) Insert(id string, vec []float32, meta map[string]any) {
 		Vector:   vec,
 		Metadata: meta,
 	}
+}
+
+func (idx *VectorIndex) Search(query []float32, limit int) ([]SearchResult, error) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	if len(query) == 0 {
+		return nil, errors.New("empty query vector")
+	}
+
+	results := make([]SearchResult, 0, limit)
+	for id, node := range idx.Store {
+		score, err := CosineSimilarity(query, node.Vector)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, SearchResult{
+			ID:    id,
+			Score: score,
+			Meta:  node.Metadata,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
 }

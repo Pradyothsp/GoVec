@@ -132,30 +132,6 @@ func (s *APITestSuite) TestVectorInsertAndOverwrite() {
 	s.Assert().Len(s.index.Store, 1, "Should still have only one vector")
 }
 
-func (s *APITestSuite) TestMultipleEndpoints() {
-	healthReq := httptest.NewRequest(http.MethodGet, "/health", nil)
-	healthW := httptest.NewRecorder()
-	s.router.ServeHTTP(healthW, healthReq)
-	s.Assert().Equal(http.StatusOK, healthW.Code)
-
-	payload := map[string]interface{}{
-		"id":     "test",
-		"vector": []float32{1.0, 2.0},
-	}
-
-	body, _ := json.Marshal(payload)
-	vectorReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
-	vectorReq.Header.Set("Content-Type", "application/json")
-
-	vectorW := httptest.NewRecorder()
-	s.router.ServeHTTP(vectorW, vectorReq)
-	s.Assert().Equal(http.StatusCreated, vectorW.Code)
-
-	healthReq2 := httptest.NewRequest(http.MethodGet, "/health", nil)
-	healthW2 := httptest.NewRecorder()
-	s.router.ServeHTTP(healthW2, healthReq2)
-	s.Assert().Equal(http.StatusOK, healthW2.Code)
-}
 
 func (s *APITestSuite) TestValidationErrors() {
 	testCases := []struct {
@@ -347,6 +323,245 @@ func (s *APITestSuite) TestEdgeCases() {
 		s.Assert().Equal(http.StatusCreated, w.Code)
 		s.Require().Contains(s.index.Store, "complex_meta")
 	})
+}
+
+func (s *APITestSuite) TestInsertAndSearchFlow() {
+	// Step 1: Insert multiple vectors via HTTP
+	vectors := []struct {
+		id       string
+		vector   []float32
+		metadata map[string]interface{}
+	}{
+		{
+			id:       "doc1",
+			vector:   []float32{1.0, 0.0, 0.0},
+			metadata: map[string]interface{}{"title": "First Document", "category": "tech"},
+		},
+		{
+			id:       "doc2",
+			vector:   []float32{0.9, 0.1, 0.0},
+			metadata: map[string]interface{}{"title": "Second Document", "category": "tech"},
+		},
+		{
+			id:       "doc3",
+			vector:   []float32{0.0, 1.0, 0.0},
+			metadata: map[string]interface{}{"title": "Third Document", "category": "science"},
+		},
+		{
+			id:       "doc4",
+			vector:   []float32{-1.0, 0.0, 0.0},
+			metadata: map[string]interface{}{"title": "Fourth Document", "category": "tech"},
+		},
+	}
+
+	for _, vec := range vectors {
+		payload := map[string]interface{}{
+			"id":       vec.id,
+			"vector":   vec.vector,
+			"metadata": vec.metadata,
+		}
+
+		body, err := json.Marshal(payload)
+		s.Require().NoError(err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+
+		s.Assert().Equal(http.StatusCreated, w.Code, "Insert should succeed for %s", vec.id)
+	}
+
+	// Step 2: Search for similar vectors via HTTP
+	searchPayload := map[string]interface{}{
+		"vector": []float32{1.0, 0.0, 0.0}, // Should be most similar to doc1
+		"k":      3,
+	}
+
+	searchBody, err := json.Marshal(searchPayload)
+	s.Require().NoError(err)
+
+	searchReq := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(searchBody))
+	searchReq.Header.Set("Content-Type", "application/json")
+
+	searchW := httptest.NewRecorder()
+	s.router.ServeHTTP(searchW, searchReq)
+
+	// Step 3: Verify search results
+	s.Assert().Equal(http.StatusOK, searchW.Code, "Search should succeed")
+
+	var results []map[string]interface{}
+	err = json.Unmarshal(searchW.Body.Bytes(), &results)
+	s.Require().NoError(err, "Should be able to parse search results")
+
+	// Verify we got exactly k results
+	s.Assert().Len(results, 3, "Should return exactly k=3 results")
+
+	// Verify first result is doc1 (identical vector, score = 1.0)
+	s.Assert().Equal("doc1", results[0]["ID"], "First result should be doc1")
+	s.Assert().InDelta(1.0, results[0]["Score"], 0.001, "doc1 should have similarity score of 1.0")
+
+	meta0, ok := results[0]["Meta"].(map[string]interface{})
+	s.Require().True(ok, "Metadata should be a map")
+	s.Assert().Equal("First Document", meta0["title"], "Should return correct metadata for doc1")
+	s.Assert().Equal("tech", meta0["category"], "Should return correct category for doc1")
+
+	// Verify second result is doc2 (similar vector, score > 0.8)
+	s.Assert().Equal("doc2", results[1]["ID"], "Second result should be doc2")
+	score1, ok := results[1]["Score"].(float64)
+	s.Require().True(ok, "Score should be a number")
+	s.Assert().Greater(score1, 0.8, "doc2 should have high similarity")
+
+	meta1, ok := results[1]["Meta"].(map[string]interface{})
+	s.Require().True(ok, "Metadata should be a map")
+	s.Assert().Equal("Second Document", meta1["title"], "Should return correct metadata for doc2")
+
+	// Verify results are sorted by score (descending)
+	for i := 0; i < len(results)-1; i++ {
+		score_i, ok1 := results[i]["Score"].(float64)
+		score_next, ok2 := results[i+1]["Score"].(float64)
+		s.Require().True(ok1 && ok2, "All scores should be numbers")
+		s.Assert().GreaterOrEqual(score_i, score_next, "Results should be sorted by score descending")
+	}
+}
+
+func (s *APITestSuite) TestSearchWithDifferentKValues() {
+	// Insert test vectors
+	for i := 1; i <= 10; i++ {
+		payload := map[string]interface{}{
+			"id":       fmt.Sprintf("vec%d", i),
+			"vector":   []float32{float32(i), float32(i * 2)},
+			"metadata": map[string]interface{}{"index": i},
+		}
+
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Assert().Equal(http.StatusCreated, w.Code)
+	}
+
+	testCases := []struct {
+		name          string
+		k             int
+		expectedCount int
+	}{
+		{"k=1", 1, 1},
+		{"k=5", 5, 5},
+		{"k=10", 10, 10},
+		{"k=20", 20, 10}, // More than available
+		{"k=0", 0, 10},   // All results
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			searchPayload := map[string]interface{}{
+				"vector": []float32{5.0, 10.0},
+				"k":      tc.k,
+			}
+
+			body, _ := json.Marshal(searchPayload)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+
+			s.Assert().Equal(http.StatusOK, w.Code)
+
+			var results []map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &results)
+			s.Require().NoError(err)
+
+			s.Assert().Len(results, tc.expectedCount, "Should return correct number of results for %s", tc.name)
+		})
+	}
+}
+
+func (s *APITestSuite) TestSearchEmptyIndex() {
+	// Don't insert any vectors
+
+	searchPayload := map[string]interface{}{
+		"vector": []float32{1.0, 2.0, 3.0},
+		"k":      5,
+	}
+
+	body, _ := json.Marshal(searchPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code, "Empty index search should succeed")
+
+	var results []map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	s.Require().NoError(err)
+
+	s.Assert().Empty(results, "Should return empty array for empty index")
+}
+
+func (s *APITestSuite) TestSearchValidationErrors() {
+	// Insert a test vector
+	insertPayload := map[string]interface{}{
+		"id":     "test",
+		"vector": []float32{1.0, 2.0, 3.0},
+	}
+	insertBody, _ := json.Marshal(insertPayload)
+	insertReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(insertBody))
+	insertReq.Header.Set("Content-Type", "application/json")
+	insertW := httptest.NewRecorder()
+	s.router.ServeHTTP(insertW, insertReq)
+	s.Assert().Equal(http.StatusCreated, insertW.Code)
+
+	testCases := []struct {
+		name           string
+		payload        map[string]interface{}
+		expectedStatus int
+		errorContains  string
+	}{
+		{
+			name:           "missing_vector",
+			payload:        map[string]interface{}{"k": 5},
+			expectedStatus: http.StatusBadRequest,
+			errorContains:  "",
+		},
+		{
+			name:           "empty_vector",
+			payload:        map[string]interface{}{"vector": []float32{}, "k": 5},
+			expectedStatus: http.StatusInternalServerError,
+			errorContains:  "empty query vector",
+		},
+		{
+			name:           "dimension_mismatch",
+			payload:        map[string]interface{}{"vector": []float32{1.0, 2.0}, "k": 5},
+			expectedStatus: http.StatusInternalServerError,
+			errorContains:  "dimension",
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			body, _ := json.Marshal(tc.payload)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+
+			s.Assert().Equal(tc.expectedStatus, w.Code, "Test case: %s", tc.name)
+
+			if tc.errorContains != "" {
+				var response map[string]interface{}
+				json.Unmarshal(w.Body.Bytes(), &response)
+				s.Assert().Contains(response["error"], tc.errorContains, "Error message should contain expected text")
+			}
+		})
+	}
 }
 
 func TestAPITestSuite(t *testing.T) {

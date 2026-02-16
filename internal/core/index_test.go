@@ -304,3 +304,318 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 		assert.Len(t, idx.Store["large"].Vector, 4096)
 	})
 }
+
+func TestVectorIndex_Search_EmptyIndex(t *testing.T) {
+	idx := NewVectorIndex()
+	query := []float32{1.0, 2.0, 3.0}
+
+	results, err := idx.Search(query, 5)
+
+	require.NoError(t, err)
+	assert.Empty(t, results, "Search on empty index should return empty results")
+}
+
+func TestVectorIndex_Search_SingleVector(t *testing.T) {
+	idx := NewVectorIndex()
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
+
+	query := []float32{1.0, 2.0, 3.0}
+	results, err := idx.Search(query, 5)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "v1", results[0].ID)
+	assert.InDelta(t, 1.0, results[0].Score, 0.0001, "Identical vector should have score 1.0")
+	assert.Equal(t, "test", results[0].Meta["label"])
+}
+
+func TestVectorIndex_Search_MultipleVectors(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Insert vectors with different similarities to query
+	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, map[string]any{"type": "identical"})
+	idx.Insert("similar", []float32{0.9, 0.1, 0.0}, map[string]any{"type": "similar"})
+	idx.Insert("orthogonal", []float32{0.0, 1.0, 0.0}, map[string]any{"type": "orthogonal"})
+	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, map[string]any{"type": "opposite"})
+
+	query := []float32{1.0, 0.0, 0.0}
+	results, err := idx.Search(query, 10)
+
+	require.NoError(t, err)
+	require.Len(t, results, 4)
+
+	// Verify results are sorted by score (descending)
+	assert.Equal(t, "identical", results[0].ID)
+	assert.InDelta(t, 1.0, results[0].Score, 0.001)
+
+	assert.Equal(t, "similar", results[1].ID)
+	assert.Greater(t, results[1].Score, float32(0.8))
+
+	assert.Equal(t, "orthogonal", results[2].ID)
+	assert.InDelta(t, 0.0, results[2].Score, 0.001)
+
+	assert.Equal(t, "opposite", results[3].ID)
+	assert.InDelta(t, -1.0, results[3].Score, 0.001)
+}
+
+func TestVectorIndex_Search_WithLimit(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Insert 10 vectors (start from 1 to avoid zero vector)
+	for i := 1; i <= 10; i++ {
+		vec := []float32{float32(i), float32(i * 2)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]any{"index": i})
+	}
+
+	query := []float32{5.0, 10.0}
+
+	tests := []struct {
+		name          string
+		limit         int
+		expectedCount int
+	}{
+		{"limit_1", 1, 1},
+		{"limit_3", 3, 3},
+		{"limit_5", 5, 5},
+		{"limit_10", 10, 10},
+		{"limit_greater_than_total", 20, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := idx.Search(query, tt.limit)
+			require.NoError(t, err)
+			assert.Len(t, results, tt.expectedCount)
+		})
+	}
+}
+
+func TestVectorIndex_Search_WithZeroLimit(t *testing.T) {
+	idx := NewVectorIndex()
+
+	for i := 1; i <= 5; i++ {
+		vec := []float32{float32(i), float32(i * 2)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, nil)
+	}
+
+	query := []float32{1.0, 2.0}
+	results, err := idx.Search(query, 0)
+
+	require.NoError(t, err)
+	assert.Len(t, results, 5, "Zero limit should return all results")
+}
+
+func TestVectorIndex_Search_EmptyQuery(t *testing.T) {
+	idx := NewVectorIndex()
+	idx.Insert("v1", []float32{1.0, 2.0}, nil)
+
+	query := []float32{}
+	results, err := idx.Search(query, 5)
+
+	require.Error(t, err)
+	assert.Equal(t, "empty query vector", err.Error())
+	assert.Nil(t, results)
+}
+
+func TestVectorIndex_Search_DimensionMismatch(t *testing.T) {
+	idx := NewVectorIndex()
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, nil)
+	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, nil)
+
+	// Query with different dimension
+	query := []float32{1.0, 2.0}
+	results, err := idx.Search(query, 5)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "vector dimensions mismatch")
+	assert.Nil(t, results)
+}
+
+func TestVectorIndex_Search_ResultsIncludeMetadata(t *testing.T) {
+	idx := NewVectorIndex()
+
+	metadata := map[string]any{
+		"category": "test",
+		"count":    42,
+		"active":   true,
+		"tags":     []string{"go", "vector"},
+	}
+
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, metadata)
+
+	query := []float32{1.0, 2.0, 3.0}
+	results, err := idx.Search(query, 1)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.Equal(t, "test", results[0].Meta["category"])
+	assert.Equal(t, 42, results[0].Meta["count"])
+	assert.Equal(t, true, results[0].Meta["active"])
+	assert.NotNil(t, results[0].Meta["tags"])
+}
+
+func TestVectorIndex_Search_SortingOrder(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Insert vectors with known similarity scores to query [1,0,0]
+	idx.Insert("high", []float32{1.0, 0.0, 0.0}, nil)      // score = 1.0
+	idx.Insert("medium", []float32{0.7, 0.7, 0.0}, nil)    // score ≈ 0.7
+	idx.Insert("low", []float32{0.5, 0.866, 0.0}, nil)     // score ≈ 0.5
+	idx.Insert("negative", []float32{-1.0, 0.0, 0.0}, nil) // score = -1.0
+
+	query := []float32{1.0, 0.0, 0.0}
+	results, err := idx.Search(query, 10)
+
+	require.NoError(t, err)
+	require.Len(t, results, 4)
+
+	// Verify descending order by score
+	for i := 0; i < len(results)-1; i++ {
+		assert.GreaterOrEqual(t, results[i].Score, results[i+1].Score,
+			"Results should be sorted by score descending")
+	}
+
+	assert.Equal(t, "high", results[0].ID)
+	assert.Equal(t, "negative", results[len(results)-1].ID)
+}
+
+func TestVectorIndex_Search_IdenticalVectors(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Insert multiple identical vectors
+	for i := 0; i < 3; i++ {
+		idx.Insert(fmt.Sprintf("v%d", i), []float32{1.0, 2.0, 3.0}, map[string]any{"id": i})
+	}
+
+	query := []float32{1.0, 2.0, 3.0}
+	results, err := idx.Search(query, 10)
+
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	// All should have score 1.0
+	for _, result := range results {
+		assert.InDelta(t, 1.0, result.Score, 0.0001)
+	}
+}
+
+func TestVectorIndex_Search_Concurrency(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Insert test vectors (start from 1 to avoid zero vector)
+	for i := 1; i <= 100; i++ {
+		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]any{"index": i})
+	}
+
+	var wg sync.WaitGroup
+	numGoroutines := 50
+	query := []float32{50.0, 100.0, 150.0}
+
+	// Run concurrent searches
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, err := idx.Search(query, 10)
+			assert.NoError(t, err)
+			assert.Len(t, results, 10)
+
+			// Verify sorting
+			for j := 0; j < len(results)-1; j++ {
+				assert.GreaterOrEqual(t, results[j].Score, results[j+1].Score)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Pre-populate with some vectors (start from 1 to avoid zero vector)
+	for i := 1; i <= 50; i++ {
+		vec := []float32{float32(i), float32(i * 2)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, nil)
+	}
+
+	var wg sync.WaitGroup
+	query := []float32{25.0, 50.0}
+
+	// Concurrent searches
+	for i := 0; i < 25; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, err := idx.Search(query, 5)
+			assert.NoError(t, err)
+			assert.NotNil(t, results)
+		}()
+	}
+
+	// Concurrent inserts
+	for i := 51; i <= 75; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			vec := []float32{float32(id), float32(id * 2)}
+			idx.Insert(fmt.Sprintf("v%d", id), vec, nil)
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestVectorIndex_Search_HighDimensional(t *testing.T) {
+	idx := NewVectorIndex()
+
+	// Test with 1536-dimensional vectors (OpenAI embedding size)
+	vec1 := make([]float32, 1536)
+	vec2 := make([]float32, 1536)
+	vec3 := make([]float32, 1536)
+
+	for i := 0; i < 1536; i++ {
+		vec1[i] = float32(i+1) * 0.001
+		vec2[i] = float32(i+1) * 0.001
+		// vec3 has different direction (reversed second half)
+		if i < 768 {
+			vec3[i] = float32(i+1) * 0.001
+		} else {
+			vec3[i] = float32(1536-i) * 0.001
+		}
+	}
+
+	idx.Insert("v1", vec1, map[string]any{"type": "identical"})
+	idx.Insert("v2", vec2, map[string]any{"type": "identical"})
+	idx.Insert("v3", vec3, map[string]any{"type": "different"})
+
+	results, err := idx.Search(vec1, 3)
+
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	// First two should have very high similarity (identical)
+	assert.InDelta(t, 1.0, results[0].Score, 0.001)
+	assert.InDelta(t, 1.0, results[1].Score, 0.001)
+	// Third should have lower similarity (different direction)
+	assert.Less(t, results[2].Score, results[1].Score)
+}
+
+func TestVectorIndex_Search_NilMetadata(t *testing.T) {
+	idx := NewVectorIndex()
+	idx.Insert("v1", []float32{1.0, 2.0}, nil)
+	idx.Insert("v2", []float32{2.0, 3.0}, nil)
+
+	query := []float32{1.0, 2.0}
+	results, err := idx.Search(query, 2)
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	// Metadata should be nil, not cause errors
+	for _, result := range results {
+		assert.Nil(t, result.Meta)
+	}
+}

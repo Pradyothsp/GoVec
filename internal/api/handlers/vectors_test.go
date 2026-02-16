@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -396,4 +397,422 @@ func TestVectorHandler_Insert_MultipleVectors(t *testing.T) {
 		require.Contains(t, idx.Store, vec.ID, "Vector %s should exist", vec.ID)
 		assert.Equal(t, vec.Vector, idx.Store[vec.ID].Vector)
 	}
+}
+
+func TestVectorHandler_Search_ValidRequest(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	// Insert test vectors
+	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"label": "first"})
+	idx.Insert("v2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"label": "second"})
+	idx.Insert("v3", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"label": "third"})
+
+	req := SearchRequest{
+		Vector: []float32{1.0, 0.0, 0.0},
+		K:      2,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Len(t, results, 2, "Should return k results")
+	assert.Equal(t, "v1", results[0].ID, "First result should be most similar")
+	assert.InDelta(t, 1.0, results[0].Score, 0.001)
+}
+
+func TestVectorHandler_Search_WithoutK(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	// Insert test vectors
+	for i := 1; i <= 5; i++ {
+		vec := []float32{float32(i), float32(i * 2)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, nil)
+	}
+
+	req := SearchRequest{
+		Vector: []float32{2.0, 4.0},
+		// K is not set (default 0)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Len(t, results, 5, "Should return all results when k=0")
+}
+
+func TestVectorHandler_Search_InvalidJSON(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader([]byte("invalid json")))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestVectorHandler_Search_MissingVector(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	req := map[string]interface{}{
+		"k": 5,
+		// vector is missing
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestVectorHandler_Search_EmptyVector(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	idx.Insert("v1", []float32{1.0, 2.0}, nil)
+
+	req := SearchRequest{
+		Vector: []float32{},
+		K:      5,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &response)
+	assert.Contains(t, response["error"], "empty query vector")
+}
+
+func TestVectorHandler_Search_WrongContentType(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	req := SearchRequest{
+		Vector: []float32{1.0, 2.0},
+		K:      5,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "text/plain")
+
+	handler.Search(c)
+
+	// Gin is lenient with content-type, may still work or return 400
+	assert.Contains(t, []int{http.StatusBadRequest, http.StatusOK}, w.Code)
+}
+
+func TestVectorHandler_Search_VariousKValues(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	// Insert 10 vectors
+	for i := 1; i <= 10; i++ {
+		vec := []float32{float32(i), float32(i * 2)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]interface{}{"index": i})
+	}
+
+	tests := []struct {
+		name          string
+		k             int
+		expectedCount int
+	}{
+		{"k_1", 1, 1},
+		{"k_5", 5, 5},
+		{"k_10", 10, 10},
+		{"k_100", 100, 10}, // More than available
+		{"k_0", 0, 10},     // Return all
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := SearchRequest{
+				Vector: []float32{5.0, 10.0},
+				K:      tt.k,
+			}
+
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+
+			body, _ := json.Marshal(req)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			handler.Search(c)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			var results []core.SearchResult
+			err := json.Unmarshal(w.Body.Bytes(), &results)
+			require.NoError(t, err)
+
+			assert.Len(t, results, tt.expectedCount)
+		})
+	}
+}
+
+func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	metadata := map[string]interface{}{
+		"category": "test",
+		"count":    42,
+		"active":   true,
+	}
+
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, metadata)
+	idx.Insert("v2", []float32{2.0, 3.0, 4.0}, map[string]interface{}{"label": "second"})
+
+	req := SearchRequest{
+		Vector: []float32{1.0, 2.0, 3.0},
+		K:      2,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	// Verify structure
+	for _, result := range results {
+		assert.NotEmpty(t, result.ID)
+		assert.NotNil(t, result.Score)
+		// Metadata can be nil or non-nil
+	}
+}
+
+func TestVectorHandler_Search_Integration(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	// Insert diverse vectors
+	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"type": "identical"})
+	idx.Insert("similar", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"type": "similar"})
+	idx.Insert("orthogonal", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"type": "orthogonal"})
+	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, map[string]interface{}{"type": "opposite"})
+
+	req := SearchRequest{
+		Vector: []float32{1.0, 0.0, 0.0},
+		K:      3,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	require.Len(t, results, 3)
+
+	// Verify results are sorted by score
+	assert.Equal(t, "identical", results[0].ID)
+	assert.InDelta(t, 1.0, results[0].Score, 0.001)
+
+	assert.Equal(t, "similar", results[1].ID)
+	assert.Greater(t, results[1].Score, float32(0.8))
+
+	assert.Equal(t, "orthogonal", results[2].ID)
+
+	// Verify metadata is included
+	assert.Equal(t, "identical", results[0].Meta["type"])
+	assert.Equal(t, "similar", results[1].Meta["type"])
+}
+
+func TestVectorHandler_Search_EmptyIndex(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	req := SearchRequest{
+		Vector: []float32{1.0, 2.0, 3.0},
+		K:      5,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Empty(t, results, "Empty index should return empty results")
+}
+
+func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	// Insert 3D vectors
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, nil)
+	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, nil)
+
+	// Search with 2D vector
+	req := SearchRequest{
+		Vector: []float32{1.0, 2.0},
+		K:      5,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var response map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &response)
+	assert.Contains(t, response["error"], "vector dimensions mismatch")
+}
+
+func TestVectorHandler_Search_LargeVectors(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	// Insert 1536-dimensional vectors (OpenAI embedding size)
+	vec1 := make([]float32, 1536)
+	vec2 := make([]float32, 1536)
+	for i := 0; i < 1536; i++ {
+		vec1[i] = float32(i+1) * 0.001
+		// vec2 has different direction (reversed second half)
+		if i < 768 {
+			vec2[i] = float32(i+1) * 0.001
+		} else {
+			vec2[i] = float32(1536-i) * 0.001
+		}
+	}
+
+	idx.Insert("large1", vec1, map[string]interface{}{"model": "text-embedding-ada-002"})
+	idx.Insert("large2", vec2, map[string]interface{}{"model": "text-embedding-ada-002"})
+
+	req := SearchRequest{
+		Vector: vec1,
+		K:      2,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Len(t, results, 2)
+	// First result should be large1 (identical to query)
+	assert.Equal(t, "large1", results[0].ID)
+	assert.InDelta(t, 1.0, results[0].Score, 0.001)
+	// Second result should have lower similarity
+	assert.Less(t, results[1].Score, results[0].Score)
+}
+
+func TestVectorHandler_Search_NegativeK(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	req := SearchRequest{
+		Vector: []float32{1.0, 2.0, 3.0},
+		K:      -1,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var response map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &response)
+	assert.Contains(t, response["error"], "k cannot be negative")
 }

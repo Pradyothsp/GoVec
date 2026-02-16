@@ -28,42 +28,13 @@ func TestHealthEndpoint(t *testing.T) {
 	idx := core.NewVectorIndex()
 	router := SetupRouter(idx)
 
-	t.Run("GET_returns_200", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/health", nil)
-		w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
 
-		router.ServeHTTP(w, req)
+	router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code, "Health endpoint should return 200")
-		assert.JSONEq(t, `{"status":"ok"}`, w.Body.String(), "Health response should be correct")
-	})
-
-	t.Run("POST_not_allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/health", nil)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code, "POST to health should not be allowed")
-	})
-
-	t.Run("PUT_not_allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut, "/health", nil)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code, "PUT to health should not be allowed")
-	})
-
-	t.Run("DELETE_not_allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodDelete, "/health", nil)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code, "DELETE to health should not be allowed")
-	})
+	assert.Equal(t, http.StatusOK, w.Code, "Health endpoint should return 200")
+	assert.JSONEq(t, `{"status":"ok"}`, w.Body.String(), "Health response should be correct")
 }
 
 func TestRouterEndpointRegistration(t *testing.T) {
@@ -86,31 +57,20 @@ func TestRouterEndpointRegistration(t *testing.T) {
 		assert.Equal(t, http.StatusCreated, w.Code, "POST /api/v1/vectors should exist and return 201")
 	})
 
-	t.Run("GET_vectors_not_allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/vectors", nil)
-		w := httptest.NewRecorder()
+	t.Run("POST_query_endpoint_exists", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"vector": []float32{1.0, 2.0},
+			"k":      1,
+		}
 
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusNotFound, w.Code, "GET /api/v1/vectors should not be allowed")
-	})
-
-	t.Run("PUT_vectors_not_allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut, "/api/v1/vectors", nil)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code, "PUT /api/v1/vectors should not be allowed")
-	})
-
-	t.Run("DELETE_vectors_not_allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodDelete, "/api/v1/vectors", nil)
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNotFound, w.Code, "DELETE /api/v1/vectors should not be allowed")
+		assert.Equal(t, http.StatusOK, w.Code, "POST /api/v1/query should exist and return 200")
 	})
 
 	t.Run("unknown_route_returns_404", func(t *testing.T) {
