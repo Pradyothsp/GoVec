@@ -3,6 +3,7 @@
 A high-performance vector database implementation written in Go, designed for storing and managing vector embeddings with associated metadata.
 
 [![Go Version](https://img.shields.io/badge/Go-1.26.0-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![CI](https://github.com/Pradyothsp/govec/actions/workflows/go.yml/badge.svg)](https://github.com/Pradyothsp/govec/actions/workflows/go.yml)
 [![Tests](https://img.shields.io/badge/tests-103%20passing-success)](/)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](/)
 
