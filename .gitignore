@@ -4,5 +4,6 @@
 *.log
 *.log.*
 *.out
+*.bin
 
 govec

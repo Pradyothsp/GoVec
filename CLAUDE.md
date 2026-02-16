@@ -190,6 +190,15 @@ The project has comprehensive test coverage organized by package:
 - Overwrite behavior
 - Edge cases (empty ID, special characters, nil vectors, large dimensions)
 
+**internal/core/persistence_test.go** (26 tests, NEW)
+- Save/Load functionality with GOB encoding
+- Data integrity for complex nested metadata
+- Large vectors (1536D, 4096D) persistence
+- Concurrent save operations with RWMutex protection
+- File operations (overwrite, invalid paths, corrupted files)
+- Atomic write verification with temp file cleanup
+- Edge cases (empty index, special characters, long paths)
+
 **internal/api/handlers/vectors_test.go** (50 tests)
 - HTTP handler testing
 - Request validation
@@ -198,12 +207,24 @@ The project has comprehensive test coverage organized by package:
 - Content-Type validation
 - Various vector dimensions and metadata types
 
-**internal/test/integration/** (3 tests)
+**internal/test/integration/api_test.go** (14 tests)
 - End-to-end API testing
 - Full request/response cycle
 - Integration between handlers and core logic
+- Concurrent HTTP requests
+- Vector search functionality
 
-**Total: 103 tests, 100% coverage in core modules**
+**internal/test/integration/persistence_test.go** (9 tests, NEW)
+- Server restart data preservation
+- Graceful shutdown save functionality
+- Crash recovery with auto-save
+- Concurrent HTTP requests during save
+- Corrupted file recovery
+- Atomic write protection
+- Large dataset persistence (1000 vectors)
+- Auto-save simulation
+
+**Total: 206 tests, 96.1% coverage in internal/core, 100% in internal/api**
 
 ### Dependencies
 
@@ -316,6 +337,15 @@ The architecture uses **constructor injection**: dependencies are passed explici
 **internal/core/index.go**
 - `VectorIndex` - In-memory storage using `map[string]*VectorNode`
 - `Insert(id, vec, meta)` - Stores vectors with metadata
+- `Search(query, k)` - Finds k nearest neighbors using cosine similarity
+
+**internal/core/persistence.go** (NEW)
+- `SaveToFile(path)` - Serializes index to disk using GOB encoding with atomic writes
+- `LoadFromFile(path)` - Loads index from disk, gracefully handles missing files
+- Atomic write protection using temporary files (.tmp)
+
+**internal/core/similarity.go**
+- `CosineSimilarity(a, b)` - Computes cosine similarity between two vectors
 
 **internal/api/router.go**
 - `SetupRouter(index)` - Configures Gin routes and injects dependencies into handlers
@@ -325,6 +355,12 @@ The architecture uses **constructor injection**: dependencies are passed explici
 **internal/api/handlers/vectors.go**
 - `VectorHandler` - Holds reference to VectorIndex
 - `Insert` endpoint - POST `/api/v1/vectors` accepts JSON with id, vector, and optional metadata
+- `Search` endpoint - POST `/api/v1/query` accepts JSON with vector and k parameter
+
+**cmd/server/main.go**
+- Auto-save ticker (saves every 60 seconds)
+- Graceful shutdown with data persistence
+- Loads existing data on startup
 
 ## Current State
 
@@ -332,24 +368,33 @@ The architecture uses **constructor injection**: dependencies are passed explici
 - ✅ Basic vector insertion with metadata support
 - ✅ In-memory vector storage using VectorIndex
 - ✅ REST API with Gin framework
-- ✅ Comprehensive test suite (103 tests, 100% coverage in core modules)
+- ✅ **Persistence layer with GOB encoding** (NEW)
+  - SaveToFile/LoadFromFile with atomic writes
+  - Auto-save every 60 seconds
+  - Graceful shutdown saves data to disk
+- ✅ **Vector search/query functionality** (NEW)
+  - Cosine similarity search
+  - Top-K nearest neighbors
+  - POST `/api/v1/query` endpoint
+- ✅ Comprehensive test suite (206 tests, 96.1% coverage in core modules)
 - ✅ Modern development tooling (Task runner, gotestsum)
 - ✅ Health check endpoint
 - ✅ Clean architecture with dependency injection
 
 **In Progress / Planned:**
-- ⏳ Persistence layer (in-memory only currently)
-- ⏳ Vector search/query functionality
-- ⏳ Advanced indexing algorithms (internal/index - planned)
+- ⏳ Advanced indexing algorithms (HNSW, IVF - internal/index planned)
 - ⏳ Storage layer abstraction (internal/storage - planned)
 - ⏳ Configuration system (internal/config - planned)
 - ⏳ Client library (pkg/client - planned)
+- ⏳ Vector deletion and update endpoints
+- ⏳ Metadata filtering in search
 
 **Test Coverage:**
-- internal/core: 100%
-- internal/api: 100%
-- internal/api/handlers: 100%
-- Total: 103 tests passing
+- internal/core: 96.1% (120 tests)
+- internal/api: 100% (6 tests)
+- internal/api/handlers: 100% (50 tests)
+- internal/test/integration: 23 tests
+- Total: 206 tests passing
 
 ## Development Workflow
 

@@ -3,7 +3,10 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/core"
@@ -124,4 +127,65 @@ func AssertVectorInIndex(t *testing.T, idx *core.VectorIndex, id string, expecte
 func AssertVectorCount(t *testing.T, idx *core.VectorIndex, expectedCount int) {
 	t.Helper()
 	assert.Len(t, idx.Store, expectedCount, "Index should contain %d vectors", expectedCount)
+}
+
+// =============================================================================
+// Persistence Test Helpers
+// =============================================================================
+
+// CreateTempStorageFile creates a temporary file for testing persistence
+func CreateTempStorageFile(t *testing.T, filename string) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), filename)
+}
+
+// CleanupStorageFile removes test storage files
+func CleanupStorageFile(t *testing.T, filepath string) {
+	t.Helper()
+	if err := os.Remove(filepath); err != nil && !os.IsNotExist(err) {
+		t.Logf("Warning: Failed to cleanup storage file %s: %v", filepath, err)
+	}
+}
+
+// PopulateIndexWithVectors inserts N vectors into an index for testing
+func PopulateIndexWithVectors(idx *core.VectorIndex, count int) {
+	for i := 0; i < count; i++ {
+		id := fmt.Sprintf("vec%d", i)
+		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
+		meta := map[string]any{
+			"index": i,
+			"type":  "test_vector",
+			"batch": "populated",
+		}
+		idx.Insert(id, vec, meta)
+	}
+}
+
+// AssertFileExists verifies that a file exists at the given path
+func AssertFileExists(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	assert.NoError(t, err, "File should exist at path: %s", path)
+}
+
+// AssertFileNotExists verifies that no file exists at the given path
+func AssertFileNotExists(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "File should not exist at path: %s", path)
+}
+
+// CorruptFile creates an intentionally corrupted file for testing
+func CorruptFile(t *testing.T, path string) {
+	t.Helper()
+	corruptedData := []byte("This is not valid GOB data!\nIt should fail to decode.")
+	err := os.WriteFile(path, corruptedData, 0644)
+	require.NoError(t, err, "Should be able to create corrupted file for testing")
+}
+
+// CreateReadOnlyFile creates a file with read-only permissions for testing
+func CreateReadOnlyFile(t *testing.T, path string) {
+	t.Helper()
+	err := os.WriteFile(path, []byte("read-only content"), 0444)
+	require.NoError(t, err, "Should be able to create read-only file")
 }
