@@ -152,9 +152,23 @@ tasks:
     status:
       - command -v gotestsum
 
+  # Generate Swagger/OpenAPI documentation from annotations
+  swagger:
+    desc: Generate Swagger/OpenAPI documentation from annotations
+    cmds:
+      - swag init -g cmd/server/main.go --output docs
+
+  # Install swag CLI if not present
+  install-swag:
+    desc: Install swag CLI for Swagger doc generation
+    cmds:
+      - go install github.com/swaggo/swag/cmd/swag@latest
+    status:
+      - command -v swag
+
   # Install all development tools
   install-tools:
-    desc: Install all development tools (gotestsum, golangci-lint, govulncheck)
+    desc: Install all development tools (gotestsum, golangci-lint, govulncheck, swag)
     vars:
       GOLANGCI_LINT_VERSION: v2.9.0
     cmds:
@@ -164,4 +178,6 @@ tasks:
       - go install golang.org/x/vuln/cmd/govulncheck@latest
       - echo "==> Installing golangci-lint {{.GOLANGCI_LINT_VERSION}}..."
       - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin {{.GOLANGCI_LINT_VERSION}}
+      - echo "==> Installing swag..."
+      - go install github.com/swaggo/swag/cmd/swag@latest
       - echo "All tools installed."

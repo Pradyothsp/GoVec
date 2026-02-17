@@ -14,9 +14,9 @@ type VectorIndex struct {
 
 // SearchResult represents a single match
 type SearchResult struct {
-	ID    string
-	Score float32
-	Meta  map[string]interface{} // Return metadata so user sees what it is
+	ID    string                 `json:"ID" example:"vec-001"`
+	Score float32                `json:"Score" example:"0.97"`
+	Meta  map[string]interface{} `json:"Meta" swaggertype:"object"` // Return metadata so user sees what it is
 }
 
 // NewVectorIndex creates an empty VectorIndex ready for use.

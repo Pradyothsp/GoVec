@@ -14,6 +14,12 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
+// @title           GoVec API
+// @version         1.0
+// @description     A vector database REST API for storing and querying vector embeddings.
+// @host            localhost:8000
+// @BasePath        /
+// @schemes         http
 func main() {
 	// 1. Load configuration
 	cfg := loadConfiguration()

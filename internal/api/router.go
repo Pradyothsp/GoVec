@@ -1,8 +1,13 @@
 package api
 
 import (
-	"github.com/gin-gonic/gin"
+	"net/http"
 
+	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
+	_ "github.com/Pradyothsp/govec/docs" // generated spec; registers via init()
 	"github.com/Pradyothsp/govec/internal/api/handlers"
 	"github.com/Pradyothsp/govec/internal/core"
 )
@@ -11,9 +16,8 @@ import (
 func SetupRouter(index *core.VectorIndex) *gin.Engine {
 	r := gin.Default()
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
-	})
+	r.GET("/health", healthCheck)
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Initialize handlers, injecting dependencies
 	vecHandler := handlers.NewVectorHandler(index)
@@ -24,4 +28,20 @@ func SetupRouter(index *core.VectorIndex) *gin.Engine {
 	v1.DELETE("/vectors/:id", vecHandler.Delete)
 
 	return r
+}
+
+// HealthResponse is the JSON response for the health check endpoint.
+type HealthResponse struct {
+	Status string `json:"status" example:"ok"`
+}
+
+// healthCheck handles GET /health
+//
+// @Summary      Health check
+// @Tags         system
+// @Produce      json
+// @Success      200  {object}  HealthResponse
+// @Router       /health [get]
+func healthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

@@ -179,6 +179,26 @@ func TestRouterConfiguration(t *testing.T) {
 	})
 }
 
+func TestSwaggerEndpoints(t *testing.T) {
+	idx := core.NewVectorIndex()
+	router := SetupRouter(idx)
+
+	t.Run("swagger_ui_returns_200", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "GET /swagger/index.html should return 200")
+	})
+
+	t.Run("swagger_doc_json_returns_200_with_spec", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/swagger/doc.json", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "GET /swagger/doc.json should return 200")
+		assert.Contains(t, w.Body.String(), `"swagger": "2.0"`, "Response should contain OpenAPI 2.0 spec")
+	})
+}
+
 func TestRouterMultipleRequests(t *testing.T) {
 	idx := core.NewVectorIndex()
 	router := SetupRouter(idx)
