@@ -382,7 +382,7 @@ func (s *APITestSuite) TestInsertAndSearchFlow() {
 	searchBody, err := json.Marshal(searchPayload)
 	s.Require().NoError(err)
 
-	searchReq := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(searchBody))
+	searchReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(searchBody))
 	searchReq.Header.Set("Content-Type", "application/json")
 
 	searchW := httptest.NewRecorder()
@@ -464,7 +464,7 @@ func (s *APITestSuite) TestSearchWithDifferentKValues() {
 			}
 
 			body, _ := json.Marshal(searchPayload)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			w := httptest.NewRecorder()
@@ -490,7 +490,7 @@ func (s *APITestSuite) TestSearchEmptyIndex() {
 	}
 
 	body, _ := json.Marshal(searchPayload)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -547,7 +547,7 @@ func (s *APITestSuite) TestSearchValidationErrors() {
 	for _, tc := range testCases {
 		s.Run(tc.name, func() {
 			body, _ := json.Marshal(tc.payload)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			w := httptest.NewRecorder()
@@ -593,7 +593,7 @@ func (s *APITestSuite) TestFilteredSearch_ByCategory() {
 		"filter": map[string]interface{}{"category": "tech"},
 	}
 	body, _ := json.Marshal(searchPayload)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
@@ -633,7 +633,7 @@ func (s *APITestSuite) TestFilteredSearch_NoMatches() {
 		"filter": map[string]interface{}{"type": "B"},
 	}
 	body, _ := json.Marshal(searchPayload)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
@@ -675,7 +675,7 @@ func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
 			"filter": map[string]interface{}{"cat": "tech", "active": true},
 		}
 		body, _ := json.Marshal(searchPayload)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		s.router.ServeHTTP(w, req)
@@ -695,7 +695,7 @@ func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
 			"filter": map[string]interface{}{"cat": "tech"},
 		}
 		body, _ := json.Marshal(searchPayload)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		s.router.ServeHTTP(w, req)
@@ -742,7 +742,7 @@ func (s *APITestSuite) TestFilteredSearch_FilterWithKLimit() {
 		"filter": map[string]interface{}{"tag": "keep"},
 	}
 	body, _ := json.Marshal(searchPayload)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
@@ -780,7 +780,7 @@ func (s *APITestSuite) TestFilteredSearch_NoFilterField() {
 		"k":      10,
 	}
 	body, _ := json.Marshal(searchPayload)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
@@ -790,6 +790,129 @@ func (s *APITestSuite) TestFilteredSearch_NoFilterField() {
 	var results []map[string]interface{}
 	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
 	s.Assert().Len(results, 3, "No filter should return all results")
+}
+
+func (s *APITestSuite) TestDeleteFlow() {
+	// Step 1: Insert a vector
+	body, _ := json.Marshal(map[string]interface{}{
+		"id":       "to_delete",
+		"vector":   []float32{1.0, 2.0, 3.0},
+		"metadata": map[string]interface{}{"label": "temp"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	s.Require().Equal(http.StatusCreated, w.Code)
+
+	// Step 2: Delete the vector
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/to_delete", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	s.Assert().Equal(http.StatusOK, w.Code)
+	s.Assert().JSONEq(`{"status":"deleted","id":"to_delete"}`, w.Body.String())
+
+	// Step 3: Verify the index no longer contains the ID
+	s.Assert().NotContains(s.index.Store, "to_delete")
+
+	// Step 4: Delete again — idempotency check must return 404
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/to_delete", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	s.Assert().Equal(http.StatusNotFound, w.Code)
+	s.Assert().JSONEq(`{"error":"vector not found"}`, w.Body.String())
+}
+
+func (s *APITestSuite) TestInsertDeleteSearchFlow() {
+	vectors := []struct {
+		id     string
+		vector []float32
+	}{
+		{"keep1", []float32{1.0, 0.0, 0.0}},
+		{"delete_me", []float32{0.9, 0.1, 0.0}},
+		{"keep2", []float32{0.0, 1.0, 0.0}},
+	}
+
+	for _, vec := range vectors {
+		body, _ := json.Marshal(map[string]interface{}{"id": vec.id, "vector": vec.vector})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	// Delete one vector
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/delete_me", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	s.Require().Equal(http.StatusOK, w.Code)
+
+	// Search and verify deleted vector is absent from results
+	searchBody, _ := json.Marshal(map[string]interface{}{
+		"vector": []float32{1.0, 0.0, 0.0},
+		"k":      10,
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(searchBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+	var results []map[string]interface{}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	s.Assert().Len(results, 2, "Should have 2 results after deletion")
+
+	resultIDs := make([]string, len(results))
+	for i, r := range results {
+		resultIDs[i] = r["ID"].(string)
+	}
+	s.Assert().NotContains(resultIDs, "delete_me")
+	s.Assert().Contains(resultIDs, "keep1")
+	s.Assert().Contains(resultIDs, "keep2")
+}
+
+func (s *APITestSuite) TestDeleteNonExistentVector() {
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/ghost", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusNotFound, w.Code)
+	s.Assert().JSONEq(`{"error":"vector not found"}`, w.Body.String())
+}
+
+func (s *APITestSuite) TestConcurrentDeletes() {
+	numVectors := 20
+	for i := 0; i < numVectors; i++ {
+		body, _ := json.Marshal(map[string]interface{}{
+			"id":     fmt.Sprintf("del_vec%d", i),
+			"vector": []float32{float32(i), float32(i * 2)},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	var wg sync.WaitGroup
+	statuses := make([]int, numVectors)
+	for i := 0; i < numVectors; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/vectors/del_vec%d", idx), nil)
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			statuses[idx] = w.Code
+		}(i)
+	}
+	wg.Wait()
+
+	for i, status := range statuses {
+		s.Assert().Equal(http.StatusOK, status, "Delete %d should return 200", i)
+	}
+	s.Assert().Empty(s.index.Store)
 }
 
 func TestAPITestSuite(t *testing.T) {

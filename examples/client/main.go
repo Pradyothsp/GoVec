@@ -66,7 +66,7 @@ func main() {
 		K:      1, // Just give me the best answer
 	}
 
-	sendRequest("POST", baseURL+"/query", queryPayload)
+	sendRequest("POST", baseURL+"/vectors/search", queryPayload)
 }
 
 // Helper to send HTTP requests

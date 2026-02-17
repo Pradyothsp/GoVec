@@ -75,3 +75,17 @@ func (idx *VectorIndex) Search(query []float32, limit int, filters map[string]in
 
 	return results, nil
 }
+
+// Delete removes a vector from the index by ID
+func (idx *VectorIndex) Delete(id string) bool {
+	idx.mu.Lock() // BLOCK everyone (Reads & Writes)
+	defer idx.mu.Unlock()
+
+	_, exists := idx.Store[id]
+	if !exists {
+		return false
+	}
+
+	delete(idx.Store, id) // The built-in Go delete function
+	return true
+}

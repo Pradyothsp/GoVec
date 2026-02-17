@@ -418,7 +418,7 @@ func TestVectorHandler_Search_ValidRequest(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -453,7 +453,7 @@ func TestVectorHandler_Search_WithoutK(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -474,7 +474,7 @@ func TestVectorHandler_Search_InvalidJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader([]byte("invalid json")))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader([]byte("invalid json")))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -495,7 +495,7 @@ func TestVectorHandler_Search_MissingVector(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -518,7 +518,7 @@ func TestVectorHandler_Search_EmptyVector(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -544,7 +544,7 @@ func TestVectorHandler_Search_WrongContentType(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "text/plain")
 
 	handler.Search(c)
@@ -586,7 +586,7 @@ func TestVectorHandler_Search_VariousKValues(t *testing.T) {
 			c, _ := gin.CreateTestContext(w)
 
 			body, _ := json.Marshal(req)
-			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 			c.Request.Header.Set("Content-Type", "application/json")
 
 			handler.Search(c)
@@ -624,7 +624,7 @@ func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -663,7 +663,7 @@ func TestVectorHandler_Search_Integration(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -703,7 +703,7 @@ func TestVectorHandler_Search_EmptyIndex(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -735,7 +735,7 @@ func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -777,7 +777,7 @@ func TestVectorHandler_Search_LargeVectors(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -809,7 +809,7 @@ func TestVectorHandler_Search_NegativeK(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -839,7 +839,7 @@ func TestVectorHandler_Search_WithFilter(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -877,7 +877,7 @@ func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -910,7 +910,7 @@ func TestVectorHandler_Search_FilterAndK(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -942,7 +942,7 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)
@@ -954,6 +954,123 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, results, 3, "No filter should return all results")
+}
+
+func TestVectorHandler_Delete(t *testing.T) {
+	tests := []struct {
+		name           string
+		setup          func(*core.VectorIndex)
+		id             string
+		expectedStatus int
+		expectedBody   string
+		checkIndex     func(*testing.T, *core.VectorIndex)
+	}{
+		{
+			name: "success",
+			setup: func(idx *core.VectorIndex) {
+				idx.Insert("v1", []float32{1.0, 2.0}, nil)
+			},
+			id:             "v1",
+			expectedStatus: http.StatusOK,
+			expectedBody:   `{"status":"deleted","id":"v1"}`,
+			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+				assert.NotContains(t, idx.Store, "v1")
+			},
+		},
+		{
+			name:           "not_found",
+			setup:          func(idx *core.VectorIndex) {},
+			id:             "missing",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   `{"error":"vector not found"}`,
+			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+				assert.Empty(t, idx.Store)
+			},
+		},
+		{
+			name:           "empty_id",
+			setup:          func(idx *core.VectorIndex) {},
+			id:             "",
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   `{"error":"id is required"}`,
+			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+				assert.Empty(t, idx.Store)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := core.NewVectorIndex()
+			tt.setup(idx)
+			handler := NewVectorHandler(idx)
+
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+
+			if tt.id != "" {
+				c.Params = gin.Params{gin.Param{Key: "id", Value: tt.id}}
+			}
+			c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/"+tt.id, nil)
+
+			handler.Delete(c)
+
+			assert.Equal(t, tt.expectedStatus, w.Code, "HTTP status should match")
+
+			if tt.expectedBody != "" {
+				assert.JSONEq(t, tt.expectedBody, w.Body.String(), "Response body should match")
+			}
+
+			if tt.checkIndex != nil {
+				tt.checkIndex(t, idx)
+			}
+		})
+	}
+}
+
+func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
+	t.Run("special_characters_in_id", func(t *testing.T) {
+		idx := core.NewVectorIndex()
+		handler := NewVectorHandler(idx)
+
+		specialID := "vec/with/slashes"
+		idx.Insert(specialID, []float32{1.0, 2.0}, nil)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Params = gin.Params{gin.Param{Key: "id", Value: specialID}}
+		c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/"+specialID, nil)
+
+		handler.Delete(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"status":"deleted","id":"vec/with/slashes"}`, w.Body.String())
+		assert.NotContains(t, idx.Store, specialID)
+	})
+
+	t.Run("double_delete", func(t *testing.T) {
+		idx := core.NewVectorIndex()
+		handler := NewVectorHandler(idx)
+
+		idx.Insert("v1", []float32{1.0, 2.0}, nil)
+
+		// First delete — should succeed
+		w1 := httptest.NewRecorder()
+		c1, _ := gin.CreateTestContext(w1)
+		c1.Params = gin.Params{gin.Param{Key: "id", Value: "v1"}}
+		c1.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/v1", nil)
+		handler.Delete(c1)
+		assert.Equal(t, http.StatusOK, w1.Code)
+
+		// Second delete — must return 404
+		w2 := httptest.NewRecorder()
+		c2, _ := gin.CreateTestContext(w2)
+		c2.Params = gin.Params{gin.Param{Key: "id", Value: "v1"}}
+		c2.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/v1", nil)
+		handler.Delete(c2)
+		assert.Equal(t, http.StatusNotFound, w2.Code)
+		assert.JSONEq(t, `{"error":"vector not found"}`, w2.Body.String())
+	})
 }
 
 func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
@@ -974,7 +1091,7 @@ func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	body, _ := json.Marshal(req)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.Search(c)

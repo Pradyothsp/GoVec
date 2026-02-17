@@ -20,7 +20,8 @@ func SetupRouter(index *core.VectorIndex) *gin.Engine {
 
 	v1 := r.Group("api/v1")
 	v1.POST("/vectors", vecHandler.Insert)
-	v1.POST("/query", vecHandler.Search)
+	v1.POST("/vectors/search", vecHandler.Search)
+	v1.DELETE("/vectors/:id", vecHandler.Delete)
 
 	return r
 }

@@ -65,13 +65,33 @@ func TestRouterEndpointRegistration(t *testing.T) {
 		}
 
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/search", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code, "POST /api/v1/query should exist and return 200")
+		assert.Equal(t, http.StatusOK, w.Code, "POST /api/v1/vectors/search should exist and return 200")
+	})
+
+	t.Run("DELETE_vectors_id_endpoint_exists", func(t *testing.T) {
+		idx.Insert("delete_test", []float32{1.0, 2.0}, nil)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/delete_test", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code, "DELETE /api/v1/vectors/:id should exist and return 200")
+		assert.JSONEq(t, `{"status":"deleted","id":"delete_test"}`, w.Body.String())
+	})
+
+	t.Run("DELETE_vectors_id_not_found", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/nonexistent", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code, "DELETE with unknown id should return 404")
+		assert.JSONEq(t, `{"error":"vector not found"}`, w.Body.String())
 	})
 
 	t.Run("unknown_route_returns_404", func(t *testing.T) {

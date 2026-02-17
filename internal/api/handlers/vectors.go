@@ -66,3 +66,20 @@ func (h *VectorHandler) Search(c *gin.Context) {
 
 	c.JSON(http.StatusOK, results)
 }
+
+// Delete handles DELETE /vectors/:id
+func (h *VectorHandler) Delete(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		return
+	}
+
+	success := h.Index.Delete(id)
+	if !success {
+		c.JSON(http.StatusNotFound, gin.H{"error": "vector not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "id": id})
+}
