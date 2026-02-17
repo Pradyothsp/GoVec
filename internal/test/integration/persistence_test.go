@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/suite"
 )
 
 type PersistenceIntegrationTestSuite struct {

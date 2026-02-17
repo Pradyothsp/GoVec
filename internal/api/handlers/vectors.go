@@ -3,16 +3,19 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/gin-gonic/gin"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
+// CreateVectorRequest is the JSON payload for inserting a vector.
 type CreateVectorRequest struct {
 	ID       string                 `json:"id" binding:"required"`
 	Vector   []float32              `json:"vector" binding:"required"`
 	Metadata map[string]interface{} `json:"metadata"`
 }
 
+// SearchRequest is the JSON payload for a nearest-neighbour query.
 type SearchRequest struct {
 	Vector []float32 `json:"vector" binding:"required"`
 	K      int       `json:"k"`
@@ -23,6 +26,7 @@ type VectorHandler struct {
 	Index *core.VectorIndex
 }
 
+// NewVectorHandler creates a VectorHandler with the given index dependency.
 func NewVectorHandler(index *core.VectorIndex) *VectorHandler {
 	return &VectorHandler{Index: index}
 }
@@ -39,7 +43,6 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{"status": "inserted"})
 }
-
 
 // Search handles POST /vectors/search`
 func (h *VectorHandler) Search(c *gin.Context) {

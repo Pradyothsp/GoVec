@@ -31,12 +31,6 @@ func ValidateServerConfig(cfg ServerConfig) error {
 		return fmt.Errorf("shutdown_timeout must be non-negative, got %v", cfg.ShutdownTimeout)
 	}
 
-	// Warn if shutdown timeout is very short (not an error, just recommendation)
-	// We'll allow it but it might not be practical
-	if cfg.ShutdownTimeout > 0 && cfg.ShutdownTimeout < time.Second {
-		// This is allowed, just not recommended
-	}
-
 	return nil
 }
 
@@ -54,4 +48,3 @@ func ValidateStorageConfig(cfg StorageConfig) error {
 
 	return nil
 }
-

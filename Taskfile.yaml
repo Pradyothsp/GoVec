@@ -69,6 +69,53 @@ tasks:
     cmds:
       - gotestsum --format testname
 
+  # Run linters with golangci-lint
+  lint:
+    desc: Run linters (golangci-lint)
+    cmds:
+      - golangci-lint run ./...
+
+  # Run go vet
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  # Check formatting without modifying files
+  fmt:check:
+    desc: Check if code is formatted (exits non-zero if not)
+    cmds:
+      - |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "Unformatted files:"
+          echo "$unformatted"
+          exit 1
+        fi
+        echo "All files are formatted."
+
+  # Fix formatting in-place
+  fmt:fix:
+    desc: Format all Go source files
+    cmds:
+      - gofmt -w .
+      - echo "Formatting applied."
+
+  # Vulnerability scanning
+  vuln:
+    desc: Run govulncheck for known vulnerabilities
+    cmds:
+      - govulncheck ./...
+
+  # Run all static checks (lint + vet + fmt + vuln)
+  check:
+    desc: Run all static checks (lint, vet, fmt, vuln)
+    cmds:
+      - task: vet
+      - task: fmt:check
+      - task: lint
+      - task: vuln
+
   # Build the project
   build:
     desc: Build the GoVec server
@@ -104,3 +151,17 @@ tasks:
       - go install gotest.tools/gotestsum@latest
     status:
       - command -v gotestsum
+
+  # Install all development tools
+  install-tools:
+    desc: Install all development tools (gotestsum, golangci-lint, govulncheck)
+    vars:
+      GOLANGCI_LINT_VERSION: v2.9.0
+    cmds:
+      - echo "==> Installing gotestsum..."
+      - go install gotest.tools/gotestsum@latest
+      - echo "==> Installing govulncheck..."
+      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - echo "==> Installing golangci-lint {{.GOLANGCI_LINT_VERSION}}..."
+      - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin {{.GOLANGCI_LINT_VERSION}}
+      - echo "All tools installed."

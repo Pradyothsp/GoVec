@@ -225,7 +225,7 @@ func BenchmarkCosineSimilarity_128D(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		CosineSimilarity(vec1, vec2)
+		_, _ = CosineSimilarity(vec1, vec2)
 	}
 }
 
@@ -239,6 +239,6 @@ func BenchmarkCosineSimilarity_1536D(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		CosineSimilarity(vec1, vec2)
+		_, _ = CosineSimilarity(vec1, vec2)
 	}
 }

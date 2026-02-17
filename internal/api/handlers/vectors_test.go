@@ -8,10 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 func init() {
@@ -525,7 +526,8 @@ func TestVectorHandler_Search_EmptyVector(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
 	assert.Contains(t, response["error"], "empty query vector")
 }
 
@@ -741,7 +743,8 @@ func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
 	assert.Contains(t, response["error"], "vector dimensions mismatch")
 }
 
@@ -813,6 +816,7 @@ func TestVectorHandler_Search_NegativeK(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
 	assert.Contains(t, response["error"], "k cannot be negative")
 }

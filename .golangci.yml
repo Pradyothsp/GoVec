@@ -1,0 +1,79 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+
+    # Security
+    - gosec
+
+    # Quality
+    - gocritic
+    - misspell
+    - prealloc
+    - revive
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+
+    gosec:
+      excludes:
+        - G115 # Integer overflow conversion (noisy for []float32 slice indexing)
+
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: error-return
+
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000" # Package comment not required on every file
+        - "-ST1020" # Unexported return types
+
+  exclusions:
+    rules:
+      # Test files get more relaxed rules
+      - path: "_test\\.go"
+        linters:
+          - gosec
+          - gocritic
+          - errcheck
+
+      # "api" is a meaningful package name; revive's generic-name check is too broad here
+      - linters:
+          - revive
+        text: "avoid meaningless package names"
+
+    # Example code does not need production-level error handling
+    paths:
+      - "^examples/"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Pradyothsp/govec
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5

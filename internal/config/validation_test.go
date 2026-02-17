@@ -207,4 +207,3 @@ func TestValidateStorageConfig(t *testing.T) {
 		})
 	}
 }
-

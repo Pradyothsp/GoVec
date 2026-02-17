@@ -44,13 +44,13 @@ func TestVectorIndex_Insert(t *testing.T) {
 			metadata: map[string]any{},
 		},
 		{
-			name:     "insert_with_nested_metadata",
-			id:       "vec4",
-			vector:   []float32{7.0, 8.0, 9.0},
+			name:   "insert_with_nested_metadata",
+			id:     "vec4",
+			vector: []float32{7.0, 8.0, 9.0},
 			metadata: map[string]any{
 				"category": "test",
 				"nested": map[string]any{
-					"level": 2,
+					"level":  2,
 					"active": true,
 				},
 				"tags": []string{"go", "vector", "db"},

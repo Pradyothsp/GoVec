@@ -9,10 +9,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Pradyothsp/govec/internal/api"
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/Pradyothsp/govec/internal/api"
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 type APITestSuite struct {
@@ -131,7 +132,6 @@ func (s *APITestSuite) TestVectorInsertAndOverwrite() {
 	s.Assert().Equal(float64(2), s.index.Store["test_vec"].Metadata["version"])
 	s.Assert().Len(s.index.Store, 1, "Should still have only one vector")
 }
-
 
 func (s *APITestSuite) TestValidationErrors() {
 	testCases := []struct {
@@ -419,10 +419,10 @@ func (s *APITestSuite) TestInsertAndSearchFlow() {
 
 	// Verify results are sorted by score (descending)
 	for i := 0; i < len(results)-1; i++ {
-		score_i, ok1 := results[i]["Score"].(float64)
-		score_next, ok2 := results[i+1]["Score"].(float64)
+		scoreI, ok1 := results[i]["Score"].(float64)
+		scoreNext, ok2 := results[i+1]["Score"].(float64)
 		s.Require().True(ok1 && ok2, "All scores should be numbers")
-		s.Assert().GreaterOrEqual(score_i, score_next, "Results should be sorted by score descending")
+		s.Assert().GreaterOrEqual(scoreI, scoreNext, "Results should be sorted by score descending")
 	}
 }
 
@@ -557,7 +557,8 @@ func (s *APITestSuite) TestSearchValidationErrors() {
 
 			if tc.errorContains != "" {
 				var response map[string]interface{}
-				json.Unmarshal(w.Body.Bytes(), &response)
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				s.Require().NoError(err)
 				s.Assert().Contains(response["error"], tc.errorContains, "Error message should contain expected text")
 			}
 		})

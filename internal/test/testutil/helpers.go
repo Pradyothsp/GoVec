@@ -9,9 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing
@@ -34,6 +35,8 @@ func NewTestVectorIndex() *core.VectorIndex {
 }
 
 // CreateTestVector generates a deterministic test vector
+//
+//nolint:gocritic // unnamedResult: id parameter name would shadow return name
 func CreateTestVector(id string, dimensions int) (string, []float32, map[string]any) {
 	vec := make([]float32, dimensions)
 	for i := 0; i < dimensions; i++ {
@@ -140,10 +143,10 @@ func CreateTempStorageFile(t *testing.T, filename string) string {
 }
 
 // CleanupStorageFile removes test storage files
-func CleanupStorageFile(t *testing.T, filepath string) {
+func CleanupStorageFile(t *testing.T, path string) {
 	t.Helper()
-	if err := os.Remove(filepath); err != nil && !os.IsNotExist(err) {
-		t.Logf("Warning: Failed to cleanup storage file %s: %v", filepath, err)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Logf("Warning: Failed to cleanup storage file %s: %v", path, err)
 	}
 }
 
@@ -179,13 +182,13 @@ func AssertFileNotExists(t *testing.T, path string) {
 func CorruptFile(t *testing.T, path string) {
 	t.Helper()
 	corruptedData := []byte("This is not valid GOB data!\nIt should fail to decode.")
-	err := os.WriteFile(path, corruptedData, 0644)
+	err := os.WriteFile(path, corruptedData, 0o600)
 	require.NoError(t, err, "Should be able to create corrupted file for testing")
 }
 
 // CreateReadOnlyFile creates a file with read-only permissions for testing
 func CreateReadOnlyFile(t *testing.T, path string) {
 	t.Helper()
-	err := os.WriteFile(path, []byte("read-only content"), 0444)
+	err := os.WriteFile(path, []byte("read-only content"), 0o444) //nolint:gosec // intentionally setting read-only permissions for test
 	require.NoError(t, err, "Should be able to create read-only file")
 }

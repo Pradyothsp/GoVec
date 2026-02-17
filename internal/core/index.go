@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// VectorIndex is a thread-safe in-memory store for vector embeddings.
 type VectorIndex struct {
 	mu    sync.RWMutex
 	Store map[string]*VectorNode
@@ -18,6 +19,7 @@ type SearchResult struct {
 	Meta  map[string]interface{} // Return metadata so user sees what it is
 }
 
+// NewVectorIndex creates an empty VectorIndex ready for use.
 func NewVectorIndex() *VectorIndex {
 	return &VectorIndex{
 		Store: make(map[string]*VectorNode),
@@ -35,6 +37,7 @@ func (idx *VectorIndex) Insert(id string, vec []float32, meta map[string]any) {
 	}
 }
 
+// Search returns the top-limit nearest neighbours to query using cosine similarity.
 func (idx *VectorIndex) Search(query []float32, limit int) ([]SearchResult, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()

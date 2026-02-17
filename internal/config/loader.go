@@ -93,12 +93,12 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		cfg.Storage.DataPath = val
 	}
 	if val := os.Getenv("GOVEC_AUTO_SAVE_ENABLED"); val != "" {
-		valLower := strings.ToLower(val)
-		if valLower == "true" {
+		switch strings.ToLower(val) {
+		case "true":
 			cfg.Storage.AutoSaveEnabled = true
-		} else if valLower == "false" {
+		case "false":
 			cfg.Storage.AutoSaveEnabled = false
-		} else {
+		default:
 			log.Printf("WARNING: Failed to parse GOVEC_AUTO_SAVE_ENABLED='%s' as boolean. Expected 'true' or 'false'. Using previous value.\n", val)
 		}
 	}

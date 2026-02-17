@@ -64,4 +64,3 @@ func TestServerConfig_Address(t *testing.T) {
 		})
 	}
 }
-
