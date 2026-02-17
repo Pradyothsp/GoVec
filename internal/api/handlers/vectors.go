@@ -17,8 +17,9 @@ type CreateVectorRequest struct {
 
 // SearchRequest is the JSON payload for a nearest-neighbour query.
 type SearchRequest struct {
-	Vector []float32 `json:"vector" binding:"required"`
-	K      int       `json:"k"`
+	Vector  []float32              `json:"vector" binding:"required"`
+	K       int                    `json:"k"`
+	Filters map[string]interface{} `json:"filter"`
 }
 
 // VectorHandler holds a reference to the core logic
@@ -57,7 +58,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		return
 	}
 
-	results, err := h.Index.Search(req.Vector, req.K)
+	results, err := h.Index.Search(req.Vector, req.K, req.Filters)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

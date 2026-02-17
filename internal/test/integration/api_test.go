@@ -565,6 +565,233 @@ func (s *APITestSuite) TestSearchValidationErrors() {
 	}
 }
 
+func (s *APITestSuite) TestFilteredSearch_ByCategory() {
+	vectors := []struct {
+		id       string
+		vector   []float32
+		metadata map[string]interface{}
+	}{
+		{"doc1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"category": "tech"}},
+		{"doc2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"category": "tech"}},
+		{"doc3", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"category": "science"}},
+	}
+
+	for _, vec := range vectors {
+		body, _ := json.Marshal(map[string]interface{}{
+			"id": vec.id, "vector": vec.vector, "metadata": vec.metadata,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	searchPayload := map[string]interface{}{
+		"vector": []float32{1.0, 0.0, 0.0},
+		"k":      10,
+		"filter": map[string]interface{}{"category": "tech"},
+	}
+	body, _ := json.Marshal(searchPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var results []map[string]interface{}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+
+	s.Assert().Len(results, 2)
+	resultIDs := make([]string, len(results))
+	for i, r := range results {
+		resultIDs[i] = r["ID"].(string)
+	}
+	s.Assert().Contains(resultIDs, "doc1")
+	s.Assert().Contains(resultIDs, "doc2")
+	s.Assert().NotContains(resultIDs, "doc3")
+}
+
+func (s *APITestSuite) TestFilteredSearch_NoMatches() {
+	for i := 1; i <= 3; i++ {
+		body, _ := json.Marshal(map[string]interface{}{
+			"id":       fmt.Sprintf("v%d", i),
+			"vector":   []float32{float32(i), float32(i * 2)},
+			"metadata": map[string]interface{}{"type": "A"},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	searchPayload := map[string]interface{}{
+		"vector": []float32{1.0, 2.0},
+		"k":      10,
+		"filter": map[string]interface{}{"type": "B"},
+	}
+	body, _ := json.Marshal(searchPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var results []map[string]interface{}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	s.Assert().Empty(results)
+}
+
+func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
+	vectors := []struct {
+		id       string
+		vector   []float32
+		metadata map[string]interface{}
+	}{
+		{"doc1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"cat": "tech", "active": true}},
+		{"doc2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"cat": "tech", "active": false}},
+		{"doc3", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"cat": "sci", "active": true}},
+	}
+
+	for _, vec := range vectors {
+		body, _ := json.Marshal(map[string]interface{}{
+			"id": vec.id, "vector": vec.vector, "metadata": vec.metadata,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	// Filter cat=tech AND active=true → only doc1
+	s.Run("cat_and_active_true", func() {
+		searchPayload := map[string]interface{}{
+			"vector": []float32{1.0, 0.0, 0.0},
+			"k":      10,
+			"filter": map[string]interface{}{"cat": "tech", "active": true},
+		}
+		body, _ := json.Marshal(searchPayload)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+
+		s.Assert().Equal(http.StatusOK, w.Code)
+		var results []map[string]interface{}
+		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+		s.Assert().Len(results, 1)
+		s.Assert().Equal("doc1", results[0]["ID"])
+	})
+
+	// Filter cat=tech → doc1 and doc2
+	s.Run("cat_only", func() {
+		searchPayload := map[string]interface{}{
+			"vector": []float32{1.0, 0.0, 0.0},
+			"k":      10,
+			"filter": map[string]interface{}{"cat": "tech"},
+		}
+		body, _ := json.Marshal(searchPayload)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+
+		s.Assert().Equal(http.StatusOK, w.Code)
+		var results []map[string]interface{}
+		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+		s.Assert().Len(results, 2)
+		resultIDs := []string{results[0]["ID"].(string), results[1]["ID"].(string)}
+		s.Assert().Contains(resultIDs, "doc1")
+		s.Assert().Contains(resultIDs, "doc2")
+	})
+}
+
+func (s *APITestSuite) TestFilteredSearch_FilterWithKLimit() {
+	// 5 vectors all with tag=keep, varying similarity to query [1,0]
+	vecs := []struct {
+		id  string
+		vec []float32
+	}{
+		{"close1", []float32{1.0, 0.0}},
+		{"close2", []float32{0.9, 0.1}},
+		{"mid1", []float32{0.7, 0.3}},
+		{"far1", []float32{0.5, 0.5}},
+		{"far2", []float32{0.3, 0.7}},
+	}
+
+	for _, v := range vecs {
+		body, _ := json.Marshal(map[string]interface{}{
+			"id":       v.id,
+			"vector":   v.vec,
+			"metadata": map[string]interface{}{"tag": "keep"},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	searchPayload := map[string]interface{}{
+		"vector": []float32{1.0, 0.0},
+		"k":      2,
+		"filter": map[string]interface{}{"tag": "keep"},
+	}
+	body, _ := json.Marshal(searchPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var results []map[string]interface{}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	s.Assert().Len(results, 2)
+
+	// Verify sorted by score descending
+	score0, ok0 := results[0]["Score"].(float64)
+	score1, ok1 := results[1]["Score"].(float64)
+	s.Require().True(ok0 && ok1)
+	s.Assert().GreaterOrEqual(score0, score1)
+}
+
+func (s *APITestSuite) TestFilteredSearch_NoFilterField() {
+	for i := 1; i <= 3; i++ {
+		body, _ := json.Marshal(map[string]interface{}{
+			"id":       fmt.Sprintf("v%d", i),
+			"vector":   []float32{float32(i), float32(i * 2)},
+			"metadata": map[string]interface{}{"index": i},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		s.Require().Equal(http.StatusCreated, w.Code)
+	}
+
+	// No filter field — should return all results
+	searchPayload := map[string]interface{}{
+		"vector": []float32{1.0, 2.0},
+		"k":      10,
+	}
+	body, _ := json.Marshal(searchPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var results []map[string]interface{}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	s.Assert().Len(results, 3, "No filter should return all results")
+}
+
 func TestAPITestSuite(t *testing.T) {
 	suite.Run(t, new(APITestSuite))
 }

@@ -309,7 +309,7 @@ func TestVectorIndex_Search_EmptyIndex(t *testing.T) {
 	idx := NewVectorIndex()
 	query := []float32{1.0, 2.0, 3.0}
 
-	results, err := idx.Search(query, 5)
+	results, err := idx.Search(query, 5, nil)
 
 	require.NoError(t, err)
 	assert.Empty(t, results, "Search on empty index should return empty results")
@@ -320,7 +320,7 @@ func TestVectorIndex_Search_SingleVector(t *testing.T) {
 	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
 
 	query := []float32{1.0, 2.0, 3.0}
-	results, err := idx.Search(query, 5)
+	results, err := idx.Search(query, 5, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -339,7 +339,7 @@ func TestVectorIndex_Search_MultipleVectors(t *testing.T) {
 	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, map[string]any{"type": "opposite"})
 
 	query := []float32{1.0, 0.0, 0.0}
-	results, err := idx.Search(query, 10)
+	results, err := idx.Search(query, 10, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 4)
@@ -383,7 +383,7 @@ func TestVectorIndex_Search_WithLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := idx.Search(query, tt.limit)
+			results, err := idx.Search(query, tt.limit, nil)
 			require.NoError(t, err)
 			assert.Len(t, results, tt.expectedCount)
 		})
@@ -399,7 +399,7 @@ func TestVectorIndex_Search_WithZeroLimit(t *testing.T) {
 	}
 
 	query := []float32{1.0, 2.0}
-	results, err := idx.Search(query, 0)
+	results, err := idx.Search(query, 0, nil)
 
 	require.NoError(t, err)
 	assert.Len(t, results, 5, "Zero limit should return all results")
@@ -410,7 +410,7 @@ func TestVectorIndex_Search_EmptyQuery(t *testing.T) {
 	idx.Insert("v1", []float32{1.0, 2.0}, nil)
 
 	query := []float32{}
-	results, err := idx.Search(query, 5)
+	results, err := idx.Search(query, 5, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, "empty query vector", err.Error())
@@ -424,7 +424,7 @@ func TestVectorIndex_Search_DimensionMismatch(t *testing.T) {
 
 	// Query with different dimension
 	query := []float32{1.0, 2.0}
-	results, err := idx.Search(query, 5)
+	results, err := idx.Search(query, 5, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "vector dimensions mismatch")
@@ -444,7 +444,7 @@ func TestVectorIndex_Search_ResultsIncludeMetadata(t *testing.T) {
 	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, metadata)
 
 	query := []float32{1.0, 2.0, 3.0}
-	results, err := idx.Search(query, 1)
+	results, err := idx.Search(query, 1, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -465,7 +465,7 @@ func TestVectorIndex_Search_SortingOrder(t *testing.T) {
 	idx.Insert("negative", []float32{-1.0, 0.0, 0.0}, nil) // score = -1.0
 
 	query := []float32{1.0, 0.0, 0.0}
-	results, err := idx.Search(query, 10)
+	results, err := idx.Search(query, 10, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 4)
@@ -489,7 +489,7 @@ func TestVectorIndex_Search_IdenticalVectors(t *testing.T) {
 	}
 
 	query := []float32{1.0, 2.0, 3.0}
-	results, err := idx.Search(query, 10)
+	results, err := idx.Search(query, 10, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 3)
@@ -518,7 +518,7 @@ func TestVectorIndex_Search_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, err := idx.Search(query, 10)
+			results, err := idx.Search(query, 10, nil)
 			assert.NoError(t, err)
 			assert.Len(t, results, 10)
 
@@ -549,7 +549,7 @@ func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, err := idx.Search(query, 5)
+			results, err := idx.Search(query, 5, nil)
 			assert.NoError(t, err)
 			assert.NotNil(t, results)
 		}()
@@ -591,7 +591,7 @@ func TestVectorIndex_Search_HighDimensional(t *testing.T) {
 	idx.Insert("v2", vec2, map[string]any{"type": "identical"})
 	idx.Insert("v3", vec3, map[string]any{"type": "different"})
 
-	results, err := idx.Search(vec1, 3)
+	results, err := idx.Search(vec1, 3, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 3)
@@ -609,7 +609,7 @@ func TestVectorIndex_Search_NilMetadata(t *testing.T) {
 	idx.Insert("v2", []float32{2.0, 3.0}, nil)
 
 	query := []float32{1.0, 2.0}
-	results, err := idx.Search(query, 2)
+	results, err := idx.Search(query, 2, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 2)
@@ -618,4 +618,147 @@ func TestVectorIndex_Search_NilMetadata(t *testing.T) {
 	for _, result := range results {
 		assert.Nil(t, result.Meta)
 	}
+}
+
+func TestVectorIndex_Search_WithFilters(t *testing.T) {
+	idx := NewVectorIndex()
+
+	idx.Insert("books1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"category": "books", "active": true, "score": float64(90)})
+	idx.Insert("books2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"category": "books", "active": false, "score": float64(80)})
+	idx.Insert("music1", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"category": "music", "active": true, "score": float64(70)})
+	idx.Insert("nilmeta", []float32{0.5, 0.5, 0.0}, nil)
+
+	query := []float32{1.0, 0.0, 0.0}
+
+	tests := []struct {
+		name        string
+		filter      map[string]interface{}
+		expectedIDs []string
+	}{
+		{
+			name:        "nil_filter",
+			filter:      nil,
+			expectedIDs: []string{"books1", "books2", "music1", "nilmeta"},
+		},
+		{
+			name:        "empty_filter",
+			filter:      map[string]interface{}{},
+			expectedIDs: []string{"books1", "books2", "music1", "nilmeta"},
+		},
+		{
+			name:        "string_match",
+			filter:      map[string]interface{}{"category": "books"},
+			expectedIDs: []string{"books1", "books2"},
+		},
+		{
+			name:        "string_no_match",
+			filter:      map[string]interface{}{"category": "films"},
+			expectedIDs: []string{},
+		},
+		{
+			name:        "bool_match",
+			filter:      map[string]interface{}{"active": true},
+			expectedIDs: []string{"books1", "music1"},
+		},
+		{
+			name:        "numeric_match",
+			filter:      map[string]interface{}{"score": float64(90)},
+			expectedIDs: []string{"books1"},
+		},
+		{
+			name:        "multiple_filters_all_match",
+			filter:      map[string]interface{}{"category": "books", "active": true},
+			expectedIDs: []string{"books1"},
+		},
+		{
+			name:        "multiple_filters_partial_match",
+			filter:      map[string]interface{}{"category": "books", "active": false},
+			expectedIDs: []string{"books2"},
+		},
+		{
+			name:        "missing_key",
+			filter:      map[string]interface{}{"nonexistent": "value"},
+			expectedIDs: []string{},
+		},
+		{
+			name:        "filter_with_nil_metadata_nodes",
+			filter:      map[string]interface{}{"category": "books"},
+			expectedIDs: []string{"books1", "books2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := idx.Search(query, 0, tt.filter)
+			require.NoError(t, err)
+
+			resultIDs := make([]string, len(results))
+			for i, r := range results {
+				resultIDs[i] = r.ID
+			}
+
+			assert.Len(t, results, len(tt.expectedIDs),
+				"Expected %d results, got %d: %v", len(tt.expectedIDs), len(results), resultIDs)
+			for _, expectedID := range tt.expectedIDs {
+				assert.Contains(t, resultIDs, expectedID,
+					"Expected ID %s in results %v", expectedID, resultIDs)
+			}
+		})
+	}
+}
+
+func TestVectorIndex_Search_FilterReducesResults(t *testing.T) {
+	idx := NewVectorIndex()
+
+	idx.Insert("a1", []float32{1.0, 0.0}, map[string]interface{}{"type": "A"})
+	idx.Insert("a2", []float32{0.9, 0.1}, map[string]interface{}{"type": "A"})
+	idx.Insert("a3", []float32{0.8, 0.2}, map[string]interface{}{"type": "A"})
+	idx.Insert("b1", []float32{0.0, 1.0}, map[string]interface{}{"type": "B"})
+	idx.Insert("b2", []float32{0.1, 0.9}, map[string]interface{}{"type": "B"})
+
+	query := []float32{1.0, 0.0}
+	results, err := idx.Search(query, 10, map[string]interface{}{"type": "A"})
+
+	require.NoError(t, err)
+	require.Len(t, results, 3, "Filter should return exactly 3 type=A results")
+
+	for _, r := range results {
+		assert.Equal(t, "A", r.Meta["type"])
+	}
+
+	for i := 0; i < len(results)-1; i++ {
+		assert.GreaterOrEqual(t, results[i].Score, results[i+1].Score,
+			"Results should be sorted by score descending")
+	}
+}
+
+func TestVectorIndex_Search_FilterWithLimit(t *testing.T) {
+	idx := NewVectorIndex()
+
+	idx.Insert("close1", []float32{1.0, 0.0}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("close2", []float32{0.9, 0.1}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("mid1", []float32{0.7, 0.3}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("far1", []float32{0.5, 0.5}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("far2", []float32{0.3, 0.7}, map[string]interface{}{"tag": "keep"})
+
+	query := []float32{1.0, 0.0}
+	results, err := idx.Search(query, 2, map[string]interface{}{"tag": "keep"})
+
+	require.NoError(t, err)
+	assert.Len(t, results, 2, "Filter + limit should return exactly 2 results")
+	assert.Equal(t, "close1", results[0].ID)
+	assert.Equal(t, "close2", results[1].ID)
+}
+
+func TestVectorIndex_Search_NilMetadataWithFilter(t *testing.T) {
+	idx := NewVectorIndex()
+	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"label": "x"})
+	idx.Insert("v2", []float32{0.9, 0.1}, nil)
+
+	query := []float32{1.0, 0.0}
+	results, err := idx.Search(query, 10, map[string]interface{}{"label": "x"})
+
+	require.NoError(t, err)
+	require.Len(t, results, 1, "Only v1 should match; v2 has nil metadata")
+	assert.Equal(t, "v1", results[0].ID)
 }

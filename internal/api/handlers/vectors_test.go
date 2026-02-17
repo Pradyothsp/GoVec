@@ -820,3 +820,171 @@ func TestVectorHandler_Search_NegativeK(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, response["error"], "k cannot be negative")
 }
+
+func TestVectorHandler_Search_WithFilter(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"label": "a"})
+	idx.Insert("v2", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"label": "b"})
+	idx.Insert("v3", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"label": "a"})
+
+	req := map[string]interface{}{
+		"vector": []float32{1.0, 0.0, 0.0},
+		"k":      10,
+		"filter": map[string]interface{}{"label": "a"},
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	require.Len(t, results, 2)
+	resultIDs := make([]string, len(results))
+	for i, r := range results {
+		resultIDs[i] = r.ID
+	}
+	assert.Contains(t, resultIDs, "v1")
+	assert.Contains(t, resultIDs, "v3")
+	assert.NotContains(t, resultIDs, "v2")
+}
+
+func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"type": "X"})
+	idx.Insert("v2", []float32{0.9, 0.1}, map[string]interface{}{"type": "X"})
+
+	req := map[string]interface{}{
+		"vector": []float32{1.0, 0.0},
+		"k":      10,
+		"filter": map[string]interface{}{"type": "Y"},
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Empty(t, results)
+}
+
+func TestVectorHandler_Search_FilterAndK(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	for i := 1; i <= 5; i++ {
+		vec := []float32{float32(i), float32(i * 2)}
+		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]interface{}{"tag": "t"})
+	}
+
+	req := map[string]interface{}{
+		"vector": []float32{5.0, 10.0},
+		"k":      2,
+		"filter": map[string]interface{}{"tag": "t"},
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Len(t, results, 2)
+}
+
+func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"type": "A"})
+	idx.Insert("v2", []float32{0.9, 0.1}, map[string]interface{}{"type": "B"})
+	idx.Insert("v3", []float32{0.8, 0.2}, map[string]interface{}{"type": "C"})
+
+	// No filter field in request
+	req := map[string]interface{}{
+		"vector": []float32{1.0, 0.0},
+		"k":      10,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	assert.Len(t, results, 3, "No filter should return all results")
+}
+
+func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
+	idx := core.NewVectorIndex()
+	handler := NewVectorHandler(idx)
+
+	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"cat": "A", "active": true})
+	idx.Insert("v2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"cat": "A", "active": false})
+	idx.Insert("v3", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"cat": "B", "active": true})
+
+	req := map[string]interface{}{
+		"vector": []float32{1.0, 0.0, 0.0},
+		"k":      10,
+		"filter": map[string]interface{}{"cat": "A", "active": true},
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body, _ := json.Marshal(req)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/query", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Search(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var results []core.SearchResult
+	err := json.Unmarshal(w.Body.Bytes(), &results)
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, "v1", results[0].ID)
+}

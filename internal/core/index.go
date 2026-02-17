@@ -38,7 +38,7 @@ func (idx *VectorIndex) Insert(id string, vec []float32, meta map[string]any) {
 }
 
 // Search returns the top-limit nearest neighbours to query using cosine similarity.
-func (idx *VectorIndex) Search(query []float32, limit int) ([]SearchResult, error) {
+func (idx *VectorIndex) Search(query []float32, limit int, filters map[string]interface{}) ([]SearchResult, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -48,6 +48,12 @@ func (idx *VectorIndex) Search(query []float32, limit int) ([]SearchResult, erro
 
 	results := make([]SearchResult, 0, limit)
 	for id, node := range idx.Store {
+		// Filter check
+		if !matchFilter(node.Metadata, filters) {
+			continue
+		}
+
+		// Similarity calculation
 		score, err := CosineSimilarity(query, node.Vector)
 		if err != nil {
 			return nil, err

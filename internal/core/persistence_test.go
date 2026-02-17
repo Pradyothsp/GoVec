@@ -492,7 +492,7 @@ func TestConcurrentSearch_AndSave(t *testing.T) {
 		go func(queryID int) {
 			defer wg.Done()
 			query := []float32{float32(queryID), float32(queryID * 2), float32(queryID * 3)}
-			_, err := index.Search(query, 5)
+			_, err := index.Search(query, 5, nil)
 			assert.NoError(t, err, "Search should succeed during save")
 		}(i)
 	}
