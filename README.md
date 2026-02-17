@@ -4,17 +4,20 @@ A high-performance vector database implementation written in Go, designed for st
 
 [![Go Version](https://img.shields.io/badge/Go-1.26.0-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![CI](https://github.com/Pradyothsp/govec/actions/workflows/go.yml/badge.svg)](https://github.com/Pradyothsp/govec/actions/workflows/go.yml)
-[![Tests](https://img.shields.io/badge/tests-103%20passing-success)](/)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](/)
+[![Tests](https://img.shields.io/badge/tests-255%20passing-success)](/)
+[![Coverage](https://img.shields.io/badge/coverage-98.1%25-brightgreen)](/)
 
 ## Features
 
 - **Fast In-Memory Storage** - Optimized vector storage using Go maps
 - **Thread-Safe Operations** - Concurrent access protection with `sync.RWMutex`
 - **Flexible Metadata** - Store arbitrary JSON metadata alongside vectors
+- **Vector Search** - Cosine similarity search with top-K nearest neighbors
+- **Persistence Layer** - Automatic snapshots with GOB encoding and graceful shutdown
+- **Configuration System** - YAML-based config with environment variable overrides
 - **RESTful API** - Simple HTTP API built with Gin framework
-- **Clean Architecture** - Dependency injection and separation of concerns
-- **Comprehensive Tests** - 103 tests with 100% coverage in core modules
+- **Clean Architecture** - DDD principles with dependency injection
+- **Comprehensive Tests** - 255 tests with 98.1% coverage
 - **Modern Tooling** - Task runner and enhanced test output with gotestsum
 
 ## Quick Start
@@ -50,6 +53,34 @@ task run
 ```
 
 The server will start on `http://localhost:8000`
+
+### Configuration
+
+GoVec uses a YAML configuration file with environment variable overrides.
+
+**Quick configuration:**
+
+```bash
+# Use default config (config.yaml)
+task run
+
+# Custom port
+GOVEC_SERVER_PORT=9000 task run
+
+# Disable auto-save
+GOVEC_AUTO_SAVE_ENABLED=false task run
+
+# Custom config file
+GOVEC_CONFIG_PATH=./custom.yaml task run
+```
+
+**Available environment variables:**
+- `GOVEC_SERVER_PORT` - Server port (default: 8000)
+- `GOVEC_STORAGE_PATH` - Data file path (default: ./govec_data.bin)
+- `GOVEC_AUTO_SAVE_ENABLED` - Enable/disable auto-save (default: true)
+- `GOVEC_AUTO_SAVE_INTERVAL` - Auto-save interval (default: 60s)
+
+See `config.example.yaml` for all available options.
 
 ### Building
 
@@ -141,6 +172,7 @@ Metadata can include various JSON types:
 |--------|----------|-------------|
 | GET | `/health` | Health check |
 | POST | `/api/v1/vectors` | Insert or update a vector |
+| POST | `/api/v1/query` | Search for similar vectors |
 
 ### POST `/api/v1/vectors`
 
@@ -170,6 +202,45 @@ Metadata can include various JSON types:
 - `400 Bad Request` - Invalid JSON or missing required fields
 - `415 Unsupported Media Type` - Missing `Content-Type: application/json` header
 
+### POST `/api/v1/query`
+
+Search for vectors similar to a query vector using cosine similarity.
+
+**Request Body:**
+
+```json
+{
+  "vector": [float32] (required),
+  "k": integer (optional, default: all results)
+}
+```
+
+**Response (200 OK):**
+
+```json
+[
+  {
+    "ID": "vec1",
+    "Score": 0.98,
+    "Meta": {
+      "label": "example"
+    }
+  },
+  {
+    "ID": "vec2",
+    "Score": 0.87,
+    "Meta": {}
+  }
+]
+```
+
+Results are sorted by similarity score (descending).
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid JSON or missing vector
+- `500 Internal Server Error` - Empty query vector or dimension mismatch
+
 ## Development
 
 ### Project Structure
@@ -179,8 +250,10 @@ govec/
 ├── cmd/server/          # Application entry point
 ├── internal/
 │   ├── api/            # HTTP layer (Gin router)
+│   ├── config/         # Configuration system (DDD)
 │   ├── core/           # Core domain logic (VectorIndex)
 │   └── test/           # Test utilities and integration tests
+├── config.yaml         # Default configuration
 ├── Taskfile.yaml       # Task runner configuration
 └── go.mod              # Go module definition
 ```
@@ -231,10 +304,12 @@ task deps              # Install dependencies
 
 ### Test Coverage
 
-- **internal/core**: 100% (50 tests)
-- **internal/api**: 100% (3 tests)
+- **internal/config**: 98.1% (49 tests)
+- **internal/core**: 96.1% (76 tests)
+- **internal/api**: 100% (13 tests)
 - **internal/api/handlers**: 100% (50 tests)
-- **Total**: 103 tests, all passing
+- **internal/test/integration**: 67 tests
+- **Total**: 255 tests, all passing
 
 ### Architecture
 
@@ -257,12 +332,13 @@ main.go
 
 ## Roadmap
 
-- [ ] Vector search and similarity queries (cosine similarity, euclidean distance)
-- [ ] Persistence layer (disk storage, WAL)
+- [x] Vector search and similarity queries (cosine similarity)
+- [x] Persistence layer (GOB encoding with atomic writes)
+- [x] Configuration system (YAML config with env var overrides)
 - [ ] Advanced indexing algorithms (HNSW, IVF)
 - [ ] Batch operations (bulk insert, batch search)
 - [ ] Query filters based on metadata
-- [ ] Configuration system (YAML/JSON config files)
+- [ ] Euclidean distance and other similarity metrics
 - [ ] Go client library
 - [ ] CLI tool for management
 - [ ] Horizontal scaling support
@@ -299,6 +375,6 @@ Built with:
 
 ---
 
-**Status**: Early development (in-memory only, no search yet)
+**Status**: Active development - Production-ready features: vector storage, search, persistence, and configuration
 
 For detailed development guidelines, see [CLAUDE.md](CLAUDE.md)

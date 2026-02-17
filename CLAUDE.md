@@ -214,7 +214,7 @@ The project has comprehensive test coverage organized by package:
 - Concurrent HTTP requests
 - Vector search functionality
 
-**internal/test/integration/persistence_test.go** (9 tests, NEW)
+**internal/test/integration/persistence_test.go** (9 tests)
 - Server restart data preservation
 - Graceful shutdown save functionality
 - Crash recovery with auto-save
@@ -224,7 +224,24 @@ The project has comprehensive test coverage organized by package:
 - Large dataset persistence (1000 vectors)
 - Auto-save simulation
 
-**Total: 206 tests, 96.1% coverage in internal/core, 100% in internal/api**
+**internal/config/config_test.go** (2 tests)
+- Default configuration values
+- ServerConfig.Address() helper method
+
+**internal/config/validation_test.go** (3 tests)
+- Complete configuration validation
+- Server config validation (port ranges, timeout constraints)
+- Storage config validation (path, auto-save settings)
+
+**internal/config/loader_test.go** (8 tests)
+- YAML file loading (valid, invalid, missing files)
+- Environment variable overrides
+- Configuration priority (env > file > defaults)
+- Boolean and duration parsing
+- Partial YAML configuration
+- Invalid configuration handling
+
+**Total: 255 tests, 98.1% coverage in internal/config, 96.1% in internal/core, 100% in internal/api**
 
 ### Dependencies
 
@@ -282,22 +299,34 @@ govec/
 ├── internal/
 │   ├── api/
 │   │   ├── router.go            # HTTP router setup
+│   │   ├── router_test.go       # Router tests
 │   │   └── handlers/
 │   │       ├── vectors.go       # Vector API handlers
 │   │       └── vectors_test.go  # Handler tests
+│   ├── config/                  # Configuration system
+│   │   ├── config.go            # Config structs (value objects)
+│   │   ├── loader.go            # Config loading service
+│   │   ├── validation.go        # Domain validation rules
+│   │   ├── config_test.go       # Config struct tests
+│   │   ├── loader_test.go       # Loader tests
+│   │   └── validation_test.go   # Validation tests
 │   ├── core/
 │   │   ├── index.go             # VectorIndex implementation
 │   │   ├── index_test.go        # Index tests
 │   │   ├── models.go            # Core data models (VectorNode)
-│   │   └── models_test.go       # Model tests
+│   │   ├── models_test.go       # Model tests
+│   │   ├── persistence.go       # Save/Load functionality
+│   │   ├── persistence_test.go  # Persistence tests
+│   │   └── similarity.go        # Cosine similarity
 │   ├── test/
 │   │   ├── integration/         # Integration tests
 │   │   └── testutil/            # Test utilities
-│   ├── config/                  # (Planned) Configuration
 │   ├── index/                   # (Planned) Advanced indexing
 │   └── storage/                 # (Planned) Persistence layer
 ├── pkg/
 │   └── client/                  # (Planned) Client library
+├── config.yaml                  # Default configuration
+├── config.example.yaml          # Example configuration
 ├── Taskfile.yaml                # Task runner configuration
 ├── .gotestsum.yml               # gotestsum configuration
 ├── CLAUDE.md                    # This file
@@ -311,23 +340,25 @@ govec/
 
 The codebase follows a clean architecture pattern with dependency injection:
 
-1. **cmd/server/main.go** - Entry point that initializes the VectorIndex and passes it to the API router
-2. **internal/core** - Core domain logic for vector storage
-3. **internal/api** - HTTP layer using Gin framework
-4. **internal/api/handlers** - HTTP handlers that depend on core services
-5. **pkg/client** - (Empty) Planned client library location
+1. **cmd/server/main.go** - Entry point that loads configuration and initializes components
+2. **internal/config** - Configuration system with DDD value objects
+3. **internal/core** - Core domain logic for vector storage
+4. **internal/api** - HTTP layer using Gin framework
+5. **internal/api/handlers** - HTTP handlers that depend on core services
+6. **pkg/client** - (Empty) Planned client library location
 
 ### Dependency Flow
 
 ```
 main.go
+  → Loads Config (config)
   → Creates VectorIndex (core)
-  → Passes to SetupRouter (api)
-    → Passes to NewVectorHandler (handlers)
+  → Passes VectorIndex to SetupRouter (api)
+    → Passes VectorIndex to NewVectorHandler (handlers)
       → Handlers call VectorIndex methods
 ```
 
-The architecture uses **constructor injection**: dependencies are passed explicitly when creating handlers, rather than using global variables or service locators.
+The architecture uses **constructor injection**: dependencies are passed explicitly when creating handlers and routers, rather than using global variables or service locators. Configuration is loaded once at startup and used to configure server and storage settings.
 
 ### Key Components
 
@@ -347,6 +378,21 @@ The architecture uses **constructor injection**: dependencies are passed explici
 **internal/core/similarity.go**
 - `CosineSimilarity(a, b)` - Computes cosine similarity between two vectors
 
+**internal/config/config.go**
+- `Config` - Root configuration aggregate (DDD)
+- `ServerConfig`, `StorageConfig` - Value objects
+- Helper methods: `Address()`
+
+**internal/config/loader.go** (NEW)
+- `Loader` - Configuration loading service
+- `Load()` - Loads from file + env vars with priority ordering
+- Gracefully handles missing files (uses defaults)
+
+**internal/config/validation.go** (NEW)
+- Domain validation rules for all config sections
+- Fail-fast validation at startup
+- Clear error messages for invalid configuration
+
 **internal/api/router.go**
 - `SetupRouter(index)` - Configures Gin routes and injects dependencies into handlers
 - Health check at `/health`
@@ -358,9 +404,87 @@ The architecture uses **constructor injection**: dependencies are passed explici
 - `Search` endpoint - POST `/api/v1/query` accepts JSON with vector and k parameter
 
 **cmd/server/main.go**
-- Auto-save ticker (saves every 60 seconds)
+- Configuration loading at startup
+- Auto-save ticker (configurable interval)
 - Graceful shutdown with data persistence
 - Loads existing data on startup
+
+## Configuration
+
+GoVec uses a YAML-based configuration system with environment variable overrides, following Domain-Driven Design (DDD) principles.
+
+### Configuration File
+
+Create `config.yaml` in the project root (see `config.example.yaml` for reference).
+
+**Default configuration (config.yaml):**
+```yaml
+server:
+  host: ""           # Bind to all interfaces
+  port: 8000         # HTTP server port
+  shutdown_timeout: 10s
+
+storage:
+  data_path: "./govec_data.bin"
+  auto_save_enabled: true
+  auto_save_interval: 60s
+```
+
+### Environment Variables
+
+Override any config value using environment variables with the `GOVEC_` prefix:
+
+**Server:**
+- `GOVEC_SERVER_HOST` - Server host (default: "")
+- `GOVEC_SERVER_PORT` - Server port (default: 8000)
+- `GOVEC_SHUTDOWN_TIMEOUT` - Graceful shutdown timeout (default: 10s)
+
+**Storage:**
+- `GOVEC_STORAGE_PATH` - Data file path (default: "./govec_data.bin")
+- `GOVEC_AUTO_SAVE_ENABLED` - Enable/disable auto-save (default: true)
+- `GOVEC_AUTO_SAVE_INTERVAL` - Auto-save interval (default: 60s)
+
+**Special:**
+- `GOVEC_CONFIG_PATH` - Custom config file path (default: "config.yaml")
+
+### Configuration Priority
+
+Configuration is loaded with the following priority (highest to lowest):
+1. Environment variables (highest)
+2. Config file (config.yaml)
+3. Built-in defaults (lowest)
+
+### Examples
+
+**Use custom port:**
+```bash
+GOVEC_SERVER_PORT=9000 task run
+```
+
+**Disable auto-save:**
+```bash
+GOVEC_AUTO_SAVE_ENABLED=false task run
+```
+
+**Use custom config file:**
+```bash
+GOVEC_CONFIG_PATH=./production.yaml task run
+```
+
+**Multiple overrides:**
+```bash
+GOVEC_SERVER_PORT=9000 GOVEC_AUTO_SAVE_INTERVAL=120s task run
+```
+
+### Validation
+
+Configuration is validated at startup with fail-fast behavior:
+- Server port: 1-65535
+- Shutdown timeout: ≥ 0
+- Storage path: cannot be empty
+- Auto-save interval: ≥ 1s when enabled
+
+Invalid configuration will cause the server to exit with a clear error message.
 
 ## Current State
 
@@ -368,15 +492,20 @@ The architecture uses **constructor injection**: dependencies are passed explici
 - ✅ Basic vector insertion with metadata support
 - ✅ In-memory vector storage using VectorIndex
 - ✅ REST API with Gin framework
-- ✅ **Persistence layer with GOB encoding** (NEW)
+- ✅ **Persistence layer with GOB encoding**
   - SaveToFile/LoadFromFile with atomic writes
-  - Auto-save every 60 seconds
+  - Configurable auto-save interval
   - Graceful shutdown saves data to disk
-- ✅ **Vector search/query functionality** (NEW)
+- ✅ **Vector search/query functionality**
   - Cosine similarity search
   - Top-K nearest neighbors
   - POST `/api/v1/query` endpoint
-- ✅ Comprehensive test suite (206 tests, 96.1% coverage in core modules)
+- ✅ **Configuration system (internal/config)**
+  - YAML-based configuration with environment variable overrides
+  - DDD architecture with value objects and validation
+  - Fail-fast validation at startup
+  - 98.1% test coverage
+- ✅ Comprehensive test suite (255 tests, 98.1% coverage in config, 96.1% in core)
 - ✅ Modern development tooling (Task runner, gotestsum)
 - ✅ Health check endpoint
 - ✅ Clean architecture with dependency injection
@@ -384,17 +513,17 @@ The architecture uses **constructor injection**: dependencies are passed explici
 **In Progress / Planned:**
 - ⏳ Advanced indexing algorithms (HNSW, IVF - internal/index planned)
 - ⏳ Storage layer abstraction (internal/storage - planned)
-- ⏳ Configuration system (internal/config - planned)
 - ⏳ Client library (pkg/client - planned)
 - ⏳ Vector deletion and update endpoints
 - ⏳ Metadata filtering in search
 
 **Test Coverage:**
-- internal/core: 96.1% (120 tests)
-- internal/api: 100% (6 tests)
+- internal/config: 98.1% (49 tests)
+- internal/core: 96.1% (76 tests)
+- internal/api: 100% (13 tests)
 - internal/api/handlers: 100% (50 tests)
-- internal/test/integration: 23 tests
-- Total: 206 tests passing
+- internal/test/integration: 67 tests
+- Total: 255 tests passing
 
 ## Development Workflow
 
