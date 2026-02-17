@@ -19,6 +19,9 @@ A high-performance vector database implementation written in Go, designed for st
 - **Clean Architecture** - DDD principles with dependency injection
 - **Comprehensive Tests** - 255 tests with 98.1% coverage
 - **Modern Tooling** - Task runner and enhanced test output with gotestsum
+- **CI/CD Pipeline** - Separate lint, test, vet, and security jobs via GitHub Actions
+- **Docker Support** - Multi-stage Dockerfile for production deployments
+- **Linting & Security** - golangci-lint, go vet, govulncheck, and pre-commit hooks
 
 ## Quick Start
 
@@ -27,6 +30,9 @@ A high-performance vector database implementation written in Go, designed for st
 - Go 1.26.0 or higher
 - [Task](https://taskfile.dev/) (optional, for convenient commands)
 - [gotestsum](https://github.com/gotestyourself/gotestsum) (optional, for better test output)
+- [golangci-lint](https://golangci-lint.run/) (optional, for linting)
+- [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) (optional, for vulnerability scanning)
+- [pre-commit](https://pre-commit.com/) (optional, for commit hooks)
 
 ### Installation
 
@@ -253,6 +259,10 @@ govec/
 │   ├── config/         # Configuration system (DDD)
 │   ├── core/           # Core domain logic (VectorIndex)
 │   └── test/           # Test utilities and integration tests
+├── .github/workflows/  # CI/CD pipeline (lint, test, vet, security)
+├── .golangci.yml       # golangci-lint configuration
+├── .pre-commit-config.yaml # Pre-commit hooks
+├── Dockerfile          # Multi-stage production image
 ├── config.yaml         # Default configuration
 ├── Taskfile.yaml       # Task runner configuration
 └── go.mod              # Go module definition
@@ -291,15 +301,32 @@ go test -race ./...
 Run `task --list` to see all available commands:
 
 ```
+# Testing
 task test              # Run tests with pretty output
 task test:verbose      # Verbose test output
 task test:watch        # Watch mode (TDD)
 task test:coverage     # Generate coverage report
 task test:race         # Run with race detector
+task test:all          # Full suite (race + coverage)
+task test:pkg PKG=...  # Test a specific package
+
+# Static analysis
+task lint              # Run golangci-lint
+task vet               # Run go vet
+task fmt:check         # Check formatting (non-destructive)
+task fmt:fix           # Apply gofmt formatting
+task vuln              # Run govulncheck
+task check             # Run all static checks (lint + vet + fmt + vuln)
+
+# Build & run
 task build             # Build the server binary
 task run               # Run the server
 task clean             # Clean build artifacts
-task deps              # Install dependencies
+
+# Dependencies & tools
+task deps              # Install/tidy dependencies
+task install-gotestsum # Install gotestsum
+task install-tools     # Install all dev tools (gotestsum, golangci-lint, govulncheck)
 ```
 
 ### Test Coverage
@@ -360,7 +387,31 @@ Contributions are welcome! Please ensure:
 1. All tests pass: `task test:all`
 2. No race conditions: `task test:race`
 3. Maintain 100% coverage in core modules
-4. Follow Go best practices and existing code style
+4. Pass all static checks: `task check`
+5. Follow Go best practices and existing code style
+
+### Setting Up Pre-commit Hooks
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Install the hooks
+pre-commit install
+
+# Run hooks manually
+pre-commit run --all-files
+```
+
+### Docker
+
+```bash
+# Build the image
+docker build -t govec .
+
+# Run the container
+docker run -p 8000:8000 govec
+```
 
 ## License
 
@@ -372,6 +423,9 @@ Built with:
 - [Gin](https://github.com/gin-gonic/gin) - HTTP web framework
 - [Task](https://taskfile.dev/) - Task runner
 - [gotestsum](https://github.com/gotestyourself/gotestsum) - Enhanced test output
+- [golangci-lint](https://golangci-lint.run/) - Go linter aggregator
+- [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) - Go vulnerability scanner
+- [pre-commit](https://pre-commit.com/) - Git hook framework
 
 ---
 

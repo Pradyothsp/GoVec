@@ -13,6 +13,9 @@ GoVec is a vector database implementation written in Go. The project provides a 
 - **Go 1.26.0+** - [Download](https://go.dev/dl/)
 - **Task** - [Installation guide](https://taskfile.dev/installation/)
 - **gotestsum** - Installed via `task install-gotestsum`
+- **golangci-lint** - Installed via `task install-tools`
+- **govulncheck** - Installed via `task install-tools`
+- **pre-commit** (optional) - `pip install pre-commit && pre-commit install`
 
 ### Quick Start
 
@@ -42,10 +45,12 @@ The server will start on `http://localhost:8000`
 ### Verify Installation
 
 ```bash
-task --version       # Should show Task version
-gotestsum --version  # Should show gotestsum version
-go version           # Should show Go 1.26.0 or compatible
-task test            # Should show 103 passing tests
+task --version           # Should show Task version
+gotestsum --version      # Should show gotestsum version
+go version               # Should show Go 1.26.0 or compatible
+golangci-lint --version  # Should show golangci-lint version
+govulncheck -version     # Should show govulncheck version
+task test                # Should show 255 passing tests
 ```
 
 ## Development Tooling
@@ -54,12 +59,18 @@ This project uses modern Go development tools for an enhanced developer experien
 
 - **[Task](https://taskfile.dev/)** - Task runner for convenient command execution (replaces Makefiles)
 - **[gotestsum](https://github.com/gotestyourself/gotestsum)** - Enhanced test output with colors, summaries, and multiple formats
+- **[golangci-lint](https://golangci-lint.run/)** - Aggregated Go linter (errcheck, govet, staticcheck, gosec, gocritic, and more)
+- **[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)** - Go vulnerability scanner
+- **[pre-commit](https://pre-commit.com/)** - Git hook framework for file hygiene and Go tooling
 - **Go 1.26.0** - Latest Go version with improved performance and features
 
 ### Configuration Files
 
 - **Taskfile.yaml** - Task runner configuration with all project commands
 - **.gotestsum.yml** - gotestsum configuration (format, watch settings, slow test threshold)
+- **.golangci.yml** - golangci-lint linter selection and settings
+- **.pre-commit-config.yaml** - Pre-commit hooks (trailing whitespace, gofmt, go vet, golangci-lint, govulncheck)
+- **Dockerfile** - Multi-stage build for production container images
 
 ### Why These Tools?
 
@@ -78,6 +89,16 @@ This project uses modern Go development tools for an enhanced developer experien
 - CI/CD integration (JUnit XML export)
 - No code changes required (works via `go test -json`)
 
+**golangci-lint** provides:
+- Runs many linters in a single pass (fast)
+- Catches correctness issues (errcheck, staticcheck), security (gosec), and style (revive, gocritic)
+- Configured via `.golangci.yml` with sensible defaults and test-file exclusions
+
+**govulncheck** provides:
+- Scans Go modules against the Go vulnerability database
+- Reports only reachable vulnerabilities (not noisy)
+- Integrated into CI and pre-commit hooks
+
 ## Development Commands
 
 ### Quick Reference
@@ -85,6 +106,7 @@ This project uses modern Go development tools for an enhanced developer experien
 ```bash
 task --list          # Show all available commands
 task test            # Run tests (most common)
+task check           # Run all static checks (lint + vet + fmt + vuln)
 task build           # Build the server
 task run             # Run the server
 task clean           # Clean build artifacts
@@ -270,14 +292,23 @@ Run `task --list` to see all available commands:
 - `task test:dots` - Run tests with dots format
 - `task test:testname` - Run tests showing each test name
 
+**Static Analysis:**
+- `task lint` - Run golangci-lint
+- `task vet` - Run go vet
+- `task fmt:check` - Check formatting without modifying files (exits non-zero if unformatted)
+- `task fmt:fix` - Apply gofmt formatting to all Go source files
+- `task vuln` - Run govulncheck for known vulnerabilities
+- `task check` - Run all static checks (vet + fmt + lint + vuln)
+
 **Building & Running:**
 - `task build` - Build the GoVec server binary
 - `task run` - Run the GoVec server
 - `task clean` - Clean build artifacts and coverage files
 
-**Dependencies:**
+**Dependencies & Tools:**
 - `task deps` - Install and update project dependencies
 - `task install-gotestsum` - Install gotestsum (if not present)
+- `task install-tools` - Install all dev tools (gotestsum, golangci-lint, govulncheck)
 
 ### Cleaning Up
 
@@ -325,10 +356,16 @@ govec/
 │   └── storage/                 # (Planned) Persistence layer
 ├── pkg/
 │   └── client/                  # (Planned) Client library
+├── .github/
+│   └── workflows/
+│       └── go.yml               # CI: lint, test, vet, security jobs
 ├── config.yaml                  # Default configuration
 ├── config.example.yaml          # Example configuration
+├── Dockerfile                   # Multi-stage production image
 ├── Taskfile.yaml                # Task runner configuration
+├── .golangci.yml                # golangci-lint linter configuration
 ├── .gotestsum.yml               # gotestsum configuration
+├── .pre-commit-config.yaml      # Pre-commit hooks configuration
 ├── CLAUDE.md                    # This file
 ├── go.mod                       # Go module definition
 └── go.sum                       # Go dependencies lock file
@@ -509,6 +546,14 @@ Invalid configuration will cause the server to exit with a clear error message.
 - ✅ Modern development tooling (Task runner, gotestsum)
 - ✅ Health check endpoint
 - ✅ Clean architecture with dependency injection
+- ✅ **CI/CD pipeline (GitHub Actions)**
+  - Separate jobs: lint, test (race + coverage), vet, security (govulncheck)
+  - Codecov upload for coverage tracking
+- ✅ **Docker support** - Multi-stage Dockerfile with non-root runtime user
+- ✅ **Linting & security tooling**
+  - golangci-lint with errcheck, staticcheck, gosec, gocritic, revive
+  - govulncheck vulnerability scanning
+  - pre-commit hooks for file hygiene and Go tooling
 
 **In Progress / Planned:**
 - ⏳ Advanced indexing algorithms (HNSW, IVF - internal/index planned)
@@ -546,11 +591,11 @@ open coverage.html
 ### Before Committing
 
 ```bash
+# Run all static checks (lint, vet, fmt, vuln)
+task check
+
 # Run full test suite with race detector and coverage
 task test:all
-
-# Verify no issues
-task test:race
 
 # Build to ensure no compilation errors
 task build
@@ -558,6 +603,8 @@ task build
 # Clean up artifacts
 task clean
 ```
+
+If pre-commit is installed, hooks run automatically on `git commit` (gofmt, go vet, golangci-lint, govulncheck).
 
 ### Testing Best Practices
 
