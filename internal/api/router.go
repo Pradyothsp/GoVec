@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/Pradyothsp/govec/docs" // generated spec; registers via init()
 	"github.com/Pradyothsp/govec/internal/api/handlers"
+	"github.com/Pradyothsp/govec/internal/api/response"
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
@@ -40,8 +41,8 @@ type HealthResponse struct {
 // @Summary      Health check
 // @Tags         system
 // @Produce      json
-// @Success      200  {object}  HealthResponse
+// @Success      200  {object}  response.Response{data=api.HealthResponse}
 // @Router       /health [get]
 func healthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	response.OK(c, http.StatusOK, HealthResponse{Status: "ok"})
 }

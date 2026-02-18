@@ -44,7 +44,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				Metadata: map[string]interface{}{"label": "test", "count": 42},
 			},
 			expectedStatus: http.StatusCreated,
-			expectedBody:   `{"status":"inserted"}`,
+			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				require.Contains(t, idx.Store, "v1")
 				assert.Equal(t, "v1", idx.Store["v1"].ID)
@@ -60,7 +60,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				Vector: []float32{4.0, 5.0},
 			},
 			expectedStatus: http.StatusCreated,
-			expectedBody:   `{"status":"inserted"}`,
+			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				require.Contains(t, idx.Store, "v2")
 				assert.Equal(t, []float32{4.0, 5.0}, idx.Store["v2"].Vector)
@@ -75,7 +75,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				Metadata: map[string]interface{}{},
 			},
 			expectedStatus: http.StatusCreated,
-			expectedBody:   `{"status":"inserted"}`,
+			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				require.Contains(t, idx.Store, "v3")
 				assert.Empty(t, idx.Store["v3"].Metadata)
@@ -137,7 +137,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				Vector: []float32{},
 			},
 			expectedStatus: http.StatusCreated,
-			expectedBody:   `{"status":"inserted"}`,
+			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				require.Contains(t, idx.Store, "v5")
 				assert.Empty(t, idx.Store["v5"].Vector)
@@ -389,7 +389,7 @@ func TestVectorHandler_Insert_MultipleVectors(t *testing.T) {
 		handler.Insert(c)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.JSONEq(t, `{"status":"inserted"}`, w.Body.String())
+		assert.JSONEq(t, `{"success":true,"data":{"status":"inserted"}}`, w.Body.String())
 	}
 
 	assert.Len(t, idx.Store, len(vectors), "All vectors should be inserted")
@@ -425,9 +425,14 @@ func TestVectorHandler_Search_ValidRequest(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
+	results := env.Data
 
 	assert.Len(t, results, 2, "Should return k results")
 	assert.Equal(t, "v1", results[0].ID, "First result should be most similar")
@@ -460,11 +465,15 @@ func TestVectorHandler_Search_WithoutK(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
 
-	assert.Len(t, results, 5, "Should return all results when k=0")
+	assert.Len(t, env.Data, 5, "Should return all results when k=0")
 }
 
 func TestVectorHandler_Search_InvalidJSON(t *testing.T) {
@@ -593,11 +602,14 @@ func TestVectorHandler_Search_VariousKValues(t *testing.T) {
 
 			assert.Equal(t, http.StatusOK, w.Code)
 
-			var results []core.SearchResult
-			err := json.Unmarshal(w.Body.Bytes(), &results)
+			var env struct {
+				Success bool                `json:"success"`
+				Data    []core.SearchResult `json:"data"`
+			}
+			err := json.Unmarshal(w.Body.Bytes(), &env)
 			require.NoError(t, err)
 
-			assert.Len(t, results, tt.expectedCount)
+			assert.Len(t, env.Data, tt.expectedCount)
 		})
 	}
 }
@@ -632,9 +644,14 @@ func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
+	results := env.Data
 
 	// Verify structure
 	for _, result := range results {
@@ -670,9 +687,14 @@ func TestVectorHandler_Search_Integration(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
+	results := env.Data
 
 	require.Len(t, results, 3)
 
@@ -710,11 +732,15 @@ func TestVectorHandler_Search_EmptyIndex(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
 
-	assert.Empty(t, results, "Empty index should return empty results")
+	assert.Empty(t, env.Data, "Empty index should return empty results")
 }
 
 func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
@@ -784,9 +810,14 @@ func TestVectorHandler_Search_LargeVectors(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
+	results := env.Data
 
 	assert.Len(t, results, 2)
 	// First result should be large1 (identical to query)
@@ -846,9 +877,14 @@ func TestVectorHandler_Search_WithFilter(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
+	results := env.Data
 
 	require.Len(t, results, 2)
 	resultIDs := make([]string, len(results))
@@ -884,11 +920,15 @@ func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
 
-	assert.Empty(t, results)
+	assert.Empty(t, env.Data)
 }
 
 func TestVectorHandler_Search_FilterAndK(t *testing.T) {
@@ -917,11 +957,15 @@ func TestVectorHandler_Search_FilterAndK(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
 
-	assert.Len(t, results, 2)
+	assert.Len(t, env.Data, 2)
 }
 
 func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
@@ -949,11 +993,15 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
 
-	assert.Len(t, results, 3, "No filter should return all results")
+	assert.Len(t, env.Data, 3, "No filter should return all results")
 }
 
 func TestVectorHandler_Delete(t *testing.T) {
@@ -972,7 +1020,7 @@ func TestVectorHandler_Delete(t *testing.T) {
 			},
 			id:             "v1",
 			expectedStatus: http.StatusOK,
-			expectedBody:   `{"status":"deleted","id":"v1"}`,
+			expectedBody:   `{"success":true,"data":{"status":"deleted","id":"v1"}}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				assert.NotContains(t, idx.Store, "v1")
 			},
@@ -982,7 +1030,7 @@ func TestVectorHandler_Delete(t *testing.T) {
 			setup:          func(idx *core.VectorIndex) {},
 			id:             "missing",
 			expectedStatus: http.StatusNotFound,
-			expectedBody:   `{"error":"vector not found"}`,
+			expectedBody:   `{"success":false,"data":null,"error":"vector not found"}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				assert.Empty(t, idx.Store)
 			},
@@ -992,7 +1040,7 @@ func TestVectorHandler_Delete(t *testing.T) {
 			setup:          func(idx *core.VectorIndex) {},
 			id:             "",
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   `{"error":"id is required"}`,
+			expectedBody:   `{"success":false,"data":null,"error":"id is required"}`,
 			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
 				assert.Empty(t, idx.Store)
 			},
@@ -1044,7 +1092,7 @@ func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 		handler.Delete(c)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.JSONEq(t, `{"status":"deleted","id":"vec/with/slashes"}`, w.Body.String())
+		assert.JSONEq(t, `{"success":true,"data":{"status":"deleted","id":"vec/with/slashes"}}`, w.Body.String())
 		assert.NotContains(t, idx.Store, specialID)
 	})
 
@@ -1069,7 +1117,7 @@ func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 		c2.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/v1", nil)
 		handler.Delete(c2)
 		assert.Equal(t, http.StatusNotFound, w2.Code)
-		assert.JSONEq(t, `{"error":"vector not found"}`, w2.Body.String())
+		assert.JSONEq(t, `{"success":false,"data":null,"error":"vector not found"}`, w2.Body.String())
 	})
 }
 
@@ -1098,10 +1146,14 @@ func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var results []core.SearchResult
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                `json:"success"`
+		Data    []core.SearchResult `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
+	require.True(t, env.Success)
 
-	require.Len(t, results, 1)
-	assert.Equal(t, "v1", results[0].ID)
+	require.Len(t, env.Data, 1)
+	assert.Equal(t, "v1", env.Data[0].ID)
 }

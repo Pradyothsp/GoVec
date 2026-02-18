@@ -35,7 +35,7 @@ func TestHealthEndpoint(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Health endpoint should return 200")
-	assert.JSONEq(t, `{"status":"ok"}`, w.Body.String(), "Health response should be correct")
+	assert.JSONEq(t, `{"success":true,"data":{"status":"ok"}}`, w.Body.String(), "Health response should be correct")
 }
 
 func TestRouterEndpointRegistration(t *testing.T) {
@@ -82,7 +82,7 @@ func TestRouterEndpointRegistration(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code, "DELETE /api/v1/vectors/:id should exist and return 200")
-		assert.JSONEq(t, `{"status":"deleted","id":"delete_test"}`, w.Body.String())
+		assert.JSONEq(t, `{"success":true,"data":{"status":"deleted","id":"delete_test"}}`, w.Body.String())
 	})
 
 	t.Run("DELETE_vectors_id_not_found", func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestRouterEndpointRegistration(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code, "DELETE with unknown id should return 404")
-		assert.JSONEq(t, `{"error":"vector not found"}`, w.Body.String())
+		assert.JSONEq(t, `{"success":false,"data":null,"error":"vector not found"}`, w.Body.String())
 	})
 
 	t.Run("unknown_route_returns_404", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestRouterMultipleRequests(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.JSONEq(t, `{"status":"inserted"}`, w.Body.String())
+		assert.JSONEq(t, `{"success":true,"data":{"status":"inserted"}}`, w.Body.String())
 	}
 
 	assert.Len(t, idx.Store, len(vectors), "All vectors should be in the index")

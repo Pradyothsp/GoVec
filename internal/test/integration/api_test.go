@@ -39,7 +39,7 @@ func (s *APITestSuite) TestHealthEndpoint() {
 	s.router.ServeHTTP(w, req)
 
 	s.Assert().Equal(http.StatusOK, w.Code)
-	s.Assert().JSONEq(`{"status":"ok"}`, w.Body.String())
+	s.Assert().JSONEq(`{"success":true,"data":{"status":"ok"}}`, w.Body.String())
 }
 
 func (s *APITestSuite) TestVectorInsertFlow() {
@@ -82,7 +82,7 @@ func (s *APITestSuite) TestVectorInsertFlow() {
 		s.router.ServeHTTP(w, req)
 
 		s.Assert().Equal(http.StatusCreated, w.Code, "Insert should succeed for %s", vec.id)
-		s.Assert().JSONEq(`{"status":"inserted"}`, w.Body.String())
+		s.Assert().JSONEq(`{"success":true,"data":{"status":"inserted"}}`, w.Body.String())
 	}
 
 	s.Assert().Len(s.index.Store, len(vectors), "All vectors should be in the index")
@@ -391,9 +391,14 @@ func (s *APITestSuite) TestInsertAndSearchFlow() {
 	// Step 3: Verify search results
 	s.Assert().Equal(http.StatusOK, searchW.Code, "Search should succeed")
 
-	var results []map[string]interface{}
-	err = json.Unmarshal(searchW.Body.Bytes(), &results)
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	err = json.Unmarshal(searchW.Body.Bytes(), &env)
 	s.Require().NoError(err, "Should be able to parse search results")
+	s.Require().True(env.Success)
+	results := env.Data
 
 	// Verify we got exactly k results
 	s.Assert().Len(results, 3, "Should return exactly k=3 results")
@@ -472,11 +477,15 @@ func (s *APITestSuite) TestSearchWithDifferentKValues() {
 
 			s.Assert().Equal(http.StatusOK, w.Code)
 
-			var results []map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &results)
+			var env struct {
+				Success bool                     `json:"success"`
+				Data    []map[string]interface{} `json:"data"`
+			}
+			err := json.Unmarshal(w.Body.Bytes(), &env)
 			s.Require().NoError(err)
+			s.Require().True(env.Success)
 
-			s.Assert().Len(results, tc.expectedCount, "Should return correct number of results for %s", tc.name)
+			s.Assert().Len(env.Data, tc.expectedCount, "Should return correct number of results for %s", tc.name)
 		})
 	}
 }
@@ -498,11 +507,15 @@ func (s *APITestSuite) TestSearchEmptyIndex() {
 
 	s.Assert().Equal(http.StatusOK, w.Code, "Empty index search should succeed")
 
-	var results []map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &results)
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &env)
 	s.Require().NoError(err)
+	s.Require().True(env.Success)
 
-	s.Assert().Empty(results, "Should return empty array for empty index")
+	s.Assert().Empty(env.Data, "Should return empty array for empty index")
 }
 
 func (s *APITestSuite) TestSearchValidationErrors() {
@@ -600,8 +613,13 @@ func (s *APITestSuite) TestFilteredSearch_ByCategory() {
 
 	s.Assert().Equal(http.StatusOK, w.Code)
 
-	var results []map[string]interface{}
-	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Require().True(env.Success)
+	results := env.Data
 
 	s.Assert().Len(results, 2)
 	resultIDs := make([]string, len(results))
@@ -640,9 +658,13 @@ func (s *APITestSuite) TestFilteredSearch_NoMatches() {
 
 	s.Assert().Equal(http.StatusOK, w.Code)
 
-	var results []map[string]interface{}
-	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
-	s.Assert().Empty(results)
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Require().True(env.Success)
+	s.Assert().Empty(env.Data)
 }
 
 func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
@@ -681,10 +703,14 @@ func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
 		s.router.ServeHTTP(w, req)
 
 		s.Assert().Equal(http.StatusOK, w.Code)
-		var results []map[string]interface{}
-		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
-		s.Assert().Len(results, 1)
-		s.Assert().Equal("doc1", results[0]["ID"])
+		var env struct {
+			Success bool                     `json:"success"`
+			Data    []map[string]interface{} `json:"data"`
+		}
+		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+		s.Require().True(env.Success)
+		s.Assert().Len(env.Data, 1)
+		s.Assert().Equal("doc1", env.Data[0]["ID"])
 	})
 
 	// Filter cat=tech → doc1 and doc2
@@ -701,10 +727,14 @@ func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
 		s.router.ServeHTTP(w, req)
 
 		s.Assert().Equal(http.StatusOK, w.Code)
-		var results []map[string]interface{}
-		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
-		s.Assert().Len(results, 2)
-		resultIDs := []string{results[0]["ID"].(string), results[1]["ID"].(string)}
+		var env struct {
+			Success bool                     `json:"success"`
+			Data    []map[string]interface{} `json:"data"`
+		}
+		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+		s.Require().True(env.Success)
+		s.Assert().Len(env.Data, 2)
+		resultIDs := []string{env.Data[0]["ID"].(string), env.Data[1]["ID"].(string)}
 		s.Assert().Contains(resultIDs, "doc1")
 		s.Assert().Contains(resultIDs, "doc2")
 	})
@@ -749,8 +779,13 @@ func (s *APITestSuite) TestFilteredSearch_FilterWithKLimit() {
 
 	s.Assert().Equal(http.StatusOK, w.Code)
 
-	var results []map[string]interface{}
-	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Require().True(env.Success)
+	results := env.Data
 	s.Assert().Len(results, 2)
 
 	// Verify sorted by score descending
@@ -787,9 +822,13 @@ func (s *APITestSuite) TestFilteredSearch_NoFilterField() {
 
 	s.Assert().Equal(http.StatusOK, w.Code)
 
-	var results []map[string]interface{}
-	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
-	s.Assert().Len(results, 3, "No filter should return all results")
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Require().True(env.Success)
+	s.Assert().Len(env.Data, 3, "No filter should return all results")
 }
 
 func (s *APITestSuite) TestDeleteFlow() {
@@ -810,7 +849,7 @@ func (s *APITestSuite) TestDeleteFlow() {
 	w = httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 	s.Assert().Equal(http.StatusOK, w.Code)
-	s.Assert().JSONEq(`{"status":"deleted","id":"to_delete"}`, w.Body.String())
+	s.Assert().JSONEq(`{"success":true,"data":{"status":"deleted","id":"to_delete"}}`, w.Body.String())
 
 	// Step 3: Verify the index no longer contains the ID
 	s.Assert().NotContains(s.index.Store, "to_delete")
@@ -820,7 +859,7 @@ func (s *APITestSuite) TestDeleteFlow() {
 	w = httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 	s.Assert().Equal(http.StatusNotFound, w.Code)
-	s.Assert().JSONEq(`{"error":"vector not found"}`, w.Body.String())
+	s.Assert().JSONEq(`{"success":false,"data":null,"error":"vector not found"}`, w.Body.String())
 }
 
 func (s *APITestSuite) TestInsertDeleteSearchFlow() {
@@ -859,8 +898,13 @@ func (s *APITestSuite) TestInsertDeleteSearchFlow() {
 	s.router.ServeHTTP(w, req)
 
 	s.Assert().Equal(http.StatusOK, w.Code)
-	var results []map[string]interface{}
-	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &results))
+	var env struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Require().True(env.Success)
+	results := env.Data
 	s.Assert().Len(results, 2, "Should have 2 results after deletion")
 
 	resultIDs := make([]string, len(results))
@@ -878,7 +922,7 @@ func (s *APITestSuite) TestDeleteNonExistentVector() {
 	s.router.ServeHTTP(w, req)
 
 	s.Assert().Equal(http.StatusNotFound, w.Code)
-	s.Assert().JSONEq(`{"error":"vector not found"}`, w.Body.String())
+	s.Assert().JSONEq(`{"success":false,"data":null,"error":"vector not found"}`, w.Body.String())
 }
 
 func (s *APITestSuite) TestConcurrentDeletes() {

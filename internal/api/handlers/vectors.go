@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Pradyothsp/govec/internal/api/response"
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
@@ -33,11 +34,6 @@ type DeleteResponse struct {
 	ID     string `json:"id" example:"vec-001"`
 }
 
-// ErrorResponse is the JSON response for all error cases.
-type ErrorResponse struct {
-	Error string `json:"error" example:"id is required"`
-}
-
 // VectorHandler holds a reference to the core logic
 type VectorHandler struct {
 	Index *core.VectorIndex
@@ -55,19 +51,19 @@ func NewVectorHandler(index *core.VectorIndex) *VectorHandler {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      CreateVectorRequest  true  "Vector payload"
-// @Success      201   {object}  InsertResponse
-// @Failure      400   {object}  ErrorResponse
+// @Success      201   {object}  response.Response{data=handlers.InsertResponse}
+// @Failure      400   {object}  response.Response
 // @Router       /api/v1/vectors [post]
 func (h *VectorHandler) Insert(c *gin.Context) {
 	var req CreateVectorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	h.Index.Insert(req.ID, req.Vector, req.Metadata)
 
-	c.JSON(http.StatusCreated, gin.H{"status": "inserted"})
+	response.OK(c, http.StatusCreated, InsertResponse{Status: "inserted"})
 }
 
 // Search handles POST /api/v1/vectors/search
@@ -77,29 +73,33 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      SearchRequest     true  "Search payload"
-// @Success      200   {array}   core.SearchResult
-// @Failure      400   {object}  ErrorResponse
-// @Failure      500   {object}  ErrorResponse
+// @Success      200   {object}  response.Response{data=[]core.SearchResult}
+// @Failure      400   {object}  response.Response
+// @Failure      500   {object}  response.Response
 // @Router       /api/v1/vectors/search [post]
 func (h *VectorHandler) Search(c *gin.Context) {
 	var req SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.K < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "k cannot be negative"})
+		response.Fail(c, http.StatusBadRequest, "k cannot be negative")
 		return
 	}
 
 	results, err := h.Index.Search(req.Vector, req.K, req.Filters)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, results)
+	if results == nil {
+		results = []core.SearchResult{}
+	}
+
+	response.OK(c, http.StatusOK, results)
 }
 
 // Delete handles DELETE /api/v1/vectors/:id
@@ -108,22 +108,22 @@ func (h *VectorHandler) Search(c *gin.Context) {
 // @Tags         vectors
 // @Produce      json
 // @Param        id   path      string            true  "Vector ID"
-// @Success      200  {object}  DeleteResponse
-// @Failure      400  {object}  ErrorResponse
-// @Failure      404  {object}  ErrorResponse
+// @Success      200  {object}  response.Response{data=handlers.DeleteResponse}
+// @Failure      400  {object}  response.Response
+// @Failure      404  {object}  response.Response
 // @Router       /api/v1/vectors/{id} [delete]
 func (h *VectorHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		response.Fail(c, http.StatusBadRequest, "id is required")
 		return
 	}
 
 	success := h.Index.Delete(id)
 	if !success {
-		c.JSON(http.StatusNotFound, gin.H{"error": "vector not found"})
+		response.Fail(c, http.StatusNotFound, "vector not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "deleted", "id": id})
+	response.OK(c, http.StatusOK, DeleteResponse{Status: "deleted", ID: id})
 }
