@@ -61,8 +61,10 @@ linters:
         text: "avoid meaningless package names"
 
     # Example code does not need production-level error handling
+    # Auto-generated swagger docs should not be linted
     paths:
       - "^examples/"
+      - "^docs/"
 
 formatters:
   enable:
