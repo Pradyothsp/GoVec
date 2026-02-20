@@ -26,6 +26,7 @@ func (s ServerConfig) Address() string {
 // StorageConfig holds persistence configuration
 type StorageConfig struct {
 	DataPath         string        `yaml:"data_path"`
+	WalPath          string        `yaml:"wal_path"`
 	AutoSaveEnabled  bool          `yaml:"auto_save_enabled"`
 	AutoSaveInterval time.Duration `yaml:"auto_save_interval"`
 }
@@ -41,6 +42,7 @@ func DefaultConfig() *Config {
 		},
 		Storage: StorageConfig{
 			DataPath:         "./govec_data.bin",
+			WalPath:          "./govec.wal",
 			AutoSaveEnabled:  true,
 			AutoSaveInterval: 60 * time.Second,
 		},

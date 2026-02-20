@@ -16,27 +16,41 @@ func (idx *VectorIndex) SaveToFile(path string) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// 1. Create a temporary file (safer than overwriting directly)
-	f, err := os.Create(path + ".tmp") //nolint:gosec // path comes from operator config, not user input
+	// PHASE 1: Clear WAL first (fail fast if this fails)
+	if idx.wal != nil {
+		if err := idx.wal.Clear(); err != nil {
+			return err
+		}
+	}
+
+	// PHASE 2: Create temporary snapshot file
+	tmpPath := path + ".tmp"
+	f, err := os.Create(tmpPath) //nolint:gosec // path comes from operator config, not user input
 	if err != nil {
 		return err
 	}
 
-	// 2. Encode the entire map to the file using GOB (Go Binary)
+	// Encode the entire map to the file using GOB (Go Binary)
 	encoder := gob.NewEncoder(f)
 	if err := encoder.Encode(idx.Store); err != nil {
-		_ = f.Close() //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
 		return err
 	}
 
-	// 3. Close before rename — required on some OSes and ensures flush
+	// Close before rename — required on some OSes and ensures flush
 	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
 		return err
 	}
 
-	// 4. Rename temp file to actual file (Atomic operation)
-	// This prevents corruption if the server crashes mid-write
-	return os.Rename(path+".tmp", path)
+	// PHASE 3: Atomic rename (commit)
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	return nil
 }
 
 // LoadFromFile reads the index from disk.

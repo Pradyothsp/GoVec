@@ -50,7 +50,7 @@ gotestsum --version      # Should show gotestsum version
 go version               # Should show Go 1.26.0 or compatible
 golangci-lint --version  # Should show golangci-lint version
 govulncheck -version     # Should show govulncheck version
-task test                # Should show 255 passing tests
+task test                # Should show 377 passing tests
 ```
 
 ## Development Tooling
@@ -212,7 +212,7 @@ The project has comprehensive test coverage organized by package:
 - Overwrite behavior
 - Edge cases (empty ID, special characters, nil vectors, large dimensions)
 
-**internal/core/persistence_test.go** (26 tests, NEW)
+**internal/core/persistence_test.go** (26 tests)
 - Save/Load functionality with GOB encoding
 - Data integrity for complex nested metadata
 - Large vectors (1536D, 4096D) persistence
@@ -220,6 +220,24 @@ The project has comprehensive test coverage organized by package:
 - File operations (overwrite, invalid paths, corrupted files)
 - Atomic write verification with temp file cleanup
 - Edge cases (empty index, special characters, long paths)
+
+**internal/core/wal_test.go** (15 tests, NEW)
+- WAL constructor and file initialization
+- WriteEntry operations (INSERT, DELETE, large vectors, special characters)
+- Clear operations (truncate, seek position)
+- Close and cleanup operations
+- Concurrent write operations
+
+**internal/core/wal_replay_test.go** (12 tests, NEW)
+- ReplayWAL basic operations (empty, missing, single insert/delete)
+- Multi-entry replay (inserts, deletes, updates, complex sequences)
+- Error handling (malformed JSON, partial entries, unknown actions, corrupted files)
+
+**internal/core/index_wal_integration_test.go** (10 tests, NEW)
+- Insert flow with WAL write-ahead guarantee
+- Delete flow with WAL integration
+- Snapshot + Clear workflow
+- Recovery scenarios (snapshot + WAL, WAL-only)
 
 **internal/api/handlers/vectors_test.go** (50 tests)
 - HTTP handler testing
@@ -246,6 +264,14 @@ The project has comprehensive test coverage organized by package:
 - Large dataset persistence (1000 vectors)
 - Auto-save simulation
 
+**internal/test/integration/wal_recovery_test.go** (10 tests, NEW)
+- E2E crash recovery after inserts
+- Mixed operations recovery (INSERT, DELETE, UPDATE)
+- Snapshot + WAL recovery scenarios
+- Concurrent operations during crash
+- Corrupted WAL graceful handling
+- Missing snapshot recovery
+
 **internal/config/config_test.go** (2 tests)
 - Default configuration values
 - ServerConfig.Address() helper method
@@ -263,7 +289,9 @@ The project has comprehensive test coverage organized by package:
 - Partial YAML configuration
 - Invalid configuration handling
 
-**Total: 255 tests, 98.1% coverage in internal/config, 96.1% in internal/core, 100% in internal/api**
+**Total: 377 tests (47 new WAL tests), 98.1% coverage in internal/config, 97%+ in internal/core, 100% in internal/api**
+
+**Known Bugs**: See `WAL_BUGS.md` for documented issues discovered through WAL testing (5 bugs: 1 critical, 2 high, 2 medium)
 
 ### Dependencies
 
@@ -533,6 +561,11 @@ Invalid configuration will cause the server to exit with a clear error message.
   - SaveToFile/LoadFromFile with atomic writes
   - Configurable auto-save interval
   - Graceful shutdown saves data to disk
+- ✅ **Write-Ahead Log (WAL) for crash recovery**
+  - JSON-based WAL for durability
+  - Automatic replay on startup
+  - Comprehensive test coverage (47 tests)
+  - E2E crash recovery scenarios
 - ✅ **Vector search/query functionality**
   - Cosine similarity search
   - Top-K nearest neighbors
@@ -542,7 +575,7 @@ Invalid configuration will cause the server to exit with a clear error message.
   - DDD architecture with value objects and validation
   - Fail-fast validation at startup
   - 98.1% test coverage
-- ✅ Comprehensive test suite (255 tests, 98.1% coverage in config, 96.1% in core)
+- ✅ Comprehensive test suite (377 tests, 98.1% coverage in config, 97%+ in core)
 - ✅ Modern development tooling (Task runner, gotestsum)
 - ✅ Health check endpoint
 - ✅ Clean architecture with dependency injection
@@ -564,11 +597,11 @@ Invalid configuration will cause the server to exit with a clear error message.
 
 **Test Coverage:**
 - internal/config: 98.1% (49 tests)
-- internal/core: 96.1% (76 tests)
+- internal/core: 97%+ (123 tests, including 47 WAL tests)
 - internal/api: 100% (13 tests)
 - internal/api/handlers: 100% (50 tests)
-- internal/test/integration: 67 tests
-- Total: 255 tests passing
+- internal/test/integration: 77 tests (including 10 WAL recovery tests)
+- Total: 377 tests passing
 
 ## Development Workflow
 

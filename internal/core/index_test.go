@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewVectorIndex(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	require.NotNil(t, idx, "NewVectorIndex should return non-nil")
 	require.NotNil(t, idx.Store, "Store should be initialized")
@@ -72,7 +72,7 @@ func TestVectorIndex_Insert(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			idx := NewVectorIndex()
+			idx := newTestIndex(t)
 			idx.Insert(tt.id, tt.vector, tt.metadata)
 
 			require.Contains(t, idx.Store, tt.id, "vector should be in store")
@@ -86,7 +86,7 @@ func TestVectorIndex_Insert(t *testing.T) {
 }
 
 func TestVectorIndex_Insert_Overwrite(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// First insert
 	idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, map[string]any{"version": 1})
@@ -105,7 +105,7 @@ func TestVectorIndex_Insert_Overwrite(t *testing.T) {
 }
 
 func TestVectorIndex_Insert_MultipleVectors(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	vectors := []struct {
 		id     string
@@ -133,7 +133,7 @@ func TestVectorIndex_Insert_MultipleVectors(t *testing.T) {
 }
 
 func TestVectorIndex_Insert_VariousMetadataTypes(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	testCases := []struct {
 		name     string
@@ -199,7 +199,7 @@ func TestVectorIndex_Insert_VariousMetadataTypes(t *testing.T) {
 }
 
 func TestVectorIndex_Insert_Concurrency(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	var wg sync.WaitGroup
 	numGoroutines := 100
 
@@ -230,7 +230,7 @@ func TestVectorIndex_Insert_Concurrency(t *testing.T) {
 }
 
 func TestVectorIndex_Insert_ConcurrentOverwrites(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	var wg sync.WaitGroup
 	numGoroutines := 50
 	vecID := "shared_vector"
@@ -254,7 +254,7 @@ func TestVectorIndex_Insert_ConcurrentOverwrites(t *testing.T) {
 
 func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 	t.Run("empty_id", func(t *testing.T) {
-		idx := NewVectorIndex()
+		idx := newTestIndex(t)
 		idx.Insert("", []float32{1.0, 2.0}, nil)
 
 		require.Contains(t, idx.Store, "", "Empty ID should be allowed")
@@ -262,7 +262,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("special_characters_in_id", func(t *testing.T) {
-		idx := NewVectorIndex()
+		idx := newTestIndex(t)
 		specialIDs := []string{
 			"vec-with-dashes",
 			"vec_with_underscores",
@@ -284,7 +284,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("nil_vector", func(t *testing.T) {
-		idx := NewVectorIndex()
+		idx := newTestIndex(t)
 		idx.Insert("nil_vec", nil, map[string]any{"type": "nil"})
 
 		require.Contains(t, idx.Store, "nil_vec")
@@ -292,7 +292,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("very_large_dimension", func(t *testing.T) {
-		idx := NewVectorIndex()
+		idx := newTestIndex(t)
 		largeVec := make([]float32, 4096)
 		for i := range largeVec {
 			largeVec[i] = float32(i)
@@ -306,7 +306,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 }
 
 func TestVectorIndex_Search_EmptyIndex(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	query := []float32{1.0, 2.0, 3.0}
 
 	results, err := idx.Search(query, 5, nil)
@@ -316,7 +316,7 @@ func TestVectorIndex_Search_EmptyIndex(t *testing.T) {
 }
 
 func TestVectorIndex_Search_SingleVector(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
 
 	query := []float32{1.0, 2.0, 3.0}
@@ -330,7 +330,7 @@ func TestVectorIndex_Search_SingleVector(t *testing.T) {
 }
 
 func TestVectorIndex_Search_MultipleVectors(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Insert vectors with different similarities to query
 	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, map[string]any{"type": "identical"})
@@ -359,7 +359,7 @@ func TestVectorIndex_Search_MultipleVectors(t *testing.T) {
 }
 
 func TestVectorIndex_Search_WithLimit(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Insert 10 vectors (start from 1 to avoid zero vector)
 	for i := 1; i <= 10; i++ {
@@ -391,7 +391,7 @@ func TestVectorIndex_Search_WithLimit(t *testing.T) {
 }
 
 func TestVectorIndex_Search_WithZeroLimit(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	for i := 1; i <= 5; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
@@ -406,7 +406,7 @@ func TestVectorIndex_Search_WithZeroLimit(t *testing.T) {
 }
 
 func TestVectorIndex_Search_EmptyQuery(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	idx.Insert("v1", []float32{1.0, 2.0}, nil)
 
 	query := []float32{}
@@ -418,7 +418,7 @@ func TestVectorIndex_Search_EmptyQuery(t *testing.T) {
 }
 
 func TestVectorIndex_Search_DimensionMismatch(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, nil)
 	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, nil)
 
@@ -432,7 +432,7 @@ func TestVectorIndex_Search_DimensionMismatch(t *testing.T) {
 }
 
 func TestVectorIndex_Search_ResultsIncludeMetadata(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	metadata := map[string]any{
 		"category": "test",
@@ -456,7 +456,7 @@ func TestVectorIndex_Search_ResultsIncludeMetadata(t *testing.T) {
 }
 
 func TestVectorIndex_Search_SortingOrder(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Insert vectors with known similarity scores to query [1,0,0]
 	idx.Insert("high", []float32{1.0, 0.0, 0.0}, nil)      // score = 1.0
@@ -481,7 +481,7 @@ func TestVectorIndex_Search_SortingOrder(t *testing.T) {
 }
 
 func TestVectorIndex_Search_IdenticalVectors(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Insert multiple identical vectors
 	for i := 0; i < 3; i++ {
@@ -501,7 +501,7 @@ func TestVectorIndex_Search_IdenticalVectors(t *testing.T) {
 }
 
 func TestVectorIndex_Search_Concurrency(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Insert test vectors (start from 1 to avoid zero vector)
 	for i := 1; i <= 100; i++ {
@@ -533,7 +533,7 @@ func TestVectorIndex_Search_Concurrency(t *testing.T) {
 }
 
 func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Pre-populate with some vectors (start from 1 to avoid zero vector)
 	for i := 1; i <= 50; i++ {
@@ -569,7 +569,7 @@ func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
 }
 
 func TestVectorIndex_Search_HighDimensional(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	// Test with 1536-dimensional vectors (OpenAI embedding size)
 	vec1 := make([]float32, 1536)
@@ -604,7 +604,7 @@ func TestVectorIndex_Search_HighDimensional(t *testing.T) {
 }
 
 func TestVectorIndex_Search_NilMetadata(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	idx.Insert("v1", []float32{1.0, 2.0}, nil)
 	idx.Insert("v2", []float32{2.0, 3.0}, nil)
 
@@ -621,7 +621,7 @@ func TestVectorIndex_Search_NilMetadata(t *testing.T) {
 }
 
 func TestVectorIndex_Search_WithFilters(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	idx.Insert("books1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"category": "books", "active": true, "score": float64(90)})
 	idx.Insert("books2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"category": "books", "active": false, "score": float64(80)})
@@ -708,7 +708,7 @@ func TestVectorIndex_Search_WithFilters(t *testing.T) {
 }
 
 func TestVectorIndex_Search_FilterReducesResults(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	idx.Insert("a1", []float32{1.0, 0.0}, map[string]interface{}{"type": "A"})
 	idx.Insert("a2", []float32{0.9, 0.1}, map[string]interface{}{"type": "A"})
@@ -733,7 +733,7 @@ func TestVectorIndex_Search_FilterReducesResults(t *testing.T) {
 }
 
 func TestVectorIndex_Search_FilterWithLimit(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 
 	idx.Insert("close1", []float32{1.0, 0.0}, map[string]interface{}{"tag": "keep"})
 	idx.Insert("close2", []float32{0.9, 0.1}, map[string]interface{}{"tag": "keep"})
@@ -751,7 +751,7 @@ func TestVectorIndex_Search_FilterWithLimit(t *testing.T) {
 }
 
 func TestVectorIndex_Search_NilMetadataWithFilter(t *testing.T) {
-	idx := NewVectorIndex()
+	idx := newTestIndex(t)
 	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"label": "x"})
 	idx.Insert("v2", []float32{0.9, 0.1}, nil)
 

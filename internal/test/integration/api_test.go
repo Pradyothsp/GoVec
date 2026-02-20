@@ -14,6 +14,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
 type APITestSuite struct {
@@ -24,7 +25,7 @@ type APITestSuite struct {
 
 func (s *APITestSuite) SetupTest() {
 	gin.SetMode(gin.TestMode)
-	s.index = core.NewVectorIndex()
+	s.index = testutil.NewTestIndex(s.T())
 	s.router = api.SetupRouter(s.index)
 }
 

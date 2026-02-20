@@ -61,7 +61,11 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 		return
 	}
 
-	h.Index.Insert(req.ID, req.Vector, req.Metadata)
+	err := h.Index.Insert(req.ID, req.Vector, req.Metadata)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	response.OK(c, http.StatusCreated, InsertResponse{Status: "inserted"})
 }
@@ -119,7 +123,12 @@ func (h *VectorHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	success := h.Index.Delete(id)
+	success, err := h.Index.Delete(id)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	if !success {
 		response.Fail(c, http.StatusNotFound, "vector not found")
 		return

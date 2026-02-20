@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"log"
 	"sort"
 	"sync"
 )
@@ -10,6 +11,7 @@ import (
 type VectorIndex struct {
 	mu    sync.RWMutex
 	Store map[string]*VectorNode
+	wal   *WAL
 }
 
 // SearchResult represents a single match
@@ -20,21 +22,39 @@ type SearchResult struct {
 }
 
 // NewVectorIndex creates an empty VectorIndex ready for use.
-func NewVectorIndex() *VectorIndex {
+func NewVectorIndex(wal *WAL) *VectorIndex {
 	return &VectorIndex{
 		Store: make(map[string]*VectorNode),
+		wal:   wal,
 	}
 }
 
 // Insert adds or updates a vector in the index with thread-safety
-func (idx *VectorIndex) Insert(id string, vec []float32, meta map[string]any) {
+func (idx *VectorIndex) Insert(id string, vec []float32, meta map[string]any) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+
+	// Update WAL
+	err := idx.wal.WriteEntry(WALEntry{
+		Action: WALActionInsert,
+		ID:     id,
+		Vector: vec,
+		Meta:   meta,
+	})
+
+	if err != nil {
+		log.Printf("Failed to write WAL entry: %v", err)
+		return err // If disk fails, we fail the request
+	}
+
+	// Update memory
 	idx.Store[id] = &VectorNode{
 		ID:       id,
 		Vector:   vec,
 		Metadata: meta,
 	}
+
+	return nil
 }
 
 // Search returns the top-limit nearest neighbours to query using cosine similarity.
@@ -77,15 +97,26 @@ func (idx *VectorIndex) Search(query []float32, limit int, filters map[string]in
 }
 
 // Delete removes a vector from the index by ID
-func (idx *VectorIndex) Delete(id string) bool {
+func (idx *VectorIndex) Delete(id string) (bool, error) {
 	idx.mu.Lock() // BLOCK everyone (Reads & Writes)
 	defer idx.mu.Unlock()
 
 	_, exists := idx.Store[id]
 	if !exists {
-		return false
+		return false, nil
 	}
 
+	// Update WAL
+	err := idx.wal.WriteEntry(WALEntry{
+		Action: WALActionDelete,
+		ID:     id,
+	})
+	if err != nil {
+		log.Printf("Failed to write WAL entry: %v", err)
+		return false, err
+	}
+
+	// Update memory
 	delete(idx.Store, id) // The built-in Go delete function
-	return true
+	return true, nil
 }

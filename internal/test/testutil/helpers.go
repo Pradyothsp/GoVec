@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -15,21 +16,34 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
-// NewTestVectorIndex creates a pre-populated VectorIndex for testing
-func NewTestVectorIndex() *core.VectorIndex {
-	idx := core.NewVectorIndex()
+// NewTestIndex creates an empty VectorIndex backed by a temp WAL for testing.
+// The WAL is closed automatically via t.Cleanup.
+func NewTestIndex(t testing.TB) *core.VectorIndex {
+	t.Helper()
+	wal, err := core.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	if err != nil {
+		t.Fatalf("NewTestIndex: failed to create WAL: %v", err)
+	}
+	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
+	return core.NewVectorIndex(wal)
+}
 
-	idx.Insert("test1", []float32{1.0, 2.0, 3.0}, map[string]any{
+// NewTestVectorIndex creates a pre-populated VectorIndex for testing.
+func NewTestVectorIndex(t testing.TB) *core.VectorIndex {
+	t.Helper()
+	idx := NewTestIndex(t)
+
+	_ = idx.Insert("test1", []float32{1.0, 2.0, 3.0}, map[string]any{ //nolint:errcheck // test helper
 		"label": "first",
 		"type":  "test",
 	})
 
-	idx.Insert("test2", []float32{4.0, 5.0, 6.0}, map[string]any{
+	_ = idx.Insert("test2", []float32{4.0, 5.0, 6.0}, map[string]any{ //nolint:errcheck // test helper
 		"label": "second",
 		"type":  "test",
 	})
 
-	idx.Insert("test3", []float32{7.0, 8.0, 9.0}, nil)
+	_ = idx.Insert("test3", []float32{7.0, 8.0, 9.0}, nil) //nolint:errcheck // test helper
 
 	return idx
 }
@@ -160,7 +174,7 @@ func PopulateIndexWithVectors(idx *core.VectorIndex, count int) {
 			"type":  "test_vector",
 			"batch": "populated",
 		}
-		idx.Insert(id, vec, meta)
+		_ = idx.Insert(id, vec, meta) //nolint:errcheck // test helper
 	}
 }
 
@@ -191,4 +205,88 @@ func CreateReadOnlyFile(t *testing.T, path string) {
 	t.Helper()
 	err := os.WriteFile(path, []byte("read-only content"), 0o444) //nolint:gosec // intentionally setting read-only permissions for test
 	require.NoError(t, err, "Should be able to create read-only file")
+}
+
+// =============================================================================
+// WAL Test Helpers
+// =============================================================================
+
+// NewWALWithPath creates a WAL at a specific path for testing
+func NewWALWithPath(t testing.TB, path string) *core.WAL {
+	t.Helper()
+	wal, err := core.NewWAL(path)
+	require.NoError(t, err, "Failed to create WAL at path: %s", path)
+	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
+	return wal
+}
+
+// WriteWALEntry manually writes entries for test setup
+func WriteWALEntry(t testing.TB, path string, entry core.WALEntry) {
+	t.Helper()
+	wal := NewWALWithPath(t, path)
+	err := wal.WriteEntry(entry)
+	require.NoError(t, err, "Failed to write WAL entry")
+}
+
+// ReadWALEntries reads all entries from a WAL file
+func ReadWALEntries(t testing.TB, path string) []core.WALEntry {
+	t.Helper()
+
+	file, err := os.Open(path) //nolint:gosec // path is test-controlled
+	require.NoError(t, err, "Failed to open WAL file")
+	defer file.Close() //nolint:errcheck // read-only test operation
+
+	var entries []core.WALEntry
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var entry core.WALEntry
+		err := json.Unmarshal(scanner.Bytes(), &entry)
+		require.NoError(t, err, "Failed to unmarshal WAL entry")
+		entries = append(entries, entry)
+	}
+	require.NoError(t, scanner.Err(), "Scanner error reading WAL")
+
+	return entries
+}
+
+// AssertWALContainsEntries verifies entry count
+func AssertWALContainsEntries(t testing.TB, path string, expectedCount int) {
+	t.Helper()
+	entries := ReadWALEntries(t, path)
+	assert.Len(t, entries, expectedCount, "WAL should contain %d entries", expectedCount)
+}
+
+// AssertWALEmpty verifies WAL file is empty (0 bytes)
+func AssertWALEmpty(t testing.TB, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err, "Failed to stat WAL file")
+	assert.Equal(t, int64(0), info.Size(), "WAL file should be empty")
+}
+
+// MakeWALReadOnly sets file permissions for failure testing
+func MakeWALReadOnly(t testing.TB, path string) {
+	t.Helper()
+	err := os.Chmod(path, 0o444) //nolint:gosec // intentionally read-only for test
+	require.NoError(t, err, "Failed to make WAL read-only")
+}
+
+// CorruptWALFile creates corrupted WAL for error testing
+func CorruptWALFile(t testing.TB, path, corruptionType string) {
+	t.Helper()
+
+	var data []byte
+	switch corruptionType {
+	case "binary":
+		data = []byte{0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA}
+	case "malformed_json":
+		data = []byte(`{"action":"INSERT","id":"test1"`)
+	case "partial":
+		data = []byte(`{"action":"INSERT","id":"vec1"}` + "\n")
+	default:
+		data = []byte("corrupted data\n")
+	}
+
+	err := os.WriteFile(path, data, 0o644) //nolint:gosec // test file with intentional corruption
+	require.NoError(t, err, "Failed to create corrupted WAL file")
 }

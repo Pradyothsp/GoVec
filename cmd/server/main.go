@@ -21,23 +21,43 @@ import (
 // @BasePath        /
 // @schemes         http
 func main() {
-	// 1. Load configuration
+	// Load configuration
 	cfg := loadConfiguration()
 
-	// 2. Initialize components
+	// Initialize WAL
+	wal, err := core.NewWAL(cfg.Storage.WalPath)
+	if err != nil {
+		log.Fatal("Failed to open WAL:", err)
+	}
+	defer wal.Close() //nolint:errcheck // best-effort cleanup on shutdown
+
+	// Initialize components
 	log.Println("Starting server...")
-	index := core.NewVectorIndex()
+	index := core.NewVectorIndex(wal)
 	router := api.SetupRouter(index)
 
-	// 3. Load existing data (Persistence)
-	log.Println("📂 Loading data from disk...")
+	// RECOVERY SEQUENCE
+	// Step 1: Load the base snapshot from DataPath (GOB format)
+	log.Println("📂 Loading snapshot from disk...")
 	if err := index.LoadFromFile(cfg.Storage.DataPath); err != nil {
-		log.Printf("⚠️ Warning: Could not load index: %v", err)
+		if os.IsNotExist(err) {
+			log.Println("⚠️ No snapshot found, starting fresh.")
+		} else {
+			log.Printf("⚠️ Warning: Could not load snapshot: %v", err)
+		}
 	} else {
-		log.Printf("✅ Loaded %d vectors from disk!", len(index.Store))
+		log.Printf("✅ Loaded %d vectors from snapshot!", len(index.Store))
 	}
 
-	// 4. Start Background Snapshotting (The "Auto-Save")
+	// Step 2: Replay the WAL from WalPath (JSON format) to recover uncommitted changes
+	log.Println("🔄 Replaying WAL...")
+	if err := index.ReplayWAL(cfg.Storage.WalPath); err != nil {
+		log.Printf("⚠️ WAL Replay warning: %v", err)
+	} else {
+		log.Printf("✅ WAL replay complete. Total vectors: %d", len(index.Store))
+	}
+
+	// Start Background Snapshotting (The "Auto-Save")
 	if cfg.Storage.AutoSaveEnabled {
 		go func() {
 			ticker := time.NewTicker(cfg.Storage.AutoSaveInterval)
@@ -56,14 +76,14 @@ func main() {
 		log.Println("⏸️  Auto-save disabled")
 	}
 
-	// 5. Create HTTP server
+	// Create HTTP server
 	srv := &http.Server{
 		Addr:              cfg.Server.Address(),
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Server.ShutdownTimeout,
 	}
 
-	// 6. Run server in goroutine
+	// Run server in goroutine
 	go func() {
 		log.Printf("GoVec server is running on %s\n", cfg.Server.Address())
 		log.Println("Press Ctrl+C to shutdown gracefully")
@@ -73,12 +93,12 @@ func main() {
 		}
 	}()
 
-	// 7. Setup signal handling
+	// Setup signal handling
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// 8. Graceful shutdown
+	// Graceful shutdown
 	log.Println("Received shutdown signal, shutting down gracefully...")
 
 	// Save data before shutdown

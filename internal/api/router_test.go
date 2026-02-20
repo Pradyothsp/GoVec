@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
 func init() {
@@ -19,14 +19,14 @@ func init() {
 }
 
 func TestSetupRouter(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	router := SetupRouter(idx)
 
 	require.NotNil(t, router, "Router should not be nil")
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	router := SetupRouter(idx)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -39,7 +39,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestRouterEndpointRegistration(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	router := SetupRouter(idx)
 
 	t.Run("POST_vectors_endpoint_exists", func(t *testing.T) {
@@ -115,7 +115,7 @@ func TestRouterEndpointRegistration(t *testing.T) {
 
 func TestRouterConfiguration(t *testing.T) {
 	t.Run("router_uses_injected_index", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		idx.Insert("existing", []float32{1.0, 2.0}, map[string]any{"pre-existing": true})
 
 		router := SetupRouter(idx)
@@ -141,7 +141,7 @@ func TestRouterConfiguration(t *testing.T) {
 	})
 
 	t.Run("api_v1_group_prefix", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		router := SetupRouter(idx)
 
 		reqBody := map[string]interface{}{
@@ -160,7 +160,7 @@ func TestRouterConfiguration(t *testing.T) {
 	})
 
 	t.Run("without_api_v1_prefix_fails", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		router := SetupRouter(idx)
 
 		reqBody := map[string]interface{}{
@@ -180,7 +180,7 @@ func TestRouterConfiguration(t *testing.T) {
 }
 
 func TestSwaggerEndpoints(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	router := SetupRouter(idx)
 
 	t.Run("swagger_ui_returns_200", func(t *testing.T) {
@@ -200,7 +200,7 @@ func TestSwaggerEndpoints(t *testing.T) {
 }
 
 func TestRouterMultipleRequests(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	router := SetupRouter(idx)
 
 	vectors := []map[string]interface{}{

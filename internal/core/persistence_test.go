@@ -16,7 +16,7 @@ import (
 // =============================================================================
 
 func TestSaveToFile_CreatesFileSuccessfully(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("test1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
 
 	tmpFile := filepath.Join(t.TempDir(), "test.bin")
@@ -29,7 +29,7 @@ func TestSaveToFile_CreatesFileSuccessfully(t *testing.T) {
 }
 
 func TestSaveToFile_EmptyIndex(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	tmpFile := filepath.Join(t.TempDir(), "empty.bin")
 
 	err := index.SaveToFile(tmpFile)
@@ -40,7 +40,7 @@ func TestSaveToFile_EmptyIndex(t *testing.T) {
 }
 
 func TestSaveToFile_PopulatedIndex(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	// Insert multiple vectors
 	for i := 0; i < 10; i++ {
@@ -61,7 +61,7 @@ func TestSaveToFile_PopulatedIndex(t *testing.T) {
 }
 
 func TestLoadFromFile_ReadsSavedDataCorrectly(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("v1", []float32{1.0, 2.0}, map[string]any{"label": "first"})
 	index.Insert("v2", []float32{3.0, 4.0}, nil)
 
@@ -71,7 +71,7 @@ func TestLoadFromFile_ReadsSavedDataCorrectly(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create new index and load
-	newIndex := NewVectorIndex()
+	newIndex := newTestIndex(t)
 	err = newIndex.LoadFromFile(tmpFile)
 	require.NoError(t, err, "LoadFromFile should succeed")
 
@@ -85,7 +85,7 @@ func TestLoadFromFile_ReadsSavedDataCorrectly(t *testing.T) {
 }
 
 func TestLoadFromFile_MissingFile(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	err := index.LoadFromFile("/nonexistent/path/file.bin")
 
@@ -96,7 +96,7 @@ func TestLoadFromFile_MissingFile(t *testing.T) {
 
 func TestRoundTrip_Preservation(t *testing.T) {
 	// Create index with diverse data
-	original := NewVectorIndex()
+	original := newTestIndex(t)
 	original.Insert("vec1", []float32{1.0, 2.0, 3.0}, map[string]any{
 		"string": "value",
 		"number": 42,
@@ -116,7 +116,7 @@ func TestRoundTrip_Preservation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load into new index
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -137,7 +137,7 @@ func TestRoundTrip_Preservation(t *testing.T) {
 // =============================================================================
 
 func TestComplexNestedMetadata_Persistence(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	complexMeta := map[string]any{
 		"nested": map[string]any{
@@ -161,7 +161,7 @@ func TestComplexNestedMetadata_Persistence(t *testing.T) {
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -192,7 +192,7 @@ func TestLargeVectors_PersistCorrectly(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			index := NewVectorIndex()
+			index := newTestIndex(t)
 
 			vec := make([]float32, tc.dimensions)
 			for i := 0; i < tc.dimensions; i++ {
@@ -206,7 +206,7 @@ func TestLargeVectors_PersistCorrectly(t *testing.T) {
 			err := index.SaveToFile(tmpFile)
 			require.NoError(t, err)
 
-			loaded := NewVectorIndex()
+			loaded := newTestIndex(t)
 			err = loaded.LoadFromFile(tmpFile)
 			require.NoError(t, err)
 
@@ -218,7 +218,7 @@ func TestLargeVectors_PersistCorrectly(t *testing.T) {
 }
 
 func TestEmptyVectors_Persist(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("empty", []float32{}, map[string]any{"type": "empty"})
 
 	tmpFile := filepath.Join(t.TempDir(), "empty_vec.bin")
@@ -226,7 +226,7 @@ func TestEmptyVectors_Persist(t *testing.T) {
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -247,7 +247,7 @@ func TestSpecialCharactersInIDs_Persist(t *testing.T) {
 		"vec@special#chars$%",
 	}
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	for _, id := range testIDs {
 		index.Insert(id, []float32{1.0, 2.0}, map[string]any{"id": id})
 	}
@@ -257,7 +257,7 @@ func TestSpecialCharactersInIDs_Persist(t *testing.T) {
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -268,7 +268,7 @@ func TestSpecialCharactersInIDs_Persist(t *testing.T) {
 }
 
 func TestVariousMetadataTypes_Persist(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	testCases := []struct {
 		id   string
@@ -292,7 +292,7 @@ func TestVariousMetadataTypes_Persist(t *testing.T) {
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -303,7 +303,7 @@ func TestVariousMetadataTypes_Persist(t *testing.T) {
 }
 
 func TestLargeNumberOfVectors_Performance(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	// Insert 1000 vectors
 	numVectors := 1000
@@ -321,7 +321,7 @@ func TestLargeNumberOfVectors_Performance(t *testing.T) {
 	require.NoError(t, err, "Should save large dataset")
 
 	// Test load
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err, "Should load large dataset")
 
@@ -334,7 +334,7 @@ func TestLargeNumberOfVectors_Performance(t *testing.T) {
 }
 
 func TestNilMetadata_Handling(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("no_meta", []float32{1.0, 2.0, 3.0}, nil)
 
 	tmpFile := filepath.Join(t.TempDir(), "nil_meta.bin")
@@ -342,7 +342,7 @@ func TestNilMetadata_Handling(t *testing.T) {
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -358,19 +358,19 @@ func TestSaveToFile_OverwritesExistingFile(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "overwrite.bin")
 
 	// Save first version
-	index1 := NewVectorIndex()
+	index1 := newTestIndex(t)
 	index1.Insert("v1", []float32{1.0, 2.0}, map[string]any{"version": 1})
 	err := index1.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
 	// Save second version (overwrite)
-	index2 := NewVectorIndex()
+	index2 := newTestIndex(t)
 	index2.Insert("v2", []float32{3.0, 4.0}, map[string]any{"version": 2})
 	err = index2.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
 	// Load and verify only second version exists
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -380,7 +380,7 @@ func TestSaveToFile_OverwritesExistingFile(t *testing.T) {
 }
 
 func TestSaveToFile_InvalidPath(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("test", []float32{1.0}, nil)
 
 	// Try to save to invalid path
@@ -395,7 +395,7 @@ func TestLoadFromFile_CorruptedFile(t *testing.T) {
 	err := os.WriteFile(tmpFile, []byte("this is not GOB data"), 0644)
 	require.NoError(t, err)
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	err = index.LoadFromFile(tmpFile)
 
 	assert.Error(t, err, "Should return error for corrupted file")
@@ -408,7 +408,7 @@ func TestLoadFromFile_NonGOBFile(t *testing.T) {
 	err := os.WriteFile(tmpFile, []byte("Hello, this is a text file!\nWith multiple lines."), 0644)
 	require.NoError(t, err)
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	err = index.LoadFromFile(tmpFile)
 
 	assert.Error(t, err, "Should fail gracefully for non-GOB file")
@@ -419,7 +419,7 @@ func TestTempFileCleanup_OnSuccess(t *testing.T) {
 	tmpFile := filepath.Join(tmpDir, "cleanup_test.bin")
 	tempFile := tmpFile + ".tmp"
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("test", []float32{1.0}, nil)
 
 	err := index.SaveToFile(tmpFile)
@@ -439,7 +439,7 @@ func TestTempFileCleanup_OnSuccess(t *testing.T) {
 // =============================================================================
 
 func TestConcurrentInsert_AndSave(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	tmpFile := filepath.Join(t.TempDir(), "concurrent_insert_save.bin")
 
 	var wg sync.WaitGroup
@@ -472,7 +472,7 @@ func TestConcurrentInsert_AndSave(t *testing.T) {
 }
 
 func TestConcurrentSearch_AndSave(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	// Pre-populate index with non-zero vectors
 	for i := 1; i <= 100; i++ { // Start from 1 to avoid zero vectors
@@ -513,7 +513,7 @@ func TestConcurrentSearch_AndSave(t *testing.T) {
 }
 
 func TestMultipleSaveToFile_Calls(t *testing.T) {
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("test", []float32{1.0, 2.0}, nil)
 
 	tmpFile := filepath.Join(t.TempDir(), "multi_save.bin")
@@ -534,7 +534,7 @@ func TestMultipleSaveToFile_Calls(t *testing.T) {
 	wg.Wait()
 
 	// Verify final file is valid
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err := loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 	assert.Contains(t, loaded.Store, "test")
@@ -548,12 +548,12 @@ func TestSaveThenLoad_EmptyIndex(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "empty_roundtrip.bin")
 
 	// Save empty index
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
 	// Load into new index
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -563,7 +563,7 @@ func TestSaveThenLoad_EmptyIndex(t *testing.T) {
 func TestOverwriteThenPersist(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "overwrite_persist.bin")
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 
 	// Insert initial value
 	index.Insert("vec", []float32{1.0, 2.0}, map[string]any{"version": 1.0})
@@ -576,7 +576,7 @@ func TestOverwriteThenPersist(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load and verify updated value
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 
@@ -598,13 +598,13 @@ func TestVeryLongFilePaths(t *testing.T) {
 
 	tmpFile := filepath.Join(longPath, "test.bin")
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("test", []float32{1.0}, nil)
 
 	err = index.SaveToFile(tmpFile)
 	require.NoError(t, err, "Should handle long paths")
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 	assert.Contains(t, loaded.Store, "test")
@@ -620,13 +620,13 @@ func TestSpecialCharactersInFilePath(t *testing.T) {
 
 	tmpFile := filepath.Join(dirWithSpaces, "test file.bin")
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	index.Insert("test", []float32{1.0}, nil)
 
 	err = index.SaveToFile(tmpFile)
 	require.NoError(t, err, "Should handle spaces in path")
 
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 	assert.Contains(t, loaded.Store, "test")
@@ -636,7 +636,7 @@ func TestAtomicWrite_Verification(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "atomic.bin")
 
-	index := NewVectorIndex()
+	index := newTestIndex(t)
 	for i := 0; i < 100; i++ {
 		id := fmt.Sprintf("vec%d", i)
 		index.Insert(id, []float32{float32(i)}, nil)
@@ -656,7 +656,7 @@ func TestAtomicWrite_Verification(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "Temp file should not exist after successful save")
 
 	// Verify data integrity
-	loaded := NewVectorIndex()
+	loaded := newTestIndex(t)
 	err = loaded.LoadFromFile(tmpFile)
 	require.NoError(t, err)
 	assert.Len(t, loaded.Store, 100)

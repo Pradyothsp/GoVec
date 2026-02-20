@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
 func init() {
@@ -20,7 +21,7 @@ func init() {
 }
 
 func TestNewVectorHandler(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	require.NotNil(t, handler, "Handler should not be nil")
@@ -147,7 +148,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			idx := core.NewVectorIndex()
+			idx := testutil.NewTestIndex(t)
 			handler := NewVectorHandler(idx)
 
 			w := httptest.NewRecorder()
@@ -180,7 +181,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 
 func TestVectorHandler_Insert_EdgeCases(t *testing.T) {
 	t.Run("large_vector", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		largeVec := make([]float32, 1536)
@@ -211,7 +212,7 @@ func TestVectorHandler_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("special_characters_in_id", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		specialIDs := []string{
@@ -244,7 +245,7 @@ func TestVectorHandler_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("unicode_in_metadata", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		req := CreateVectorRequest{
@@ -272,7 +273,7 @@ func TestVectorHandler_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("nested_metadata", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		req := CreateVectorRequest{
@@ -304,7 +305,7 @@ func TestVectorHandler_Insert_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("wrong_content_type", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		w := httptest.NewRecorder()
@@ -328,7 +329,7 @@ func TestVectorHandler_Insert_EdgeCases(t *testing.T) {
 }
 
 func TestVectorHandler_Insert_Overwrite(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	req1 := CreateVectorRequest{
@@ -369,7 +370,7 @@ func TestVectorHandler_Insert_Overwrite(t *testing.T) {
 }
 
 func TestVectorHandler_Insert_MultipleVectors(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	vectors := []CreateVectorRequest{
@@ -401,7 +402,7 @@ func TestVectorHandler_Insert_MultipleVectors(t *testing.T) {
 }
 
 func TestVectorHandler_Search_ValidRequest(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	// Insert test vectors
@@ -440,7 +441,7 @@ func TestVectorHandler_Search_ValidRequest(t *testing.T) {
 }
 
 func TestVectorHandler_Search_WithoutK(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	// Insert test vectors
@@ -477,7 +478,7 @@ func TestVectorHandler_Search_WithoutK(t *testing.T) {
 }
 
 func TestVectorHandler_Search_InvalidJSON(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	w := httptest.NewRecorder()
@@ -492,7 +493,7 @@ func TestVectorHandler_Search_InvalidJSON(t *testing.T) {
 }
 
 func TestVectorHandler_Search_MissingVector(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	req := map[string]interface{}{
@@ -513,7 +514,7 @@ func TestVectorHandler_Search_MissingVector(t *testing.T) {
 }
 
 func TestVectorHandler_Search_EmptyVector(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	idx.Insert("v1", []float32{1.0, 2.0}, nil)
@@ -541,7 +542,7 @@ func TestVectorHandler_Search_EmptyVector(t *testing.T) {
 }
 
 func TestVectorHandler_Search_WrongContentType(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	req := SearchRequest{
@@ -563,7 +564,7 @@ func TestVectorHandler_Search_WrongContentType(t *testing.T) {
 }
 
 func TestVectorHandler_Search_VariousKValues(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	// Insert 10 vectors
@@ -615,7 +616,7 @@ func TestVectorHandler_Search_VariousKValues(t *testing.T) {
 }
 
 func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	metadata := map[string]interface{}{
@@ -662,7 +663,7 @@ func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
 }
 
 func TestVectorHandler_Search_Integration(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	// Insert diverse vectors
@@ -713,7 +714,7 @@ func TestVectorHandler_Search_Integration(t *testing.T) {
 }
 
 func TestVectorHandler_Search_EmptyIndex(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	req := SearchRequest{
@@ -744,7 +745,7 @@ func TestVectorHandler_Search_EmptyIndex(t *testing.T) {
 }
 
 func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	// Insert 3D vectors
@@ -775,7 +776,7 @@ func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
 }
 
 func TestVectorHandler_Search_LargeVectors(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	// Insert 1536-dimensional vectors (OpenAI embedding size)
@@ -828,7 +829,7 @@ func TestVectorHandler_Search_LargeVectors(t *testing.T) {
 }
 
 func TestVectorHandler_Search_NegativeK(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	req := SearchRequest{
@@ -853,7 +854,7 @@ func TestVectorHandler_Search_NegativeK(t *testing.T) {
 }
 
 func TestVectorHandler_Search_WithFilter(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"label": "a"})
@@ -897,7 +898,7 @@ func TestVectorHandler_Search_WithFilter(t *testing.T) {
 }
 
 func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"type": "X"})
@@ -932,7 +933,7 @@ func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
 }
 
 func TestVectorHandler_Search_FilterAndK(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	for i := 1; i <= 5; i++ {
@@ -969,7 +970,7 @@ func TestVectorHandler_Search_FilterAndK(t *testing.T) {
 }
 
 func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"type": "A"})
@@ -1049,7 +1050,7 @@ func TestVectorHandler_Delete(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			idx := core.NewVectorIndex()
+			idx := testutil.NewTestIndex(t)
 			tt.setup(idx)
 			handler := NewVectorHandler(idx)
 
@@ -1078,7 +1079,7 @@ func TestVectorHandler_Delete(t *testing.T) {
 
 func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 	t.Run("special_characters_in_id", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		specialID := "vec/with/slashes"
@@ -1097,7 +1098,7 @@ func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("double_delete", func(t *testing.T) {
-		idx := core.NewVectorIndex()
+		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
 		idx.Insert("v1", []float32{1.0, 2.0}, nil)
@@ -1122,7 +1123,7 @@ func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 }
 
 func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
-	idx := core.NewVectorIndex()
+	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
 	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"cat": "A", "active": true})
