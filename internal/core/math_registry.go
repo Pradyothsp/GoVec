@@ -14,7 +14,7 @@ func resolveMetric(metric string) (MathBlock, error) {
 	case "cosine":
 		return MathBlock{
 			FloatFunc: CosineSimilarity,
-			Int8Func:  nil, // Will be implemented in Stage 2
+			Int8Func:  CosineSimilarityInt8,
 		}, nil
 	default:
 		return MathBlock{}, fmt.Errorf("unknown distance metric: %s", metric)

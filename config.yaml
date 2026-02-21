@@ -13,5 +13,5 @@ storage:
   auto_save_interval: 60s
 
 engine:
-  quantization: "none" # Options: "none" (Stage 1), "scalar" (Stage 2)
+  quantization: "none" # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
   distance_metric: "cosine" # Options: "cosine"

@@ -55,9 +55,10 @@ func ValidateStorageConfig(cfg StorageConfig) error {
 
 // ValidateEngineConfig validates engine configuration
 func ValidateEngineConfig(cfg EngineConfig) error {
-	// In Stage 1, only "none" quantization is supported
-	if cfg.Quantization != "none" {
-		return fmt.Errorf("only 'none' quantization is supported in Stage 1, got '%s'", cfg.Quantization)
+	// Validate quantization type
+	validQuant := map[string]bool{"none": true, "scalar": true}
+	if !validQuant[cfg.Quantization] {
+		return fmt.Errorf("invalid quantization: '%s', must be 'none' or 'scalar'", cfg.Quantization)
 	}
 
 	// Only cosine distance metric is currently supported

@@ -15,6 +15,12 @@ type Engine interface {
 	// SaveToFile persists the index to disk
 	SaveToFile(path string) error
 
+	// LoadFromFile loads the index from disk
+	LoadFromFile(path string) error
+
+	// ReplayWAL replays the write-ahead log to recover uncommitted changes
+	ReplayWAL(path string) error
+
 	// Clear removes all vectors from the index
 	Clear()
 

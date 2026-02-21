@@ -30,6 +30,89 @@ func TestValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "storage config")
 	})
 
+	t.Run("invalid engine config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Engine.Quantization = "invalid"
+		err := Validate(cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "engine config")
+	})
+}
+
+func TestValidateEngineConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       EngineConfig
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "valid none quantization",
+			cfg: EngineConfig{
+				Quantization:   "none",
+				DistanceMetric: "cosine",
+			},
+			wantError: false,
+		},
+		{
+			name: "valid scalar quantization",
+			cfg: EngineConfig{
+				Quantization:   "scalar",
+				DistanceMetric: "cosine",
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid quantization type",
+			cfg: EngineConfig{
+				Quantization:   "invalid",
+				DistanceMetric: "cosine",
+			},
+			wantError: true,
+			errorMsg:  "invalid quantization",
+		},
+		{
+			name: "invalid distance metric",
+			cfg: EngineConfig{
+				Quantization:   "none",
+				DistanceMetric: "euclidean",
+			},
+			wantError: true,
+			errorMsg:  "invalid distance metric",
+		},
+		{
+			name: "empty quantization",
+			cfg: EngineConfig{
+				Quantization:   "",
+				DistanceMetric: "cosine",
+			},
+			wantError: true,
+			errorMsg:  "invalid quantization",
+		},
+		{
+			name: "empty distance metric",
+			cfg: EngineConfig{
+				Quantization:   "none",
+				DistanceMetric: "",
+			},
+			wantError: true,
+			errorMsg:  "invalid distance metric",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateEngineConfig(tt.cfg)
+			if tt.wantError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestValidateServerConfig(t *testing.T) {

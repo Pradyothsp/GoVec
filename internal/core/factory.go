@@ -8,23 +8,35 @@ import (
 
 // NewEngine creates a new vector engine based on the configuration
 func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
-	// Validate config
-	if cfg.Quantization != "none" {
-		return nil, fmt.Errorf("only 'none' quantization supported in Stage 1, got '%s'", cfg.Quantization)
-	}
-
 	// Get math functions
 	mathBlock, err := resolveMetric(cfg.DistanceMetric)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build engine (only float32 in Stage 1)
-	identityFunc := func(v []float32) []float32 { return v }
+	// Create engine based on quantization type
+	switch cfg.Quantization {
+	case "scalar":
+		// Int8 quantization
+		if mathBlock.Int8Func == nil {
+			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
+		}
+		return NewVectorIndex[[]int8](
+			wal,
+			QuantizeVector,
+			mathBlock.Int8Func,
+		), nil
 
-	return NewVectorIndex[[]float32](
-		wal,
-		identityFunc,
-		mathBlock.FloatFunc,
-	), nil
+	case "none":
+		// No quantization (float32)
+		identityFunc := func(v []float32) []float32 { return v }
+		return NewVectorIndex[[]float32](
+			wal,
+			identityFunc,
+			mathBlock.FloatFunc,
+		), nil
+
+	default:
+		return nil, fmt.Errorf("unknown quantization: '%s'", cfg.Quantization)
+	}
 }
