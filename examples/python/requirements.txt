@@ -1,0 +1,16 @@
+# GoVec Python Client - Dependencies
+
+# Core dependencies
+requests>=2.31.0                # HTTP client with connection pooling
+urllib3>=2.0.0                  # HTTP library (used by requests)
+
+# Optional dependencies for examples
+# Uncomment if needed for development or running examples
+
+# numpy>=1.24.0                 # For generating random vectors in examples
+# python-dotenv>=1.0.0          # For loading environment variables from .env
+
+# Development dependencies (optional)
+# black>=23.0.0                 # Code formatter
+# mypy>=1.0.0                   # Type checker
+# pytest>=7.0.0                 # Testing framework
