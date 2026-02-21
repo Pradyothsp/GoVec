@@ -17,6 +17,7 @@ tasks:
   # Verbose output showing all tests
   test:verbose:
     desc: Run tests with verbose output
+    aliases: [test:v]
     cmds:
       - gotestsum --format standard-verbose
 
@@ -70,6 +71,12 @@ tasks:
     desc: Run tests showing each test name
     cmds:
       - gotestsum --format testname
+
+  test:benchmark:
+    desc: Run Go benchmarks
+    aliases: [test:b]
+    cmds:
+      - go test -bench=. -run=^$ -v ./...
 
   # Run linters with golangci-lint
   lint:
