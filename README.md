@@ -274,6 +274,12 @@ govec/
 # Quick test run
 task test
 
+# Run Go benchmarks (using alias)
+task test:b
+
+# Run Go benchmarks (full command)
+task test:benchmark
+
 # Watch mode (auto re-run on changes)
 task test:watch
 
@@ -309,6 +315,7 @@ task test:coverage     # Generate coverage report
 task test:race         # Run with race detector
 task test:all          # Full suite (race + coverage)
 task test:pkg PKG=...  # Test a specific package
+task test:benchmark    # Run Go benchmarks
 
 # Static analysis
 task lint              # Run golangci-lint
