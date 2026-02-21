@@ -36,12 +36,12 @@ type DeleteResponse struct {
 
 // VectorHandler holds a reference to the core logic
 type VectorHandler struct {
-	Index *core.VectorIndex
+	Engine core.Engine
 }
 
-// NewVectorHandler creates a VectorHandler with the given index dependency.
-func NewVectorHandler(index *core.VectorIndex) *VectorHandler {
-	return &VectorHandler{Index: index}
+// NewVectorHandler creates a VectorHandler with the given engine dependency.
+func NewVectorHandler(engine core.Engine) *VectorHandler {
+	return &VectorHandler{Engine: engine}
 }
 
 // Insert handles POST /api/v1/vectors
@@ -61,7 +61,7 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 		return
 	}
 
-	err := h.Index.Insert(req.ID, req.Vector, req.Metadata)
+	err := h.Engine.Insert(req.ID, req.Vector, req.Metadata)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -93,7 +93,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		return
 	}
 
-	results, err := h.Index.Search(req.Vector, req.K, req.Filters)
+	results, err := h.Engine.Search(req.Vector, req.K, req.Filters)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -123,7 +123,7 @@ func (h *VectorHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	success, err := h.Index.Delete(id)
+	success, err := h.Engine.Delete(id)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return

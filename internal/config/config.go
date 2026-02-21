@@ -5,10 +5,17 @@ import (
 	"time"
 )
 
+// EngineConfig holds vector engine configuration
+type EngineConfig struct {
+	Quantization   string `yaml:"quantization"`
+	DistanceMetric string `yaml:"distance_metric"`
+}
+
 // Config is the root configuration aggregate
 type Config struct {
 	Server  ServerConfig  `yaml:"server"`
 	Storage StorageConfig `yaml:"storage"`
+	Engine  EngineConfig  `yaml:"engine"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -45,6 +52,10 @@ func DefaultConfig() *Config {
 			WalPath:          "./govec.wal",
 			AutoSaveEnabled:  true,
 			AutoSaveInterval: 60 * time.Second,
+		},
+		Engine: EngineConfig{
+			Quantization:   "none",
+			DistanceMetric: "cosine",
 		},
 	}
 }

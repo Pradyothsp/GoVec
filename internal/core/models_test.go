@@ -16,7 +16,7 @@ func TestVectorNode_Creation(t *testing.T) {
 			"count": 42,
 		}
 
-		node := &VectorNode{
+		node := &VectorNode[[]float32]{
 			ID:       id,
 			Vector:   vector,
 			Metadata: metadata,
@@ -29,7 +29,7 @@ func TestVectorNode_Creation(t *testing.T) {
 	})
 
 	t.Run("with_nil_metadata", func(t *testing.T) {
-		node := &VectorNode{
+		node := &VectorNode[[]float32]{
 			ID:       "vec1",
 			Vector:   []float32{4.0, 5.0},
 			Metadata: nil,
@@ -42,7 +42,7 @@ func TestVectorNode_Creation(t *testing.T) {
 	})
 
 	t.Run("with_empty_metadata", func(t *testing.T) {
-		node := &VectorNode{
+		node := &VectorNode[[]float32]{
 			ID:       "vec2",
 			Vector:   []float32{1.0},
 			Metadata: map[string]any{},
@@ -54,7 +54,7 @@ func TestVectorNode_Creation(t *testing.T) {
 	})
 
 	t.Run("with_nil_vector", func(t *testing.T) {
-		node := &VectorNode{
+		node := &VectorNode[[]float32]{
 			ID:       "vec3",
 			Vector:   nil,
 			Metadata: map[string]any{"type": "placeholder"},
@@ -65,7 +65,7 @@ func TestVectorNode_Creation(t *testing.T) {
 	})
 
 	t.Run("with_empty_vector", func(t *testing.T) {
-		node := &VectorNode{
+		node := &VectorNode[[]float32]{
 			ID:       "vec4",
 			Vector:   []float32{},
 			Metadata: nil,
@@ -77,7 +77,7 @@ func TestVectorNode_Creation(t *testing.T) {
 	})
 
 	t.Run("zero_value", func(t *testing.T) {
-		var node VectorNode
+		var node VectorNode[[]float32]
 
 		assert.Equal(t, "", node.ID)
 		assert.Nil(t, node.Vector)
@@ -87,17 +87,17 @@ func TestVectorNode_Creation(t *testing.T) {
 
 func TestVectorNode_FieldTypes(t *testing.T) {
 	t.Run("id_is_string", func(t *testing.T) {
-		node := &VectorNode{ID: "test"}
+		node := &VectorNode[[]float32]{ID: "test"}
 		assert.IsType(t, "", node.ID)
 	})
 
 	t.Run("vector_is_float32_slice", func(t *testing.T) {
-		node := &VectorNode{Vector: []float32{1.0, 2.0}}
+		node := &VectorNode[[]float32]{Vector: []float32{1.0, 2.0}}
 		assert.IsType(t, []float32{}, node.Vector)
 	})
 
 	t.Run("metadata_is_string_any_map", func(t *testing.T) {
-		node := &VectorNode{Metadata: map[string]any{"key": "value"}}
+		node := &VectorNode[[]float32]{Metadata: map[string]any{"key": "value"}}
 		assert.IsType(t, map[string]any{}, node.Metadata)
 	})
 }
@@ -160,7 +160,7 @@ func TestVectorNode_MetadataTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			node := &VectorNode{
+			node := &VectorNode[[]float32]{
 				ID:       "test",
 				Vector:   []float32{1.0, 2.0},
 				Metadata: tt.metadata,
@@ -196,7 +196,7 @@ func TestVectorNode_VectorDimensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			node := &VectorNode{
+			node := &VectorNode[[]float32]{
 				ID:       tt.name,
 				Vector:   tt.vector,
 				Metadata: nil,

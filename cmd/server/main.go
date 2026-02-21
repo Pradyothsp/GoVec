@@ -29,32 +29,48 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to open WAL:", err)
 	}
-	defer wal.Close() //nolint:errcheck // best-effort cleanup on shutdown
 
 	// Initialize components
 	log.Println("Starting server...")
-	index := core.NewVectorIndex(wal)
-	router := api.SetupRouter(index)
+
+	// Create engine via factory
+	engine, err := core.NewEngine(cfg.Engine, wal)
+	if err != nil {
+		_ = wal.Close() //nolint:errcheck // best-effort cleanup before fatal exit
+		log.Fatalf("Failed to create engine: %v", err)
+	}
+
+	// Engine created successfully, set up cleanup
+	defer wal.Close() //nolint:errcheck // best-effort cleanup on shutdown
+
+	router := api.SetupRouter(engine)
 
 	// RECOVERY SEQUENCE
+	// Type-assert to concrete VectorIndex type for persistence operations
+	idx, ok := engine.(*core.VectorIndex[[]float32])
+	if !ok {
+		_ = wal.Close()                                          //nolint:errcheck // best-effort cleanup before fatal exit
+		log.Fatal("Failed to type-assert engine to VectorIndex") //nolint:gocritic // WAL is closed explicitly before exit
+	}
+
 	// Step 1: Load the base snapshot from DataPath (GOB format)
 	log.Println("📂 Loading snapshot from disk...")
-	if err := index.LoadFromFile(cfg.Storage.DataPath); err != nil {
+	if err := idx.LoadFromFile(cfg.Storage.DataPath); err != nil {
 		if os.IsNotExist(err) {
 			log.Println("⚠️ No snapshot found, starting fresh.")
 		} else {
 			log.Printf("⚠️ Warning: Could not load snapshot: %v", err)
 		}
 	} else {
-		log.Printf("✅ Loaded %d vectors from snapshot!", len(index.Store))
+		log.Printf("✅ Loaded %d vectors from snapshot!", engine.Len())
 	}
 
 	// Step 2: Replay the WAL from WalPath (JSON format) to recover uncommitted changes
 	log.Println("🔄 Replaying WAL...")
-	if err := index.ReplayWAL(cfg.Storage.WalPath); err != nil {
+	if err := idx.ReplayWAL(cfg.Storage.WalPath); err != nil {
 		log.Printf("⚠️ WAL Replay warning: %v", err)
 	} else {
-		log.Printf("✅ WAL replay complete. Total vectors: %d", len(index.Store))
+		log.Printf("✅ WAL replay complete. Total vectors: %d", engine.Len())
 	}
 
 	// Start Background Snapshotting (The "Auto-Save")
@@ -64,7 +80,7 @@ func main() {
 			defer ticker.Stop()
 			for range ticker.C {
 				log.Println("💾 Auto-saving snapshot...")
-				if err := index.SaveToFile(cfg.Storage.DataPath); err != nil {
+				if err := engine.SaveToFile(cfg.Storage.DataPath); err != nil {
 					log.Printf("❌ Failed to save snapshot: %v", err)
 				} else {
 					log.Println("✅ Snapshot saved.")
@@ -103,7 +119,7 @@ func main() {
 
 	// Save data before shutdown
 	log.Println("💾 Saving data to disk...")
-	if err := index.SaveToFile(cfg.Storage.DataPath); err != nil {
+	if err := engine.SaveToFile(cfg.Storage.DataPath); err != nil {
 		log.Printf("❌ Error saving data on shutdown: %v", err)
 	} else {
 		log.Println("✅ Data saved successfully")

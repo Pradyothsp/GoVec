@@ -65,7 +65,7 @@ func TestRecoverySequence(t *testing.T) {
 	// Setup: Create snapshot with 3 vectors
 	setupWal, err := core.NewWAL(filepath.Join(tempDir, "setup.wal"))
 	require.NoError(t, err)
-	setupIdx := core.NewVectorIndex(setupWal)
+	setupIdx := core.NewVectorIndex[[]float32](setupWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	for i := 1; i <= 3; i++ {
 		err = setupIdx.Insert(fmt.Sprintf("snap%d", i), []float32{float32(i)}, nil)
@@ -97,7 +97,7 @@ func TestRecoverySequence(t *testing.T) {
 	require.NoError(t, err)
 	defer recoveryWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(recoveryWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](recoveryWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// CORRECT sequence: LoadFromFile(DataPath) then ReplayWAL(WalPath)
 	err = recoveredIdx.LoadFromFile(snapPath) // Load snapshot

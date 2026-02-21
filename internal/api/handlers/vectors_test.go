@@ -25,8 +25,8 @@ func TestNewVectorHandler(t *testing.T) {
 	handler := NewVectorHandler(idx)
 
 	require.NotNil(t, handler, "Handler should not be nil")
-	require.NotNil(t, handler.Index, "Handler Index should not be nil")
-	assert.Equal(t, idx, handler.Index, "Handler should reference the provided index")
+	require.NotNil(t, handler.Engine, "Handler Index should not be nil")
+	assert.Equal(t, idx, handler.Engine, "Handler should reference the provided index")
 }
 
 func TestVectorHandler_Insert(t *testing.T) {
@@ -35,7 +35,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 		requestBody    interface{}
 		expectedStatus int
 		expectedBody   string
-		checkIndex     func(*testing.T, *core.VectorIndex)
+		checkIndex     func(*testing.T, *core.VectorIndex[[]float32])
 	}{
 		{
 			name: "valid_request_with_metadata",
@@ -46,7 +46,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v1")
 				assert.Equal(t, "v1", idx.Store["v1"].ID)
 				assert.Equal(t, []float32{1.0, 2.0, 3.0}, idx.Store["v1"].Vector)
@@ -62,7 +62,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v2")
 				assert.Equal(t, []float32{4.0, 5.0}, idx.Store["v2"].Vector)
 				assert.Nil(t, idx.Store["v2"].Metadata)
@@ -77,7 +77,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v3")
 				assert.Empty(t, idx.Store["v3"].Metadata)
 			},
@@ -88,7 +88,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				"vector": []float32{1.0, 2.0},
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store, "No vector should be inserted")
 			},
 		},
@@ -98,7 +98,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				"id": "v4",
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store, "No vector should be inserted")
 			},
 		},
@@ -108,7 +108,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				"metadata": map[string]interface{}{"test": true},
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -116,7 +116,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			name:           "malformed_json",
 			requestBody:    "not a valid json",
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -127,7 +127,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				Vector: []float32{1.0, 2.0},
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -139,7 +139,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v5")
 				assert.Empty(t, idx.Store["v5"].Vector)
 			},
@@ -1008,41 +1008,41 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 func TestVectorHandler_Delete(t *testing.T) {
 	tests := []struct {
 		name           string
-		setup          func(*core.VectorIndex)
+		setup          func(*core.VectorIndex[[]float32])
 		id             string
 		expectedStatus int
 		expectedBody   string
-		checkIndex     func(*testing.T, *core.VectorIndex)
+		checkIndex     func(*testing.T, *core.VectorIndex[[]float32])
 	}{
 		{
 			name: "success",
-			setup: func(idx *core.VectorIndex) {
+			setup: func(idx *core.VectorIndex[[]float32]) {
 				idx.Insert("v1", []float32{1.0, 2.0}, nil)
 			},
 			id:             "v1",
 			expectedStatus: http.StatusOK,
 			expectedBody:   `{"success":true,"data":{"status":"deleted","id":"v1"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.NotContains(t, idx.Store, "v1")
 			},
 		},
 		{
 			name:           "not_found",
-			setup:          func(idx *core.VectorIndex) {},
+			setup:          func(idx *core.VectorIndex[[]float32]) {},
 			id:             "missing",
 			expectedStatus: http.StatusNotFound,
 			expectedBody:   `{"success":false,"data":null,"error":"vector not found"}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
 		{
 			name:           "empty_id",
-			setup:          func(idx *core.VectorIndex) {},
+			setup:          func(idx *core.VectorIndex[[]float32]) {},
 			id:             "",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   `{"success":false,"data":null,"error":"id is required"}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex) {
+			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},

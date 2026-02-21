@@ -16,6 +16,10 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("storage config: %w", err)
 	}
 
+	if err := ValidateEngineConfig(cfg.Engine); err != nil {
+		return fmt.Errorf("engine config: %w", err)
+	}
+
 	return nil
 }
 
@@ -44,6 +48,22 @@ func ValidateStorageConfig(cfg StorageConfig) error {
 	// Auto-save interval must be >= 1s when enabled
 	if cfg.AutoSaveEnabled && cfg.AutoSaveInterval < time.Second {
 		return fmt.Errorf("auto_save_interval must be >= 1s when auto_save_enabled is true, got %v", cfg.AutoSaveInterval)
+	}
+
+	return nil
+}
+
+// ValidateEngineConfig validates engine configuration
+func ValidateEngineConfig(cfg EngineConfig) error {
+	// In Stage 1, only "none" quantization is supported
+	if cfg.Quantization != "none" {
+		return fmt.Errorf("only 'none' quantization is supported in Stage 1, got '%s'", cfg.Quantization)
+	}
+
+	// Only cosine distance metric is currently supported
+	validMetrics := map[string]bool{"cosine": true}
+	if !validMetrics[cfg.DistanceMetric] {
+		return fmt.Errorf("invalid distance metric: '%s', must be 'cosine'", cfg.DistanceMetric)
 	}
 
 	return nil

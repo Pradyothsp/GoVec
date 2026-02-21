@@ -1,8 +1,10 @@
-version: '3'
+version: "3"
 
 vars:
   COVERAGE_FILE: coverage.out
   COVERAGE_HTML: coverage.html
+  WAL_FILE: govec.wal
+  BIN_FILE: govec_data.bin
 
 tasks:
   # Run tests with gotestsum (human-friendly output)
@@ -134,7 +136,7 @@ tasks:
   clean:
     desc: Clean build artifacts and test coverage files
     cmds:
-      - rm -f govec {{.COVERAGE_FILE}} {{.COVERAGE_HTML}}
+      - rm -f govec {{.COVERAGE_FILE}} {{.COVERAGE_HTML}} {{.WAL_FILE}} {{.BIN_FILE}}
       - echo "Cleaned build artifacts"
 
   # Install dependencies

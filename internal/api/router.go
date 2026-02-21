@@ -14,14 +14,14 @@ import (
 )
 
 // SetupRouter configures the Gin engine with all routes and injects dependencies.
-func SetupRouter(index *core.VectorIndex) *gin.Engine {
+func SetupRouter(engine core.Engine) *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/health", healthCheck)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Initialize handlers, injecting dependencies
-	vecHandler := handlers.NewVectorHandler(index)
+	vecHandler := handlers.NewVectorHandler(engine)
 
 	v1 := r.Group("api/v1")
 	v1.POST("/vectors", vecHandler.Insert)

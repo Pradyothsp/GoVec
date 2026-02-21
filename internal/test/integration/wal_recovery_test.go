@@ -20,7 +20,7 @@ import (
 
 type WALRecoveryTestSuite struct {
 	suite.Suite
-	index      *core.VectorIndex
+	index      *core.VectorIndex[[]float32]
 	router     *gin.Engine
 	storageDir string
 	walPath    string
@@ -39,7 +39,7 @@ func (s *WALRecoveryTestSuite) SetupTest() {
 	s.wal = wal
 	s.T().Cleanup(func() { _ = wal.Close() })
 
-	s.index = core.NewVectorIndex(wal)
+	s.index = core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	s.router = api.SetupRouter(s.index)
 }
 
@@ -80,7 +80,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashAfterInserts() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Load from missing snapshot
 	err = recoveredIdx.LoadFromFile(s.snapPath)
@@ -158,7 +158,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashDuringMixedOperations() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -182,7 +182,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_EmptyWAL() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
@@ -241,7 +241,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashBetweenAutoSaves() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -308,7 +308,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_SnapshotAfterDeletes() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -381,7 +381,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MultipleSnapshots() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -430,7 +430,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_ConcurrentInsertsBeforeCrash() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -484,7 +484,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_InterleavedInsertsDeletes() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -529,7 +529,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CorruptedWALGracefulHandling() {
 	s.T().Cleanup(func() { _ = newWal.Close() })
 
 	// Recovery
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -586,7 +586,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MissingSnapshotButValidWAL() {
 	s.Require().NoError(err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = recoveredIdx.LoadFromFile(s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
 	err = recoveredIdx.ReplayWAL(s.walPath)

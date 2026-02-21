@@ -11,3 +11,7 @@ storage:
   wal_path: "./govec.wal"
   auto_save_enabled: true
   auto_save_interval: 60s
+
+engine:
+  quantization: "none" # Options: "none" (Stage 1), "scalar" (Stage 2)
+  distance_metric: "cosine" # Options: "cosine"

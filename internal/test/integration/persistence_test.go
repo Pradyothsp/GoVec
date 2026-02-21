@@ -22,7 +22,7 @@ import (
 
 type PersistenceIntegrationTestSuite struct {
 	suite.Suite
-	index      *core.VectorIndex
+	index      *core.VectorIndex[[]float32]
 	router     *gin.Engine
 	storageDir string
 }

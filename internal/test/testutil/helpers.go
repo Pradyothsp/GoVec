@@ -18,18 +18,21 @@ import (
 
 // NewTestIndex creates an empty VectorIndex backed by a temp WAL for testing.
 // The WAL is closed automatically via t.Cleanup.
-func NewTestIndex(t testing.TB) *core.VectorIndex {
+func NewTestIndex(t testing.TB) *core.VectorIndex[[]float32] {
 	t.Helper()
 	wal, err := core.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
 	if err != nil {
 		t.Fatalf("NewTestIndex: failed to create WAL: %v", err)
 	}
 	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
-	return core.NewVectorIndex(wal)
+
+	// Create index with identity encode function and cosine similarity
+	identityFunc := func(v []float32) []float32 { return v }
+	return core.NewVectorIndex[[]float32](wal, identityFunc, core.CosineSimilarity)
 }
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing.
-func NewTestVectorIndex(t testing.TB) *core.VectorIndex {
+func NewTestVectorIndex(t testing.TB) *core.VectorIndex[[]float32] {
 	t.Helper()
 	idx := NewTestIndex(t)
 
@@ -129,7 +132,7 @@ func NewCreateVectorRequest(id string, dimensions int, withMetadata bool) Create
 }
 
 // AssertVectorInIndex verifies a vector exists in the index with expected values
-func AssertVectorInIndex(t *testing.T, idx *core.VectorIndex, id string, expectedVector []float32, expectedMetadata map[string]any) {
+func AssertVectorInIndex(t *testing.T, idx *core.VectorIndex[[]float32], id string, expectedVector []float32, expectedMetadata map[string]any) {
 	t.Helper()
 
 	require.Contains(t, idx.Store, id, "Vector %s should exist in index", id)
@@ -141,7 +144,7 @@ func AssertVectorInIndex(t *testing.T, idx *core.VectorIndex, id string, expecte
 }
 
 // AssertVectorCount verifies the number of vectors in the index
-func AssertVectorCount(t *testing.T, idx *core.VectorIndex, expectedCount int) {
+func AssertVectorCount(t *testing.T, idx *core.VectorIndex[[]float32], expectedCount int) {
 	t.Helper()
 	assert.Len(t, idx.Store, expectedCount, "Index should contain %d vectors", expectedCount)
 }
@@ -165,7 +168,7 @@ func CleanupStorageFile(t *testing.T, path string) {
 }
 
 // PopulateIndexWithVectors inserts N vectors into an index for testing
-func PopulateIndexWithVectors(idx *core.VectorIndex, count int) {
+func PopulateIndexWithVectors(idx *core.VectorIndex[[]float32], count int) {
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("vec%d", i)
 		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}

@@ -23,7 +23,7 @@ func TestVectorIndex_Insert_WritesToWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vector
 	err = idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
@@ -41,7 +41,13 @@ func TestVectorIndex_Insert_WritesToWAL(t *testing.T) {
 	// Verify WAL contains correct data
 	assert.Equal(t, core.WALActionInsert, entry.Action)
 	assert.Equal(t, "vec1", entry.ID)
-	assert.Equal(t, []float32{1.0, 2.0, 3.0}, entry.Vector)
+	// Vector is unmarshaled as []interface{} with float64 elements
+	vecSlice, ok := entry.Vector.([]interface{})
+	require.True(t, ok, "Vector should be []interface{}")
+	assert.Len(t, vecSlice, 3, "Vector should have 3 elements")
+	assert.Equal(t, float64(1.0), vecSlice[0])
+	assert.Equal(t, float64(2.0), vecSlice[1])
+	assert.Equal(t, float64(3.0), vecSlice[2])
 	assert.Equal(t, "test", entry.Meta["label"])
 }
 
@@ -52,7 +58,7 @@ func TestVectorIndex_Insert_WALFailurePreventMemoryUpdate(t *testing.T) {
 	require.NoError(t, err)
 	wal.Close() // Close file to make writes fail
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Attempt Insert (should fail)
 	err = idx.Insert("vec1", []float32{1.0, 2.0}, map[string]any{"label": "test"})
@@ -84,7 +90,7 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 	wal, err := core.NewWAL(walPath)
 	require.NoError(t, err)
 	defer wal.Close()
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -141,7 +147,7 @@ func TestVectorIndex_Delete_WritesToWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert then delete
 	err = idx.Insert("vec1", []float32{1.0, 2.0}, nil)
@@ -172,7 +178,7 @@ func TestVectorIndex_Delete_WALFailurePreventsDelete(t *testing.T) {
 	wal, err := core.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vector
 	err = idx.Insert("vec1", []float32{1.0, 2.0}, nil)
@@ -196,7 +202,7 @@ func TestVectorIndex_Delete_NonExistentID(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Delete non-existent ID
 	deleted, err := idx.Delete("nonexistent")
@@ -221,7 +227,7 @@ func TestVectorIndex_SaveToFile_ClearsWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert 10 vectors
 	for i := 0; i < 10; i++ {
@@ -256,7 +262,7 @@ func TestVectorIndex_SaveToFile_WALClearFailure(t *testing.T) {
 	wal, err := core.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vectors
 	for i := 0; i < 5; i++ {
@@ -292,7 +298,7 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 	wal, err := core.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vec1-3
 	for i := 1; i <= 3; i++ {
@@ -316,7 +322,7 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Load from snapshot
 	err = recoveredIdx.LoadFromFile(snapPath)
@@ -340,7 +346,7 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 	wal, err := core.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := core.NewVectorIndex(wal)
+	idx := core.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert 10 vectors (no save)
 	for i := 0; i < 10; i++ {
@@ -354,7 +360,7 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 	require.NoError(t, err)
 	defer newWal.Close()
 
-	recoveredIdx := core.NewVectorIndex(newWal)
+	recoveredIdx := core.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Load from missing snapshot (graceful)
 	err = recoveredIdx.LoadFromFile(snapPath)
