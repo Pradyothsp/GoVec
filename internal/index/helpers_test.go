@@ -19,5 +19,5 @@ func newTestIndex(t testing.TB) *VectorIndex[[]float32] {
 
 	// Create an index with identity encode function and cosine similarity
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, identityFunc, core.CosineSimilarity)
+	return NewVectorIndex[[]float32](wal, nil, identityFunc, core.CosineSimilarity)
 }

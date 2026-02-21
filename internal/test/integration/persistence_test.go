@@ -18,6 +18,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/index"
 
 	"github.com/Pradyothsp/govec/internal/api"
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -158,16 +159,18 @@ func (s *PersistenceIntegrationTestSuite) TestRecoveryFromCrash_OnlyAutoSaveData
 
 	// Phase 1: Insert 10 vectors and auto-save
 	for i := 0; i < 10; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, nil)
+		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
+
+			// Simulate auto-save
+		}, nil)
 	}
 
-	// Simulate auto-save
 	err := s.index.SaveToFile(storagePath)
 	s.Require().NoError(err)
 
 	// Phase 2: Insert 5 more vectors (these won't be saved - simulating crash)
 	for i := 10; i < 15; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, nil)
+		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
 	}
 
 	s.Assert().Len(s.index.Store, 15, "Should have 15 vectors in memory before crash")
@@ -329,10 +332,12 @@ func (s *PersistenceIntegrationTestSuite) TestLargeDataset_Persistence() {
 			"index":      i,
 			"dimensions": 128,
 		}
-		s.index.Insert(id, vec, meta)
+		s.index.Insert(id, vec, core.SparseVector{
+
+			// Save
+		}, meta)
 	}
 
-	// Save
 	err := s.index.SaveToFile(storagePath)
 	s.Require().NoError(err, "Should save large dataset")
 
@@ -378,10 +383,12 @@ func (s *PersistenceIntegrationTestSuite) TestAutoSave_Simulation() {
 
 	// Insert initial vectors
 	for i := 0; i < 5; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, nil)
+		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
+
+			// Simulate auto-save ticker
+		}, nil)
 	}
 
-	// Simulate auto-save ticker
 	saveInterval := 100 * time.Millisecond
 	ticker := time.NewTicker(saveInterval)
 	defer ticker.Stop()
@@ -410,10 +417,12 @@ func (s *PersistenceIntegrationTestSuite) TestAutoSave_Simulation() {
 	// Insert more vectors while auto-save is running
 	time.Sleep(50 * time.Millisecond)
 	for i := 5; i < 10; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, nil)
+		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
+
+			// Wait for auto-save to complete
+		}, nil)
 	}
 
-	// Wait for auto-save to complete
 	<-done
 
 	// Verify file was created and has latest data

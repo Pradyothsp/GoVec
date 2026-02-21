@@ -22,11 +22,13 @@ const (
 
 // WALEntry represents a single write-ahead log entry
 // Vector is always []float32 (canonical format from API), regardless of internal storage type
+// Sparse vector is stored in canonical format (uint32 indices + float32 values)
 type WALEntry struct {
-	Action WALAction      `json:"action"`
-	ID     string         `json:"id"`
-	Vector []float32      `json:"vec,omitempty"`
-	Meta   map[string]any `json:"meta,omitempty"`
+	Action WALAction         `json:"action"`
+	ID     string            `json:"id"`
+	Vector []float32         `json:"vec,omitempty"`
+	Sparse core.SparseVector `json:"sparse,omitempty"`
+	Meta   map[string]any    `json:"meta,omitempty"`
 }
 
 // WAL is a write-ahead log for durability
@@ -46,7 +48,7 @@ func NewWAL(filepath string) (*WAL, error) {
 }
 
 // WriteEntry saves an operation to the disk immediately
-func (w *WAL) WriteEntry(entry WALEntry) error {
+func (w *WAL) WriteEntry(entry *WALEntry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -109,14 +111,34 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 		case WALActionInsert:
 			// Encode WAL vector ([]float32) to storage format (T)
 			idx.mu.Lock()
+
+			// If hybrid search is enabled, update inverted index
+			if idx.InvertedIndex != nil {
+				// Remove old postings if document exists (update case)
+				if existingNode, exists := idx.Store[entry.ID]; exists {
+					idx.removeFromInvertedIndex(entry.ID, existingNode.Sparse)
+				}
+				// Add new postings
+				idx.addToInvertedIndex(entry.ID, entry.Sparse)
+			}
+
 			idx.Store[entry.ID] = &core.VectorNode[T]{
 				ID:       entry.ID,
 				Vector:   idx.encodeFunc(entry.Vector),
+				Sparse:   entry.Sparse,
 				Metadata: entry.Meta,
 			}
 			idx.mu.Unlock()
 		case WALActionDelete:
 			idx.mu.Lock()
+
+			// If hybrid search is enabled, remove from inverted index
+			if idx.InvertedIndex != nil {
+				if node, exists := idx.Store[entry.ID]; exists {
+					idx.removeFromInvertedIndex(entry.ID, node.Sparse)
+				}
+			}
+
 			delete(idx.Store, entry.ID)
 			idx.mu.Unlock()
 		}

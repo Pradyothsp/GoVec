@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/config"
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
 )
 
@@ -42,7 +43,7 @@ func TestScalarQuantization_EndToEnd(t *testing.T) {
 	}
 
 	for _, tv := range testVectors {
-		err = engine.Insert(tv.id, tv.vec, tv.meta)
+		err = engine.Insert(tv.id, tv.vec, core.SparseVector{}, tv.meta)
 		if err != nil {
 			t.Fatalf("Insert failed for %s: %v", tv.id, err)
 		}
@@ -50,7 +51,7 @@ func TestScalarQuantization_EndToEnd(t *testing.T) {
 
 	// Search for similar vectors
 	query := []float32{0.55, 0.25, 0.75}
-	results, err := engine.Search(query, 3, nil)
+	results, err := engine.Search(query, core.SparseVector{}, 3, nil)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -119,10 +120,10 @@ func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 	}
 
 	for _, tv := range testVectors {
-		if err := engineNone.Insert(tv.id, tv.vec, nil); err != nil {
+		if err := engineNone.Insert(tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
 			t.Fatalf("Insert to engineNone failed: %v", err)
 		}
-		if err := engineScalar.Insert(tv.id, tv.vec, nil); err != nil {
+		if err := engineScalar.Insert(tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
 			t.Fatalf("Insert to engineScalar failed: %v", err)
 		}
 	}
@@ -130,12 +131,12 @@ func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 	// Search with same query
 	query := []float32{0.55, 0.25, 0.75, -0.15}
 
-	resultsNone, err := engineNone.Search(query, 5, nil)
+	resultsNone, err := engineNone.Search(query, core.SparseVector{}, 5, nil)
 	if err != nil {
 		t.Fatalf("Search (none) failed: %v", err)
 	}
 
-	resultsScalar, err := engineScalar.Search(query, 5, nil)
+	resultsScalar, err := engineScalar.Search(query, core.SparseVector{}, 5, nil)
 	if err != nil {
 		t.Fatalf("Search (scalar) failed: %v", err)
 	}
@@ -192,10 +193,10 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 	vec1 := []float32{0.5, 0.3, 0.8}
 	vec2 := []float32{0.6, 0.2, 0.7}
 
-	if err := engine.Insert("vec1", vec1, nil); err != nil {
+	if err := engine.Insert("vec1", vec1, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
-	if err := engine.Insert("vec2", vec2, nil); err != nil {
+	if err := engine.Insert("vec2", vec2, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
@@ -228,7 +229,7 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 	}
 
 	// Search to verify vectors are correct
-	results, err := engine2.Search(vec1, 1, nil)
+	results, err := engine2.Search(vec1, core.SparseVector{}, 1, nil)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -266,10 +267,10 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 	vec1 := []float32{0.5, 0.3, 0.8}
 	vec2 := []float32{0.6, 0.2, 0.7}
 
-	if err := engine.Insert("vec1", vec1, nil); err != nil {
+	if err := engine.Insert("vec1", vec1, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
-	if err := engine.Insert("vec2", vec2, nil); err != nil {
+	if err := engine.Insert("vec2", vec2, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
@@ -297,7 +298,7 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 	}
 
 	// Search to verify vectors are correct
-	results, err := engine2.Search(vec1, 1, nil)
+	results, err := engine2.Search(vec1, core.SparseVector{}, 1, nil)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -341,7 +342,7 @@ func TestScalarQuantization_MemoryUsage(t *testing.T) {
 		for j := range vec {
 			vec[j] = float32(j) / 1536.0
 		}
-		if err := engine.Insert(string(rune('a'+i%26)), vec, nil); err != nil {
+		if err := engine.Insert(string(rune('a'+i%26)), vec, core.SparseVector{}, nil); err != nil {
 			t.Fatalf("Insert failed: %v", err)
 		}
 	}
@@ -395,7 +396,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	}
 
 	vec := []float32{0.5, 0.3, 0.8}
-	if err := engine1.Insert("vec1", vec, nil); err != nil {
+	if err := engine1.Insert("vec1", vec, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
@@ -449,7 +450,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	}
 
 	// Now insert should work
-	if err := engine3.Insert("vec1", vec, nil); err != nil {
+	if err := engine3.Insert("vec1", vec, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert to fresh engine failed: %v", err)
 	}
 

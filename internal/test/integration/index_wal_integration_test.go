@@ -25,10 +25,10 @@ func TestVectorIndex_Insert_WritesToWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vector
-	err = idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
+	err = idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"label": "test"})
 	require.NoError(t, err)
 
 	// Read WAL file directly
@@ -54,10 +54,10 @@ func TestVectorIndex_Insert_WALFailurePreventMemoryUpdate(t *testing.T) {
 	require.NoError(t, err)
 	wal.Close() // Close file to make writes fail
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Attempt Insert (should fail)
-	err = idx.Insert("vec1", []float32{1.0, 2.0}, map[string]any{"label": "test"})
+	err = idx.Insert("vec1", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"label": "test"})
 	assert.Error(t, err, "Insert should fail when WAL write fails")
 
 	// Verify memory NOT updated
@@ -73,7 +73,7 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 	replayWal, err := index.NewWAL(replayWalPath)
 	require.NoError(t, err)
 	for i := 0; i < 10; i++ {
-		err = replayWal.WriteEntry(index.WALEntry{
+		err = replayWal.WriteEntry(&index.WALEntry{
 			Action: index.WALActionInsert,
 			ID:     "replay" + string(rune('0'+i)),
 			Vector: []float32{float32(i)},
@@ -86,7 +86,7 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 	defer wal.Close()
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -116,7 +116,7 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 			}
 		}()
 		for i := 0; i < 10; i++ {
-			err := idx.Insert("insert"+string(rune('0'+i)), []float32{float32(i + 100)}, nil)
+			err := idx.Insert("insert"+string(rune('0'+i)), []float32{float32(i + 100)}, core.SparseVector{}, nil)
 			if err != nil && insertErr == nil {
 				insertErr = err
 			}
@@ -143,10 +143,10 @@ func TestVectorIndex_Delete_WritesToWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert then delete
-	err = idx.Insert("vec1", []float32{1.0, 2.0}, nil)
+	err = idx.Insert("vec1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 	require.NoError(t, err)
 
 	deleted, err := idx.Delete("vec1")
@@ -174,10 +174,10 @@ func TestVectorIndex_Delete_WALFailurePreventsDelete(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vector
-	err = idx.Insert("vec1", []float32{1.0, 2.0}, nil)
+	err = idx.Insert("vec1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 	require.NoError(t, err)
 
 	// Close WAL to make writes fail
@@ -198,7 +198,7 @@ func TestVectorIndex_Delete_NonExistentID(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Delete non-existent ID
 	deleted, err := idx.Delete("nonexistent")
@@ -223,11 +223,11 @@ func TestVectorIndex_SaveToFile_ClearsWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert 10 vectors
 	for i := 0; i < 10; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, nil)
+		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -258,11 +258,11 @@ func TestVectorIndex_SaveToFile_WALClearFailure(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vectors
 	for i := 0; i < 5; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, nil)
+		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -294,11 +294,11 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert vec1-3
 	for i := 1; i <= 3; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, nil)
+		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -308,7 +308,7 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 
 	// Insert vec4-5 (not saved)
 	for i := 4; i <= 5; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, nil)
+		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 	wal.Close()
@@ -318,7 +318,7 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 	require.NoError(t, err)
 	defer newWal.Close()
 
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Load from snapshot
 	err = recoveredIdx.LoadFromFile(snapPath)
@@ -342,11 +342,11 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idx := index.NewVectorIndex[[]float32](wal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := index.NewVectorIndex[[]float32](wal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Insert 10 vectors (no save)
 	for i := 0; i < 10; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, nil)
+		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 	wal.Close()
@@ -356,7 +356,7 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 	require.NoError(t, err)
 	defer newWal.Close()
 
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// Load from missing snapshot (graceful)
 	err = recoveredIdx.LoadFromFile(snapPath)

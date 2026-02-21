@@ -231,6 +231,9 @@
                 "metadata": {
                     "type": "object"
                 },
+                "sparse_vector": {
+                    "type": "object"
+                },
                 "vector": {
                     "type": "array",
                     "items": {
@@ -273,6 +276,9 @@
                 "k": {
                     "type": "integer",
                     "example": 10
+                },
+                "sparse_vector": {
+                    "type": "object"
                 },
                 "vector": {
                     "type": "array",

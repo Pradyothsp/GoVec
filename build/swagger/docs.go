@@ -234,6 +234,9 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object"
                 },
+                "sparse_vector": {
+                    "type": "object"
+                },
                 "vector": {
                     "type": "array",
                     "items": {
@@ -276,6 +279,9 @@ const docTemplate = `{
                 "k": {
                     "type": "integer",
                     "example": 10
+                },
+                "sparse_vector": {
+                    "type": "object"
                 },
                 "vector": {
                     "type": "array",

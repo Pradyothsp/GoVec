@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 func TestNewVectorIndex(t *testing.T) {
@@ -73,7 +75,7 @@ func TestVectorIndex_Insert(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := newTestIndex(t)
-			idx.Insert(tt.id, tt.vector, tt.metadata)
+			idx.Insert(tt.id, tt.vector, core.SparseVector{}, tt.metadata)
 
 			require.Contains(t, idx.Store, tt.id, "vector should be in store")
 
@@ -89,14 +91,14 @@ func TestVectorIndex_Insert_Overwrite(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// First insert
-	idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, map[string]any{"version": 1})
+	idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"version": 1})
 
 	require.Contains(t, idx.Store, "vec1")
 	assert.Equal(t, []float32{1.0, 2.0, 3.0}, idx.Store["vec1"].Vector)
 	assert.Equal(t, map[string]any{"version": 1}, idx.Store["vec1"].Metadata)
 
 	// Overwrite with new vector
-	idx.Insert("vec1", []float32{7.0, 8.0, 9.0}, map[string]any{"version": 2, "updated": true})
+	idx.Insert("vec1", []float32{7.0, 8.0, 9.0}, core.SparseVector{}, map[string]any{"version": 2, "updated": true})
 
 	require.Contains(t, idx.Store, "vec1")
 	assert.Equal(t, []float32{7.0, 8.0, 9.0}, idx.Store["vec1"].Vector, "Vector should be updated")
@@ -119,7 +121,7 @@ func TestVectorIndex_Insert_MultipleVectors(t *testing.T) {
 	}
 
 	for _, v := range vectors {
-		idx.Insert(v.id, v.vector, v.meta)
+		idx.Insert(v.id, v.vector, core.SparseVector{}, v.meta)
 	}
 
 	assert.Len(t, idx.Store, len(vectors), "Should have all vectors")
@@ -190,7 +192,7 @@ func TestVectorIndex_Insert_VariousMetadataTypes(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			vec := []float32{1.0, 2.0, 3.0}
-			idx.Insert(tc.id, vec, tc.metadata)
+			idx.Insert(tc.id, vec, core.SparseVector{}, tc.metadata)
 
 			require.Contains(t, idx.Store, tc.id)
 			assert.Equal(t, tc.metadata, idx.Store[tc.id].Metadata)
@@ -210,7 +212,7 @@ func TestVectorIndex_Insert_Concurrency(t *testing.T) {
 			vecID := fmt.Sprintf("vec%d", id)
 			vec := []float32{float32(id), float32(id * 2)}
 			meta := map[string]any{"id": id}
-			idx.Insert(vecID, vec, meta)
+			idx.Insert(vecID, vec, core.SparseVector{}, meta)
 		}(i)
 	}
 
@@ -241,7 +243,7 @@ func TestVectorIndex_Insert_ConcurrentOverwrites(t *testing.T) {
 			defer wg.Done()
 			vec := []float32{float32(iteration)}
 			meta := map[string]any{"iteration": iteration}
-			idx.Insert(vecID, vec, meta)
+			idx.Insert(vecID, vec, core.SparseVector{}, meta)
 		}(i)
 	}
 
@@ -255,7 +257,7 @@ func TestVectorIndex_Insert_ConcurrentOverwrites(t *testing.T) {
 func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 	t.Run("empty_id", func(t *testing.T) {
 		idx := newTestIndex(t)
-		idx.Insert("", []float32{1.0, 2.0}, nil)
+		idx.Insert("", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 
 		require.Contains(t, idx.Store, "", "Empty ID should be allowed")
 		assert.Equal(t, "", idx.Store[""].ID)
@@ -276,7 +278,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 		}
 
 		for _, id := range specialIDs {
-			idx.Insert(id, []float32{1.0}, nil)
+			idx.Insert(id, []float32{1.0}, core.SparseVector{}, nil)
 			require.Contains(t, idx.Store, id, "ID with special characters should be allowed: %s", id)
 		}
 
@@ -285,7 +287,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 
 	t.Run("nil_vector", func(t *testing.T) {
 		idx := newTestIndex(t)
-		idx.Insert("nil_vec", nil, map[string]any{"type": "nil"})
+		idx.Insert("nil_vec", nil, core.SparseVector{}, map[string]any{"type": "nil"})
 
 		require.Contains(t, idx.Store, "nil_vec")
 		assert.Nil(t, idx.Store["nil_vec"].Vector)
@@ -298,7 +300,7 @@ func TestVectorIndex_Insert_EdgeCases(t *testing.T) {
 			largeVec[i] = float32(i)
 		}
 
-		idx.Insert("large", largeVec, nil)
+		idx.Insert("large", largeVec, core.SparseVector{}, nil)
 
 		require.Contains(t, idx.Store, "large")
 		assert.Len(t, idx.Store["large"].Vector, 4096)
@@ -309,7 +311,7 @@ func TestVectorIndex_Search_EmptyIndex(t *testing.T) {
 	idx := newTestIndex(t)
 	query := []float32{1.0, 2.0, 3.0}
 
-	results, err := idx.Search(query, 5, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 5, nil)
 
 	require.NoError(t, err)
 	assert.Empty(t, results, "Search on empty index should return empty results")
@@ -317,10 +319,10 @@ func TestVectorIndex_Search_EmptyIndex(t *testing.T) {
 
 func TestVectorIndex_Search_SingleVector(t *testing.T) {
 	idx := newTestIndex(t)
-	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"label": "test"})
 
 	query := []float32{1.0, 2.0, 3.0}
-	results, err := idx.Search(query, 5, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 5, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -333,13 +335,13 @@ func TestVectorIndex_Search_MultipleVectors(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// Insert vectors with different similarities to query
-	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, map[string]any{"type": "identical"})
-	idx.Insert("similar", []float32{0.9, 0.1, 0.0}, map[string]any{"type": "similar"})
-	idx.Insert("orthogonal", []float32{0.0, 1.0, 0.0}, map[string]any{"type": "orthogonal"})
-	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, map[string]any{"type": "opposite"})
+	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, core.SparseVector{}, map[string]any{"type": "identical"})
+	idx.Insert("similar", []float32{0.9, 0.1, 0.0}, core.SparseVector{}, map[string]any{"type": "similar"})
+	idx.Insert("orthogonal", []float32{0.0, 1.0, 0.0}, core.SparseVector{}, map[string]any{"type": "orthogonal"})
+	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, core.SparseVector{}, map[string]any{"type": "opposite"})
 
 	query := []float32{1.0, 0.0, 0.0}
-	results, err := idx.Search(query, 10, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 10, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 4)
@@ -364,7 +366,7 @@ func TestVectorIndex_Search_WithLimit(t *testing.T) {
 	// Insert 10 vectors (start from 1 to avoid zero vector)
 	for i := 1; i <= 10; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]any{"index": i})
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, map[string]any{"index": i})
 	}
 
 	query := []float32{5.0, 10.0}
@@ -383,7 +385,7 @@ func TestVectorIndex_Search_WithLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := idx.Search(query, tt.limit, nil)
+			results, err := idx.Search(query, core.SparseVector{}, tt.limit, nil)
 			require.NoError(t, err)
 			assert.Len(t, results, tt.expectedCount)
 		})
@@ -395,11 +397,11 @@ func TestVectorIndex_Search_WithZeroLimit(t *testing.T) {
 
 	for i := 1; i <= 5; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, nil)
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, nil)
 	}
 
 	query := []float32{1.0, 2.0}
-	results, err := idx.Search(query, 0, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 0, nil)
 
 	require.NoError(t, err)
 	assert.Len(t, results, 5, "Zero limit should return all results")
@@ -407,10 +409,10 @@ func TestVectorIndex_Search_WithZeroLimit(t *testing.T) {
 
 func TestVectorIndex_Search_EmptyQuery(t *testing.T) {
 	idx := newTestIndex(t)
-	idx.Insert("v1", []float32{1.0, 2.0}, nil)
+	idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 
 	query := []float32{}
-	results, err := idx.Search(query, 5, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 5, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, "empty query vector", err.Error())
@@ -419,12 +421,14 @@ func TestVectorIndex_Search_EmptyQuery(t *testing.T) {
 
 func TestVectorIndex_Search_DimensionMismatch(t *testing.T) {
 	idx := newTestIndex(t)
-	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, nil)
-	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, nil)
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, nil)
+	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, core.SparseVector{
 
-	// Query with different dimension
+		// Query with different dimension
+	}, nil)
+
 	query := []float32{1.0, 2.0}
-	results, err := idx.Search(query, 5, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 5, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "vector dimensions mismatch")
@@ -441,10 +445,10 @@ func TestVectorIndex_Search_ResultsIncludeMetadata(t *testing.T) {
 		"tags":     []string{"go", "vector"},
 	}
 
-	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, metadata)
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, metadata)
 
 	query := []float32{1.0, 2.0, 3.0}
-	results, err := idx.Search(query, 1, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 1, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -459,13 +463,17 @@ func TestVectorIndex_Search_SortingOrder(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// Insert vectors with known similarity scores to query [1,0,0]
-	idx.Insert("high", []float32{1.0, 0.0, 0.0}, nil)      // score = 1.0
-	idx.Insert("medium", []float32{0.7, 0.7, 0.0}, nil)    // score ≈ 0.7
-	idx.Insert("low", []float32{0.5, 0.866, 0.0}, nil)     // score ≈ 0.5
-	idx.Insert("negative", []float32{-1.0, 0.0, 0.0}, nil) // score = -1.0
+	idx.Insert("high", []float32{1.0, 0.0, 0.0}, core.SparseVector{ // score = 1.0
+	}, nil)
+	idx.Insert("medium", []float32{0.7, 0.7, 0.0}, core.SparseVector{ // score ≈ 0.7
+	}, nil)
+	idx.Insert("low", []float32{0.5, 0.866, 0.0}, core.SparseVector{ // score ≈ 0.5
+	}, nil)
+	idx.Insert("negative", []float32{-1.0, 0.0, 0.0}, core.SparseVector{ // score = -1.0
+	}, nil)
 
 	query := []float32{1.0, 0.0, 0.0}
-	results, err := idx.Search(query, 10, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 10, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 4)
@@ -485,11 +493,11 @@ func TestVectorIndex_Search_IdenticalVectors(t *testing.T) {
 
 	// Insert multiple identical vectors
 	for i := 0; i < 3; i++ {
-		idx.Insert(fmt.Sprintf("v%d", i), []float32{1.0, 2.0, 3.0}, map[string]any{"id": i})
+		idx.Insert(fmt.Sprintf("v%d", i), []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"id": i})
 	}
 
 	query := []float32{1.0, 2.0, 3.0}
-	results, err := idx.Search(query, 10, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 10, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 3)
@@ -506,7 +514,7 @@ func TestVectorIndex_Search_Concurrency(t *testing.T) {
 	// Insert test vectors (start from 1 to avoid zero vector)
 	for i := 1; i <= 100; i++ {
 		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]any{"index": i})
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, map[string]any{"index": i})
 	}
 
 	var wg sync.WaitGroup
@@ -518,7 +526,7 @@ func TestVectorIndex_Search_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, err := idx.Search(query, 10, nil)
+			results, err := idx.Search(query, core.SparseVector{}, 10, nil)
 			assert.NoError(t, err)
 			assert.Len(t, results, 10)
 
@@ -538,7 +546,7 @@ func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
 	// Pre-populate with some vectors (start from 1 to avoid zero vector)
 	for i := 1; i <= 50; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, nil)
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, nil)
 	}
 
 	var wg sync.WaitGroup
@@ -549,7 +557,7 @@ func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, err := idx.Search(query, 5, nil)
+			results, err := idx.Search(query, core.SparseVector{}, 5, nil)
 			assert.NoError(t, err)
 			assert.NotNil(t, results)
 		}()
@@ -561,7 +569,7 @@ func TestVectorIndex_Search_ConcurrentInsertAndSearch(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			vec := []float32{float32(id), float32(id * 2)}
-			idx.Insert(fmt.Sprintf("v%d", id), vec, nil)
+			idx.Insert(fmt.Sprintf("v%d", id), vec, core.SparseVector{}, nil)
 		}(i)
 	}
 
@@ -587,11 +595,11 @@ func TestVectorIndex_Search_HighDimensional(t *testing.T) {
 		}
 	}
 
-	idx.Insert("v1", vec1, map[string]any{"type": "identical"})
-	idx.Insert("v2", vec2, map[string]any{"type": "identical"})
-	idx.Insert("v3", vec3, map[string]any{"type": "different"})
+	idx.Insert("v1", vec1, core.SparseVector{}, map[string]any{"type": "identical"})
+	idx.Insert("v2", vec2, core.SparseVector{}, map[string]any{"type": "identical"})
+	idx.Insert("v3", vec3, core.SparseVector{}, map[string]any{"type": "different"})
 
-	results, err := idx.Search(vec1, 3, nil)
+	results, err := idx.Search(vec1, core.SparseVector{}, 3, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 3)
@@ -605,11 +613,11 @@ func TestVectorIndex_Search_HighDimensional(t *testing.T) {
 
 func TestVectorIndex_Search_NilMetadata(t *testing.T) {
 	idx := newTestIndex(t)
-	idx.Insert("v1", []float32{1.0, 2.0}, nil)
-	idx.Insert("v2", []float32{2.0, 3.0}, nil)
+	idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
+	idx.Insert("v2", []float32{2.0, 3.0}, core.SparseVector{}, nil)
 
 	query := []float32{1.0, 2.0}
-	results, err := idx.Search(query, 2, nil)
+	results, err := idx.Search(query, core.SparseVector{}, 2, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 2)
@@ -623,10 +631,10 @@ func TestVectorIndex_Search_NilMetadata(t *testing.T) {
 func TestVectorIndex_Search_WithFilters(t *testing.T) {
 	idx := newTestIndex(t)
 
-	idx.Insert("books1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"category": "books", "active": true, "score": float64(90)})
-	idx.Insert("books2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"category": "books", "active": false, "score": float64(80)})
-	idx.Insert("music1", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"category": "music", "active": true, "score": float64(70)})
-	idx.Insert("nilmeta", []float32{0.5, 0.5, 0.0}, nil)
+	idx.Insert("books1", []float32{1.0, 0.0, 0.0}, core.SparseVector{}, map[string]interface{}{"category": "books", "active": true, "score": float64(90)})
+	idx.Insert("books2", []float32{0.9, 0.1, 0.0}, core.SparseVector{}, map[string]interface{}{"category": "books", "active": false, "score": float64(80)})
+	idx.Insert("music1", []float32{0.0, 1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"category": "music", "active": true, "score": float64(70)})
+	idx.Insert("nilmeta", []float32{0.5, 0.5, 0.0}, core.SparseVector{}, nil)
 
 	query := []float32{1.0, 0.0, 0.0}
 
@@ -689,7 +697,7 @@ func TestVectorIndex_Search_WithFilters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := idx.Search(query, 0, tt.filter)
+			results, err := idx.Search(query, core.SparseVector{}, 0, tt.filter)
 			require.NoError(t, err)
 
 			resultIDs := make([]string, len(results))
@@ -710,14 +718,14 @@ func TestVectorIndex_Search_WithFilters(t *testing.T) {
 func TestVectorIndex_Search_FilterReducesResults(t *testing.T) {
 	idx := newTestIndex(t)
 
-	idx.Insert("a1", []float32{1.0, 0.0}, map[string]interface{}{"type": "A"})
-	idx.Insert("a2", []float32{0.9, 0.1}, map[string]interface{}{"type": "A"})
-	idx.Insert("a3", []float32{0.8, 0.2}, map[string]interface{}{"type": "A"})
-	idx.Insert("b1", []float32{0.0, 1.0}, map[string]interface{}{"type": "B"})
-	idx.Insert("b2", []float32{0.1, 0.9}, map[string]interface{}{"type": "B"})
+	idx.Insert("a1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "A"})
+	idx.Insert("a2", []float32{0.9, 0.1}, core.SparseVector{}, map[string]interface{}{"type": "A"})
+	idx.Insert("a3", []float32{0.8, 0.2}, core.SparseVector{}, map[string]interface{}{"type": "A"})
+	idx.Insert("b1", []float32{0.0, 1.0}, core.SparseVector{}, map[string]interface{}{"type": "B"})
+	idx.Insert("b2", []float32{0.1, 0.9}, core.SparseVector{}, map[string]interface{}{"type": "B"})
 
 	query := []float32{1.0, 0.0}
-	results, err := idx.Search(query, 10, map[string]interface{}{"type": "A"})
+	results, err := idx.Search(query, core.SparseVector{}, 10, map[string]interface{}{"type": "A"})
 
 	require.NoError(t, err)
 	require.Len(t, results, 3, "Filter should return exactly 3 type=A results")
@@ -735,14 +743,14 @@ func TestVectorIndex_Search_FilterReducesResults(t *testing.T) {
 func TestVectorIndex_Search_FilterWithLimit(t *testing.T) {
 	idx := newTestIndex(t)
 
-	idx.Insert("close1", []float32{1.0, 0.0}, map[string]interface{}{"tag": "keep"})
-	idx.Insert("close2", []float32{0.9, 0.1}, map[string]interface{}{"tag": "keep"})
-	idx.Insert("mid1", []float32{0.7, 0.3}, map[string]interface{}{"tag": "keep"})
-	idx.Insert("far1", []float32{0.5, 0.5}, map[string]interface{}{"tag": "keep"})
-	idx.Insert("far2", []float32{0.3, 0.7}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("close1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("close2", []float32{0.9, 0.1}, core.SparseVector{}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("mid1", []float32{0.7, 0.3}, core.SparseVector{}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("far1", []float32{0.5, 0.5}, core.SparseVector{}, map[string]interface{}{"tag": "keep"})
+	idx.Insert("far2", []float32{0.3, 0.7}, core.SparseVector{}, map[string]interface{}{"tag": "keep"})
 
 	query := []float32{1.0, 0.0}
-	results, err := idx.Search(query, 2, map[string]interface{}{"tag": "keep"})
+	results, err := idx.Search(query, core.SparseVector{}, 2, map[string]interface{}{"tag": "keep"})
 
 	require.NoError(t, err)
 	assert.Len(t, results, 2, "Filter + limit should return exactly 2 results")
@@ -752,11 +760,11 @@ func TestVectorIndex_Search_FilterWithLimit(t *testing.T) {
 
 func TestVectorIndex_Search_NilMetadataWithFilter(t *testing.T) {
 	idx := newTestIndex(t)
-	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"label": "x"})
-	idx.Insert("v2", []float32{0.9, 0.1}, nil)
+	idx.Insert("v1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "x"})
+	idx.Insert("v2", []float32{0.9, 0.1}, core.SparseVector{}, nil)
 
 	query := []float32{1.0, 0.0}
-	results, err := idx.Search(query, 10, map[string]interface{}{"label": "x"})
+	results, err := idx.Search(query, core.SparseVector{}, 10, map[string]interface{}{"label": "x"})
 
 	require.NoError(t, err)
 	require.Len(t, results, 1, "Only v1 should match; v2 has nil metadata")

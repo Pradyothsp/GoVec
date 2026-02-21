@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // =============================================================================
@@ -17,7 +19,7 @@ import (
 
 func TestSaveToFile_CreatesFileSuccessfully(t *testing.T) {
 	index := newTestIndex(t)
-	index.Insert("test1", []float32{1.0, 2.0, 3.0}, map[string]any{"label": "test"})
+	index.Insert("test1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"label": "test"})
 
 	tmpFile := filepath.Join(t.TempDir(), "test.bin")
 
@@ -47,7 +49,7 @@ func TestSaveToFile_PopulatedIndex(t *testing.T) {
 		id := fmt.Sprintf("vec%d", i)
 		vec := []float32{float32(i), float32(i * 2)}
 		meta := map[string]any{"index": i, "batch": "test"}
-		index.Insert(id, vec, meta)
+		index.Insert(id, vec, core.SparseVector{}, meta)
 	}
 
 	tmpFile := filepath.Join(t.TempDir(), "populated.bin")
@@ -62,8 +64,8 @@ func TestSaveToFile_PopulatedIndex(t *testing.T) {
 
 func TestLoadFromFile_ReadsSavedDataCorrectly(t *testing.T) {
 	index := newTestIndex(t)
-	index.Insert("v1", []float32{1.0, 2.0}, map[string]any{"label": "first"})
-	index.Insert("v2", []float32{3.0, 4.0}, nil)
+	index.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"label": "first"})
+	index.Insert("v2", []float32{3.0, 4.0}, core.SparseVector{}, nil)
 
 	tmpFile := filepath.Join(t.TempDir(), "load_test.bin")
 
@@ -97,13 +99,13 @@ func TestLoadFromFile_MissingFile(t *testing.T) {
 func TestRoundTrip_Preservation(t *testing.T) {
 	// Create index with diverse data
 	original := newTestIndex(t)
-	original.Insert("vec1", []float32{1.0, 2.0, 3.0}, map[string]any{
+	original.Insert("vec1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{
 		"string": "value",
 		"number": 42,
 		"bool":   true,
 	})
-	original.Insert("vec2", []float32{4.0, 5.0}, nil)
-	original.Insert("vec3", []float32{6.0}, map[string]any{
+	original.Insert("vec2", []float32{4.0, 5.0}, core.SparseVector{}, nil)
+	original.Insert("vec3", []float32{6.0}, core.SparseVector{}, map[string]any{
 		"nested": map[string]any{
 			"level1": "deep",
 		},
@@ -154,7 +156,7 @@ func TestComplexNestedMetadata_Persistence(t *testing.T) {
 		// Note: empty_array is omitted because GOB encodes empty slices as nil
 	}
 
-	index.Insert("complex", []float32{1.0, 2.0}, complexMeta)
+	index.Insert("complex", []float32{1.0, 2.0}, core.SparseVector{}, complexMeta)
 
 	tmpFile := filepath.Join(t.TempDir(), "complex_meta.bin")
 
@@ -199,7 +201,7 @@ func TestLargeVectors_PersistCorrectly(t *testing.T) {
 				vec[i] = float32(i) * 0.001
 			}
 
-			index.Insert("large_vec", vec, map[string]any{"dimensions": tc.dimensions})
+			index.Insert("large_vec", vec, core.SparseVector{}, map[string]any{"dimensions": tc.dimensions})
 
 			tmpFile := filepath.Join(t.TempDir(), fmt.Sprintf("%s.bin", tc.name))
 
@@ -219,7 +221,7 @@ func TestLargeVectors_PersistCorrectly(t *testing.T) {
 
 func TestEmptyVectors_Persist(t *testing.T) {
 	index := newTestIndex(t)
-	index.Insert("empty", []float32{}, map[string]any{"type": "empty"})
+	index.Insert("empty", []float32{}, core.SparseVector{}, map[string]any{"type": "empty"})
 
 	tmpFile := filepath.Join(t.TempDir(), "empty_vec.bin")
 
@@ -249,7 +251,7 @@ func TestSpecialCharactersInIDs_Persist(t *testing.T) {
 
 	index := newTestIndex(t)
 	for _, id := range testIDs {
-		index.Insert(id, []float32{1.0, 2.0}, map[string]any{"id": id})
+		index.Insert(id, []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"id": id})
 	}
 
 	tmpFile := filepath.Join(t.TempDir(), "special_ids.bin")
@@ -284,7 +286,7 @@ func TestVariousMetadataTypes_Persist(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		index.Insert(tc.id, []float32{1.0}, tc.meta)
+		index.Insert(tc.id, []float32{1.0}, core.SparseVector{}, tc.meta)
 	}
 
 	tmpFile := filepath.Join(t.TempDir(), "various_meta.bin")
@@ -311,7 +313,7 @@ func TestLargeNumberOfVectors_Performance(t *testing.T) {
 		id := fmt.Sprintf("vec%d", i)
 		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
 		meta := map[string]any{"index": i, "batch": "performance_test"}
-		index.Insert(id, vec, meta)
+		index.Insert(id, vec, core.SparseVector{}, meta)
 	}
 
 	tmpFile := filepath.Join(t.TempDir(), "large_dataset.bin")
@@ -335,7 +337,7 @@ func TestLargeNumberOfVectors_Performance(t *testing.T) {
 
 func TestNilMetadata_Handling(t *testing.T) {
 	index := newTestIndex(t)
-	index.Insert("no_meta", []float32{1.0, 2.0, 3.0}, nil)
+	index.Insert("no_meta", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, nil)
 
 	tmpFile := filepath.Join(t.TempDir(), "nil_meta.bin")
 
@@ -359,13 +361,13 @@ func TestSaveToFile_OverwritesExistingFile(t *testing.T) {
 
 	// Save first version
 	index1 := newTestIndex(t)
-	index1.Insert("v1", []float32{1.0, 2.0}, map[string]any{"version": 1})
+	index1.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"version": 1})
 	err := index1.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
 	// Save second version (overwrite)
 	index2 := newTestIndex(t)
-	index2.Insert("v2", []float32{3.0, 4.0}, map[string]any{"version": 2})
+	index2.Insert("v2", []float32{3.0, 4.0}, core.SparseVector{}, map[string]any{"version": 2})
 	err = index2.SaveToFile(tmpFile)
 	require.NoError(t, err)
 
@@ -381,9 +383,11 @@ func TestSaveToFile_OverwritesExistingFile(t *testing.T) {
 
 func TestSaveToFile_InvalidPath(t *testing.T) {
 	index := newTestIndex(t)
-	index.Insert("test", []float32{1.0}, nil)
+	index.Insert("test", []float32{1.0}, core.SparseVector{
 
-	// Try to save to invalid path
+		// Try to save to invalid path
+	}, nil)
+
 	err := index.SaveToFile("/invalid/nonexistent/path/file.bin")
 	assert.Error(t, err, "Should return error for invalid path")
 }
@@ -420,7 +424,7 @@ func TestTempFileCleanup_OnSuccess(t *testing.T) {
 	tempFile := tmpFile + ".tmp"
 
 	index := newTestIndex(t)
-	index.Insert("test", []float32{1.0}, nil)
+	index.Insert("test", []float32{1.0}, core.SparseVector{}, nil)
 
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
@@ -453,7 +457,7 @@ func TestConcurrentInsert_AndSave(t *testing.T) {
 			vecID := fmt.Sprintf("vec%d", id)
 			vec := []float32{float32(id), float32(id * 2)}
 			meta := map[string]any{"index": id}
-			index.Insert(vecID, vec, meta)
+			index.Insert(vecID, vec, core.SparseVector{}, meta)
 		}(i)
 	}
 
@@ -478,7 +482,7 @@ func TestConcurrentSearch_AndSave(t *testing.T) {
 	for i := 1; i <= 100; i++ { // Start from 1 to avoid zero vectors
 		id := fmt.Sprintf("vec%d", i)
 		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-		index.Insert(id, vec, nil)
+		index.Insert(id, vec, core.SparseVector{}, nil)
 	}
 
 	tmpFile := filepath.Join(t.TempDir(), "concurrent_search_save.bin")
@@ -492,7 +496,7 @@ func TestConcurrentSearch_AndSave(t *testing.T) {
 		go func(queryID int) {
 			defer wg.Done()
 			query := []float32{float32(queryID), float32(queryID * 2), float32(queryID * 3)}
-			_, err := index.Search(query, 5, nil)
+			_, err := index.Search(query, core.SparseVector{}, 5, nil)
 			assert.NoError(t, err, "Search should succeed during save")
 		}(i)
 	}
@@ -514,7 +518,7 @@ func TestConcurrentSearch_AndSave(t *testing.T) {
 
 func TestMultipleSaveToFile_Calls(t *testing.T) {
 	index := newTestIndex(t)
-	index.Insert("test", []float32{1.0, 2.0}, nil)
+	index.Insert("test", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 
 	tmpFile := filepath.Join(t.TempDir(), "multi_save.bin")
 
@@ -566,10 +570,10 @@ func TestOverwriteThenPersist(t *testing.T) {
 	index := newTestIndex(t)
 
 	// Insert initial value
-	index.Insert("vec", []float32{1.0, 2.0}, map[string]any{"version": 1.0})
+	index.Insert("vec", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"version": 1.0})
 
 	// Overwrite with updated value
-	index.Insert("vec", []float32{3.0, 4.0, 5.0}, map[string]any{"version": 2.0})
+	index.Insert("vec", []float32{3.0, 4.0, 5.0}, core.SparseVector{}, map[string]any{"version": 2.0})
 
 	// Save
 	err := index.SaveToFile(tmpFile)
@@ -599,7 +603,7 @@ func TestVeryLongFilePaths(t *testing.T) {
 	tmpFile := filepath.Join(longPath, "test.bin")
 
 	index := newTestIndex(t)
-	index.Insert("test", []float32{1.0}, nil)
+	index.Insert("test", []float32{1.0}, core.SparseVector{}, nil)
 
 	err = index.SaveToFile(tmpFile)
 	require.NoError(t, err, "Should handle long paths")
@@ -621,7 +625,7 @@ func TestSpecialCharactersInFilePath(t *testing.T) {
 	tmpFile := filepath.Join(dirWithSpaces, "test file.bin")
 
 	index := newTestIndex(t)
-	index.Insert("test", []float32{1.0}, nil)
+	index.Insert("test", []float32{1.0}, core.SparseVector{}, nil)
 
 	err = index.SaveToFile(tmpFile)
 	require.NoError(t, err, "Should handle spaces in path")
@@ -639,10 +643,12 @@ func TestAtomicWrite_Verification(t *testing.T) {
 	index := newTestIndex(t)
 	for i := 0; i < 100; i++ {
 		id := fmt.Sprintf("vec%d", i)
-		index.Insert(id, []float32{float32(i)}, nil)
+		index.Insert(id, []float32{float32(i)}, core.SparseVector{
+
+			// Save should use atomic write (.tmp file then rename)
+		}, nil)
 	}
 
-	// Save should use atomic write (.tmp file then rename)
 	err := index.SaveToFile(tmpFile)
 	require.NoError(t, err)
 

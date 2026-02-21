@@ -30,7 +30,7 @@ func NewTestIndex(t testing.TB) *index.VectorIndex[[]float32] {
 
 	// Create index with identity encode function and cosine similarity
 	identityFunc := func(v []float32) []float32 { return v }
-	return index.NewVectorIndex[[]float32](wal, identityFunc, core.CosineSimilarity)
+	return index.NewVectorIndex[[]float32](wal, nil, identityFunc, core.CosineSimilarity)
 }
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing.
@@ -38,17 +38,17 @@ func NewTestVectorIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	t.Helper()
 	idx := NewTestIndex(t)
 
-	_ = idx.Insert("test1", []float32{1.0, 2.0, 3.0}, map[string]any{ //nolint:errcheck // test helper
+	_ = idx.Insert("test1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{ //nolint:errcheck // test helper
 		"label": "first",
 		"type":  "test",
 	})
 
-	_ = idx.Insert("test2", []float32{4.0, 5.0, 6.0}, map[string]any{ //nolint:errcheck // test helper
+	_ = idx.Insert("test2", []float32{4.0, 5.0, 6.0}, core.SparseVector{}, map[string]any{ //nolint:errcheck // test helper
 		"label": "second",
 		"type":  "test",
 	})
 
-	_ = idx.Insert("test3", []float32{7.0, 8.0, 9.0}, nil) //nolint:errcheck // test helper
+	_ = idx.Insert("test3", []float32{7.0, 8.0, 9.0}, core.SparseVector{}, nil) //nolint:errcheck // test helper
 
 	return idx
 }
@@ -179,7 +179,7 @@ func PopulateIndexWithVectors(idx *index.VectorIndex[[]float32], count int) {
 			"type":  "test_vector",
 			"batch": "populated",
 		}
-		_ = idx.Insert(id, vec, meta) //nolint:errcheck // test helper
+		_ = idx.Insert(id, vec, core.SparseVector{}, meta) //nolint:errcheck // test helper
 	}
 }
 
@@ -226,7 +226,7 @@ func NewWALWithPath(t testing.TB, path string) *index.WAL {
 }
 
 // WriteWALEntry manually writes entries for test setup
-func WriteWALEntry(t testing.TB, path string, entry index.WALEntry) {
+func WriteWALEntry(t testing.TB, path string, entry *index.WALEntry) {
 	t.Helper()
 	wal := NewWALWithPath(t, path)
 	err := wal.WriteEntry(entry)

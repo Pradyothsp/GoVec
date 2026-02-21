@@ -44,6 +44,7 @@ tasks:
   # Run all checks (tests + race detector + coverage)
   test:all:
     desc: Run full test suite (race detector + coverage)
+    aliases: [test:a]
     cmds:
       - echo "==> Running tests with race detector..."
       - gotestsum --format testname -- -race ./...

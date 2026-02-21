@@ -14,6 +14,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/index"
 
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -407,9 +408,9 @@ func TestVectorHandler_Search_ValidRequest(t *testing.T) {
 	handler := NewVectorHandler(idx)
 
 	// Insert test vectors
-	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"label": "first"})
-	idx.Insert("v2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"label": "second"})
-	idx.Insert("v3", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"label": "third"})
+	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "first"})
+	idx.Insert("v2", []float32{0.9, 0.1, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "second"})
+	idx.Insert("v3", []float32{0.0, 1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "third"})
 
 	req := SearchRequest{
 		Vector: []float32{1.0, 0.0, 0.0},
@@ -448,7 +449,7 @@ func TestVectorHandler_Search_WithoutK(t *testing.T) {
 	// Insert test vectors
 	for i := 1; i <= 5; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, nil)
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, nil)
 	}
 
 	req := SearchRequest{
@@ -518,7 +519,7 @@ func TestVectorHandler_Search_EmptyVector(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
-	idx.Insert("v1", []float32{1.0, 2.0}, nil)
+	idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 
 	req := SearchRequest{
 		Vector: []float32{},
@@ -571,7 +572,7 @@ func TestVectorHandler_Search_VariousKValues(t *testing.T) {
 	// Insert 10 vectors
 	for i := 1; i <= 10; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]interface{}{"index": i})
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, map[string]interface{}{"index": i})
 	}
 
 	tests := []struct {
@@ -626,8 +627,8 @@ func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
 		"active":   true,
 	}
 
-	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, metadata)
-	idx.Insert("v2", []float32{2.0, 3.0, 4.0}, map[string]interface{}{"label": "second"})
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, metadata)
+	idx.Insert("v2", []float32{2.0, 3.0, 4.0}, core.SparseVector{}, map[string]interface{}{"label": "second"})
 
 	req := SearchRequest{
 		Vector: []float32{1.0, 2.0, 3.0},
@@ -668,10 +669,10 @@ func TestVectorHandler_Search_Integration(t *testing.T) {
 	handler := NewVectorHandler(idx)
 
 	// Insert diverse vectors
-	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"type": "identical"})
-	idx.Insert("similar", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"type": "similar"})
-	idx.Insert("orthogonal", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"type": "orthogonal"})
-	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, map[string]interface{}{"type": "opposite"})
+	idx.Insert("identical", []float32{1.0, 0.0, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "identical"})
+	idx.Insert("similar", []float32{0.9, 0.1, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "similar"})
+	idx.Insert("orthogonal", []float32{0.0, 1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "orthogonal"})
+	idx.Insert("opposite", []float32{-1.0, 0.0, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "opposite"})
 
 	req := SearchRequest{
 		Vector: []float32{1.0, 0.0, 0.0},
@@ -750,10 +751,12 @@ func TestVectorHandler_Search_DimensionMismatch(t *testing.T) {
 	handler := NewVectorHandler(idx)
 
 	// Insert 3D vectors
-	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, nil)
-	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, nil)
+	idx.Insert("v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, nil)
+	idx.Insert("v2", []float32{4.0, 5.0, 6.0}, core.SparseVector{
 
-	// Search with 2D vector
+		// Search with 2D vector
+	}, nil)
+
 	req := SearchRequest{
 		Vector: []float32{1.0, 2.0},
 		K:      5,
@@ -793,8 +796,8 @@ func TestVectorHandler_Search_LargeVectors(t *testing.T) {
 		}
 	}
 
-	idx.Insert("large1", vec1, map[string]interface{}{"model": "text-embedding-ada-002"})
-	idx.Insert("large2", vec2, map[string]interface{}{"model": "text-embedding-ada-002"})
+	idx.Insert("large1", vec1, core.SparseVector{}, map[string]interface{}{"model": "text-embedding-ada-002"})
+	idx.Insert("large2", vec2, core.SparseVector{}, map[string]interface{}{"model": "text-embedding-ada-002"})
 
 	req := SearchRequest{
 		Vector: vec1,
@@ -858,9 +861,9 @@ func TestVectorHandler_Search_WithFilter(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
-	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"label": "a"})
-	idx.Insert("v2", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"label": "b"})
-	idx.Insert("v3", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"label": "a"})
+	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "a"})
+	idx.Insert("v2", []float32{0.0, 1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "b"})
+	idx.Insert("v3", []float32{0.9, 0.1, 0.0}, core.SparseVector{}, map[string]interface{}{"label": "a"})
 
 	req := map[string]interface{}{
 		"vector": []float32{1.0, 0.0, 0.0},
@@ -902,8 +905,8 @@ func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
-	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"type": "X"})
-	idx.Insert("v2", []float32{0.9, 0.1}, map[string]interface{}{"type": "X"})
+	idx.Insert("v1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "X"})
+	idx.Insert("v2", []float32{0.9, 0.1}, core.SparseVector{}, map[string]interface{}{"type": "X"})
 
 	req := map[string]interface{}{
 		"vector": []float32{1.0, 0.0},
@@ -939,7 +942,7 @@ func TestVectorHandler_Search_FilterAndK(t *testing.T) {
 
 	for i := 1; i <= 5; i++ {
 		vec := []float32{float32(i), float32(i * 2)}
-		idx.Insert(fmt.Sprintf("v%d", i), vec, map[string]interface{}{"tag": "t"})
+		idx.Insert(fmt.Sprintf("v%d", i), vec, core.SparseVector{}, map[string]interface{}{"tag": "t"})
 	}
 
 	req := map[string]interface{}{
@@ -974,9 +977,9 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
-	idx.Insert("v1", []float32{1.0, 0.0}, map[string]interface{}{"type": "A"})
-	idx.Insert("v2", []float32{0.9, 0.1}, map[string]interface{}{"type": "B"})
-	idx.Insert("v3", []float32{0.8, 0.2}, map[string]interface{}{"type": "C"})
+	idx.Insert("v1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"type": "A"})
+	idx.Insert("v2", []float32{0.9, 0.1}, core.SparseVector{}, map[string]interface{}{"type": "B"})
+	idx.Insert("v3", []float32{0.8, 0.2}, core.SparseVector{}, map[string]interface{}{"type": "C"})
 
 	// No filter field in request
 	req := map[string]interface{}{
@@ -1018,7 +1021,7 @@ func TestVectorHandler_Delete(t *testing.T) {
 		{
 			name: "success",
 			setup: func(idx *index.VectorIndex[[]float32]) {
-				idx.Insert("v1", []float32{1.0, 2.0}, nil)
+				idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 			},
 			id:             "v1",
 			expectedStatus: http.StatusOK,
@@ -1084,7 +1087,7 @@ func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 		handler := NewVectorHandler(idx)
 
 		specialID := "vec/with/slashes"
-		idx.Insert(specialID, []float32{1.0, 2.0}, nil)
+		idx.Insert(specialID, []float32{1.0, 2.0}, core.SparseVector{}, nil)
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -1102,9 +1105,11 @@ func TestVectorHandler_Delete_EdgeCases(t *testing.T) {
 		idx := testutil.NewTestIndex(t)
 		handler := NewVectorHandler(idx)
 
-		idx.Insert("v1", []float32{1.0, 2.0}, nil)
+		idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{
 
-		// First delete — should succeed
+			// First delete — should succeed
+		}, nil)
+
 		w1 := httptest.NewRecorder()
 		c1, _ := gin.CreateTestContext(w1)
 		c1.Params = gin.Params{gin.Param{Key: "id", Value: "v1"}}
@@ -1127,9 +1132,9 @@ func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
 	handler := NewVectorHandler(idx)
 
-	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, map[string]interface{}{"cat": "A", "active": true})
-	idx.Insert("v2", []float32{0.9, 0.1, 0.0}, map[string]interface{}{"cat": "A", "active": false})
-	idx.Insert("v3", []float32{0.0, 1.0, 0.0}, map[string]interface{}{"cat": "B", "active": true})
+	idx.Insert("v1", []float32{1.0, 0.0, 0.0}, core.SparseVector{}, map[string]interface{}{"cat": "A", "active": true})
+	idx.Insert("v2", []float32{0.9, 0.1, 0.0}, core.SparseVector{}, map[string]interface{}{"cat": "A", "active": false})
+	idx.Insert("v3", []float32{0.0, 1.0, 0.0}, core.SparseVector{}, map[string]interface{}{"cat": "B", "active": true})
 
 	req := map[string]interface{}{
 		"vector": []float32{1.0, 0.0, 0.0},

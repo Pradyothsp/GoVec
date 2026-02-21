@@ -4,19 +4,24 @@ import (
 	"encoding/gob"
 	"fmt"
 	"os"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 func init() {
 	// Register types for GOB encoding/decoding of metadata
 	gob.Register(map[string]any{})
 	gob.Register([]any{})
+	// Register types for inverted index
+	gob.Register(core.Posting{})
 }
 
 // SnapshotHeader contains metadata about the snapshot file format
 type SnapshotHeader struct {
-	Version        int    // File format version (currently 1)
-	Quantization   string // "none" or "scalar"
-	DistanceMetric string // "cosine", etc.
+	Version             int    // File format version (currently 2)
+	Quantization        string // "none" or "scalar"
+	DistanceMetric      string // "cosine", etc.
+	HybridSearchEnabled bool   // Whether inverted index is included
 }
 
 // SaveToFile serializes the index to a specific path
@@ -53,9 +58,10 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 
 	// Write header first
 	header := SnapshotHeader{
-		Version:        1,
-		Quantization:   quantType,
-		DistanceMetric: "cosine", // TODO: Make this configurable when we support multiple metrics
+		Version:             2,
+		Quantization:        quantType,
+		DistanceMetric:      "cosine", // TODO: Make this configurable when we support multiple metrics
+		HybridSearchEnabled: idx.InvertedIndex != nil,
 	}
 	if err := encoder.Encode(header); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -63,11 +69,20 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 		return err
 	}
 
-	// Write data
+	// Write store (vector data)
 	if err := encoder.Encode(idx.Store); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
 		return err
+	}
+
+	// Write inverted index (if hybrid search is enabled)
+	if idx.InvertedIndex != nil {
+		if err := encoder.Encode(idx.InvertedIndex); err != nil {
+			_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+			_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
+			return err
+		}
 	}
 
 	// Close before rename — required on some OSes and ensures flush
@@ -88,6 +103,9 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 // LoadFromFile reads the index from disk.
 // A missing file is not an error — the server starts with an empty index.
 func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
 	f, err := os.Open(path) //nolint:gosec // path comes from operator config, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -109,8 +127,8 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 		return fmt.Errorf("failed to decode snapshot header: %w", err)
 	}
 
-	// Validate header version
-	if header.Version != 1 {
+	// Validate header version (support v1 and v2)
+	if header.Version != 1 && header.Version != 2 {
 		return fmt.Errorf("unsupported snapshot version: %d", header.Version)
 	}
 
@@ -130,6 +148,28 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 		return fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
 	}
 
-	// Read data
-	return decoder.Decode(&idx.Store)
+	// Read store (vector data)
+	if err := decoder.Decode(&idx.Store); err != nil {
+		return fmt.Errorf("failed to decode store: %w", err)
+	}
+
+	// Read inverted index (if v2 and hybrid search was enabled)
+	if header.Version == 2 && header.HybridSearchEnabled {
+		// Only load if current index has inverted index enabled
+		if idx.InvertedIndex != nil {
+			var loadedIndex map[uint32][]core.Posting
+			if err := decoder.Decode(&loadedIndex); err != nil {
+				return fmt.Errorf("failed to decode inverted index: %w", err)
+			}
+			idx.InvertedIndex = loadedIndex
+		} else {
+			// Skip inverted index data if current config doesn't have hybrid search
+			var discarded map[uint32][]core.Posting
+			if err := decoder.Decode(&discarded); err != nil {
+				return fmt.Errorf("failed to skip inverted index: %w", err)
+			}
+		}
+	}
+
+	return nil
 }

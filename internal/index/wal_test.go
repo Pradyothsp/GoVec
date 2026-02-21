@@ -45,7 +45,7 @@ func TestNewWAL_AppendsToExistingFile(t *testing.T) {
 	// Create WAL, write entry, close
 	wal1, err := NewWAL(walPath)
 	require.NoError(t, err)
-	err = wal1.WriteEntry(WALEntry{Action: WALActionInsert, ID: "vec1", Vector: []float32{1.0, 2.0}})
+	err = wal1.WriteEntry(&WALEntry{Action: WALActionInsert, ID: "vec1", Vector: []float32{1.0, 2.0}})
 	require.NoError(t, err)
 	wal1.Close()
 
@@ -53,7 +53,7 @@ func TestNewWAL_AppendsToExistingFile(t *testing.T) {
 	wal2, err := NewWAL(walPath)
 	require.NoError(t, err)
 	defer wal2.Close()
-	err = wal2.WriteEntry(WALEntry{Action: WALActionInsert, ID: "vec2", Vector: []float32{3.0, 4.0}})
+	err = wal2.WriteEntry(&WALEntry{Action: WALActionInsert, ID: "vec2", Vector: []float32{3.0, 4.0}})
 	require.NoError(t, err)
 
 	// Verify both entries present
@@ -80,7 +80,7 @@ func TestWriteEntry_SingleInsertAction(t *testing.T) {
 		Meta:   map[string]any{"label": "test"},
 	}
 
-	err = wal.WriteEntry(entry)
+	err = wal.WriteEntry(&entry)
 	require.NoError(t, err)
 
 	// Read and parse JSON
@@ -108,7 +108,7 @@ func TestWriteEntry_SingleDeleteAction(t *testing.T) {
 		ID:     "vec1",
 	}
 
-	err = wal.WriteEntry(entry)
+	err = wal.WriteEntry(&entry)
 	require.NoError(t, err)
 
 	// Read and parse JSON
@@ -138,7 +138,7 @@ func TestWriteEntry_MultipleEntries(t *testing.T) {
 			ID:     "vec" + string(rune('1'+i)),
 			Vector: []float32{float32(i)},
 		}
-		err = wal.WriteEntry(entry)
+		err = wal.WriteEntry(&entry)
 		require.NoError(t, err)
 	}
 
@@ -147,7 +147,7 @@ func TestWriteEntry_MultipleEntries(t *testing.T) {
 			Action: WALActionDelete,
 			ID:     "vec" + string(rune('1'+i)),
 		}
-		err = wal.WriteEntry(entry)
+		err = wal.WriteEntry(&entry)
 		require.NoError(t, err)
 	}
 
@@ -176,7 +176,7 @@ func TestWriteEntry_LargeVector(t *testing.T) {
 		Vector: vec,
 	}
 
-	err = wal.WriteEntry(entry)
+	err = wal.WriteEntry(&entry)
 	require.NoError(t, err)
 
 	// Read and verify
@@ -209,7 +209,7 @@ func TestWriteEntry_SpecialCharactersInMetadata(t *testing.T) {
 		},
 	}
 
-	err = wal.WriteEntry(entry)
+	err = wal.WriteEntry(&entry)
 	require.NoError(t, err)
 
 	// Read and verify JSON escaping
@@ -240,7 +240,7 @@ func TestClear_TruncatesFileToZero(t *testing.T) {
 			ID:     "vec" + string(rune('0'+i)),
 			Vector: []float32{float32(i)},
 		}
-		err = wal.WriteEntry(entry)
+		err = wal.WriteEntry(&entry)
 		require.NoError(t, err)
 	}
 
@@ -292,7 +292,7 @@ func TestClear_SeekPositionAfterClear(t *testing.T) {
 			ID:     "vec" + string(rune('1'+i)),
 			Vector: []float32{float32(i)},
 		}
-		err = wal.WriteEntry(entry)
+		err = wal.WriteEntry(&entry)
 		require.NoError(t, err)
 	}
 
@@ -306,7 +306,7 @@ func TestClear_SeekPositionAfterClear(t *testing.T) {
 		ID:     "new1",
 		Vector: []float32{99.0},
 	}
-	err = wal.WriteEntry(entry)
+	err = wal.WriteEntry(&entry)
 	require.NoError(t, err)
 
 	// Verify only 1 line at position 0
@@ -347,7 +347,7 @@ func TestClose_FlushesBufferedWrites(t *testing.T) {
 		ID:     "vec1",
 		Vector: []float32{1.0, 2.0},
 	}
-	err = wal.WriteEntry(entry)
+	err = wal.WriteEntry(&entry)
 	require.NoError(t, err)
 
 	// Check size before Close
@@ -391,7 +391,7 @@ func TestWriteEntry_ConcurrentWrites(t *testing.T) {
 				ID:     "vec" + string(rune('0'+id%10)),
 				Vector: []float32{float32(id)},
 			}
-			_ = wal.WriteEntry(entry)
+			_ = wal.WriteEntry(&entry)
 		}(i)
 	}
 
@@ -433,7 +433,7 @@ func TestClear_ConcurrentWithWrite(t *testing.T) {
 				ID:     "before" + string(rune('0'+i%10)),
 				Vector: []float32{float32(i)},
 			}
-			_ = wal.WriteEntry(entry)
+			_ = wal.WriteEntry(&entry)
 		}
 	}()
 
@@ -446,7 +446,7 @@ func TestClear_ConcurrentWithWrite(t *testing.T) {
 				ID:     "temp",
 				Vector: []float32{1.0},
 			}
-			_ = wal.WriteEntry(entry)
+			_ = wal.WriteEntry(&entry)
 		}
 		_ = wal.Clear()
 		for i := 0; i < 25; i++ {
@@ -455,7 +455,7 @@ func TestClear_ConcurrentWithWrite(t *testing.T) {
 				ID:     "after" + string(rune('0'+i%10)),
 				Vector: []float32{float32(i)},
 			}
-			_ = wal.WriteEntry(entry)
+			_ = wal.WriteEntry(&entry)
 		}
 	}()
 

@@ -15,7 +15,13 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		return nil, err
 	}
 
-	// Create engine based on quantization type
+	// Create an inverted index if hybrid search is enabled
+	var invertedIndex map[uint32][]core.Posting
+	if cfg.EnableHybridSearch {
+		invertedIndex = make(map[uint32][]core.Posting)
+	}
+
+	// Create an engine based on a quantization type
 	switch cfg.Quantization {
 	case "scalar":
 		// Int8 quantization
@@ -24,6 +30,7 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		}
 		return NewVectorIndex[[]int8](
 			wal,
+			invertedIndex,
 			core.QuantizeVector,
 			mathBlock.Int8Func,
 		), nil
@@ -33,6 +40,7 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		identityFunc := func(v []float32) []float32 { return v }
 		return NewVectorIndex[[]float32](
 			wal,
+			invertedIndex,
 			identityFunc,
 			mathBlock.FloatFunc,
 		), nil

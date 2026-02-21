@@ -7,8 +7,9 @@ import (
 
 // EngineConfig holds vector engine configuration
 type EngineConfig struct {
-	Quantization   string `yaml:"quantization"`
-	DistanceMetric string `yaml:"distance_metric"`
+	Quantization       string `yaml:"quantization"`
+	DistanceMetric     string `yaml:"distance_metric"`
+	EnableHybridSearch bool   `yaml:"enable_hybrid_search"`
 }
 
 // Config is the root configuration aggregate
@@ -54,8 +55,9 @@ func DefaultConfig() *Config {
 			AutoSaveInterval: 60 * time.Second,
 		},
 		Engine: EngineConfig{
-			Quantization:   "none",
-			DistanceMetric: "cosine",
+			Quantization:       "none",
+			DistanceMetric:     "cosine",
+			EnableHybridSearch: false,
 		},
 	}
 }

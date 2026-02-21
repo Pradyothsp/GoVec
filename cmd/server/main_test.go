@@ -22,7 +22,7 @@ func TestWALCloseOnShutdown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Write an entry
-	err = wal.WriteEntry(index.WALEntry{
+	err = wal.WriteEntry(&index.WALEntry{
 		Action: index.WALActionInsert,
 		ID:     "test1",
 		Vector: []float32{1.0, 2.0},
@@ -67,10 +67,10 @@ func TestRecoverySequence(t *testing.T) {
 	// Setup: Create snapshot with 3 vectors
 	setupWal, err := index.NewWAL(filepath.Join(tempDir, "setup.wal"))
 	require.NoError(t, err)
-	setupIdx := index.NewVectorIndex[[]float32](setupWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	setupIdx := index.NewVectorIndex[[]float32](setupWal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	for i := 1; i <= 3; i++ {
-		err = setupIdx.Insert(fmt.Sprintf("snap%d", i), []float32{float32(i)}, nil)
+		err = setupIdx.Insert(fmt.Sprintf("snap%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 	err = setupIdx.SaveToFile(snapPath)
@@ -80,13 +80,13 @@ func TestRecoverySequence(t *testing.T) {
 	// Create WAL with 2 more vectors
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
-	err = wal.WriteEntry(index.WALEntry{
+	err = wal.WriteEntry(&index.WALEntry{
 		Action: index.WALActionInsert,
 		ID:     "wal1",
 		Vector: []float32{4.0},
 	})
 	require.NoError(t, err)
-	err = wal.WriteEntry(index.WALEntry{
+	err = wal.WriteEntry(&index.WALEntry{
 		Action: index.WALActionInsert,
 		ID:     "wal2",
 		Vector: []float32{5.0},
@@ -99,7 +99,7 @@ func TestRecoverySequence(t *testing.T) {
 	require.NoError(t, err)
 	defer recoveryWal.Close()
 
-	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// CORRECT sequence: LoadFromFile(DataPath) then ReplayWAL(WalPath)
 	err = recoveredIdx.LoadFromFile(snapPath) // Load snapshot

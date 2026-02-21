@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -75,7 +76,7 @@ func TestRouterEndpointRegistration(t *testing.T) {
 	})
 
 	t.Run("DELETE_vectors_id_endpoint_exists", func(t *testing.T) {
-		idx.Insert("delete_test", []float32{1.0, 2.0}, nil)
+		idx.Insert("delete_test", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/delete_test", nil)
 		w := httptest.NewRecorder()
@@ -116,7 +117,7 @@ func TestRouterEndpointRegistration(t *testing.T) {
 func TestRouterConfiguration(t *testing.T) {
 	t.Run("router_uses_injected_index", func(t *testing.T) {
 		idx := testutil.NewTestIndex(t)
-		idx.Insert("existing", []float32{1.0, 2.0}, map[string]any{"pre-existing": true})
+		idx.Insert("existing", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"pre-existing": true})
 
 		router := SetupRouter(idx)
 

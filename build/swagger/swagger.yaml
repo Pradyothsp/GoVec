@@ -13,6 +13,8 @@ definitions:
         type: string
       metadata:
         type: object
+      sparse_vector:
+        type: object
       vector:
         items:
           type: number
@@ -43,6 +45,8 @@ definitions:
       k:
         example: 10
         type: integer
+      sparse_vector:
+        type: object
       vector:
         items:
           type: number

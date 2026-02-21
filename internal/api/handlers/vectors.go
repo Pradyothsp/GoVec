@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
 
 	"github.com/Pradyothsp/govec/internal/api/response"
@@ -12,16 +13,18 @@ import (
 
 // CreateVectorRequest is the JSON payload for inserting a vector.
 type CreateVectorRequest struct {
-	ID       string                 `json:"id" binding:"required" example:"vec-001"`
-	Vector   []float32              `json:"vector" binding:"required" swaggertype:"array,number"`
-	Metadata map[string]interface{} `json:"metadata" swaggertype:"object"`
+	ID           string                 `json:"id" binding:"required" example:"vec-001"`
+	Vector       []float32              `json:"vector" binding:"required" swaggertype:"array,number"`
+	SparseVector *core.SparseVector     `json:"sparse_vector,omitempty" swaggertype:"object"`
+	Metadata     map[string]interface{} `json:"metadata" swaggertype:"object"`
 }
 
 // SearchRequest is the JSON payload for a nearest-neighbour query.
 type SearchRequest struct {
-	Vector  []float32              `json:"vector" binding:"required" swaggertype:"array,number"`
-	K       int                    `json:"k" example:"10"`
-	Filters map[string]interface{} `json:"filter" swaggertype:"object"`
+	Vector       []float32              `json:"vector" binding:"required" swaggertype:"array,number"`
+	SparseVector *core.SparseVector     `json:"sparse_vector,omitempty" swaggertype:"object"`
+	K            int                    `json:"k" example:"10"`
+	Filters      map[string]interface{} `json:"filter" swaggertype:"object"`
 }
 
 // InsertResponse is the JSON response for a successful vector insert.
@@ -62,7 +65,19 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 		return
 	}
 
-	err := h.Engine.Insert(req.ID, req.Vector, req.Metadata)
+	// Validate sparse vector if provided
+	if req.SparseVector != nil && !req.SparseVector.IsValid() {
+		response.Fail(c, http.StatusBadRequest, "invalid sparse_vector: indices and values must have the same length")
+		return
+	}
+
+	// Convert nil pointer to empty SparseVector for cleaner API
+	var sparse core.SparseVector
+	if req.SparseVector != nil {
+		sparse = *req.SparseVector
+	}
+
+	err := h.Engine.Insert(req.ID, req.Vector, sparse, req.Metadata)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -94,7 +109,19 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		return
 	}
 
-	results, err := h.Engine.Search(req.Vector, req.K, req.Filters)
+	// Validate sparse vector if provided
+	if req.SparseVector != nil && !req.SparseVector.IsValid() {
+		response.Fail(c, http.StatusBadRequest, "invalid sparse_vector: indices and values must have the same length")
+		return
+	}
+
+	// Convert nil pointer to empty SparseVector for cleaner API
+	var sparse core.SparseVector
+	if req.SparseVector != nil {
+		sparse = *req.SparseVector
+	}
+
+	results, err := h.Engine.Search(req.Vector, sparse, req.K, req.Filters)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return

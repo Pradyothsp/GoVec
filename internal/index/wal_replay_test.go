@@ -25,7 +25,7 @@ func TestReplayWAL_EmptyFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create index and replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err, "Replaying empty WAL should not error")
 
@@ -36,7 +36,7 @@ func TestReplayWAL_MissingFile(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "nonexistent.wal")
 
 	// Create index and replay non-existent file
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err := idx.ReplayWAL(walPath)
 	require.NoError(t, err, "Replaying missing WAL should not error (graceful handling)")
 
@@ -56,7 +56,7 @@ func TestReplayWAL_SingleInsert(t *testing.T) {
 	writeWALEntry(t, walPath, entry)
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err := idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -79,7 +79,7 @@ func TestReplayWAL_SingleDelete(t *testing.T) {
 	writeWALEntry(t, walPath, entry)
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err := idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -104,13 +104,13 @@ func TestReplayWAL_MultipleInserts(t *testing.T) {
 			ID:     "vec" + string(rune('0'+i)),
 			Vector: []float32{float32(i)},
 		}
-		err = wal.WriteEntry(entry)
+		err = wal.WriteEntry(&entry)
 		require.NoError(t, err)
 	}
 	wal.Close()
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -125,7 +125,7 @@ func TestReplayWAL_InsertThenDelete(t *testing.T) {
 	defer wal.Close()
 
 	// INSERT vec1
-	err = wal.WriteEntry(WALEntry{
+	err = wal.WriteEntry(&WALEntry{
 		Action: WALActionInsert,
 		ID:     "vec1",
 		Vector: []float32{1.0, 2.0},
@@ -133,7 +133,7 @@ func TestReplayWAL_InsertThenDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	// DELETE vec1
-	err = wal.WriteEntry(WALEntry{
+	err = wal.WriteEntry(&WALEntry{
 		Action: WALActionDelete,
 		ID:     "vec1",
 	})
@@ -141,7 +141,7 @@ func TestReplayWAL_InsertThenDelete(t *testing.T) {
 	wal.Close()
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -156,7 +156,7 @@ func TestReplayWAL_InsertUpdateInsert(t *testing.T) {
 	defer wal.Close()
 
 	// 3 INSERTs for same ID with different vectors
-	err = wal.WriteEntry(WALEntry{
+	err = wal.WriteEntry(&WALEntry{
 		Action: WALActionInsert,
 		ID:     "vec1",
 		Vector: []float32{1.0},
@@ -164,7 +164,7 @@ func TestReplayWAL_InsertUpdateInsert(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = wal.WriteEntry(WALEntry{
+	err = wal.WriteEntry(&WALEntry{
 		Action: WALActionInsert,
 		ID:     "vec1",
 		Vector: []float32{2.0},
@@ -172,7 +172,7 @@ func TestReplayWAL_InsertUpdateInsert(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = wal.WriteEntry(WALEntry{
+	err = wal.WriteEntry(&WALEntry{
 		Action: WALActionInsert,
 		ID:     "vec1",
 		Vector: []float32{3.0},
@@ -182,7 +182,7 @@ func TestReplayWAL_InsertUpdateInsert(t *testing.T) {
 	wal.Close()
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -202,7 +202,7 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 
 	// INSERT vec1-10
 	for i := 1; i <= 10; i++ {
-		err = wal.WriteEntry(WALEntry{
+		err = wal.WriteEntry(&WALEntry{
 			Action: WALActionInsert,
 			ID:     fmt.Sprintf("vec%d", i),
 			Vector: []float32{float32(i)},
@@ -212,7 +212,7 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 
 	// DELETE vec5-7
 	for i := 5; i <= 7; i++ {
-		err = wal.WriteEntry(WALEntry{
+		err = wal.WriteEntry(&WALEntry{
 			Action: WALActionDelete,
 			ID:     fmt.Sprintf("vec%d", i),
 		})
@@ -221,7 +221,7 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 
 	// INSERT vec11-12
 	for i := 11; i <= 12; i++ {
-		err = wal.WriteEntry(WALEntry{
+		err = wal.WriteEntry(&WALEntry{
 			Action: WALActionInsert,
 			ID:     fmt.Sprintf("vec%d", i),
 			Vector: []float32{float32(i)},
@@ -230,7 +230,7 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 	}
 
 	// DELETE vec1
-	err = wal.WriteEntry(WALEntry{
+	err = wal.WriteEntry(&WALEntry{
 		Action: WALActionDelete,
 		ID:     "vec1",
 	})
@@ -238,7 +238,7 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 	wal.Close()
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -271,7 +271,7 @@ func TestReplayWAL_MalformedJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -294,7 +294,7 @@ func TestReplayWAL_PartialEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -316,7 +316,7 @@ func TestReplayWAL_UnknownAction(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err)
 
@@ -336,7 +336,7 @@ func TestReplayWAL_CorruptedFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay
-	idx := NewVectorIndex[[]float32](newTestWAL(t), func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	idx := NewVectorIndex[[]float32](newTestWAL(t), nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 	err = idx.ReplayWAL(walPath)
 	require.NoError(t, err, "Corrupted file should not panic")
 

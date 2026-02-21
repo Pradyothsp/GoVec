@@ -11,3 +11,8 @@ storage:
   wal_path: "/var/lib/govec/govec.wal"
   auto_save_enabled: true
   auto_save_interval: 120s # Save every 2 minutes
+
+engine:
+  quantization: "scalar" # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
+  distance_metric: "cosine" # Options: "cosine"
+  enable_hybrid_search: true  # Enables the Inverted Index for Sparse Vectors

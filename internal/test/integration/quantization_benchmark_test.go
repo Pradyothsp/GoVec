@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Pradyothsp/govec/internal/config"
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
 )
 
@@ -78,7 +79,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 	insertStart := time.Now()
 	for i, vec := range vectors {
 		id := fmt.Sprintf("vec%d", i)
-		if err := engine.Insert(id, vec, map[string]interface{}{"index": i}); err != nil {
+		if err := engine.Insert(id, vec, core.SparseVector{}, map[string]interface{}{"index": i}); err != nil {
 			b.Fatalf("Insert failed: %v", err)
 		}
 	}
@@ -103,7 +104,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 	queries := generateTestVectors(numSearches, vectorDim)
 	searchStart := time.Now()
 	for _, query := range queries {
-		if _, err := engine.Search(query, topK, nil); err != nil {
+		if _, err := engine.Search(query, core.SparseVector{}, topK, nil); err != nil {
 			b.Fatalf("Search failed: %v", err)
 		}
 	}
@@ -115,7 +116,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 	for len(sampleQuery) < vectorDim {
 		sampleQuery = append(sampleQuery, 0.0)
 	}
-	topResults, err := engine.Search(sampleQuery, topK, nil)
+	topResults, err := engine.Search(sampleQuery, core.SparseVector{}, topK, nil)
 	if err != nil {
 		b.Fatalf("Search failed: %v", err)
 	}
