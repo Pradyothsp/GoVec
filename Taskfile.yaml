@@ -95,7 +95,7 @@ tasks:
     desc: Check if code is formatted (exits non-zero if not)
     cmds:
       - |
-        unformatted=$(gofmt -l .)
+        unformatted=$(gofmt -l . | grep -v "build/swagger")
         if [ -n "$unformatted" ]; then
           echo "Unformatted files:"
           echo "$unformatted"
@@ -165,7 +165,7 @@ tasks:
   swagger:
     desc: Generate Swagger/OpenAPI documentation from annotations
     cmds:
-      - swag init -g cmd/server/main.go --output docs
+      - swag init -g cmd/server/main.go --output build/swagger
 
   # Install swag CLI if not present
   install-swag:

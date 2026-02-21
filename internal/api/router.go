@@ -7,7 +7,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	_ "github.com/Pradyothsp/govec/docs" // generated spec; registers via init()
+	_ "github.com/Pradyothsp/govec/build/swagger" // generated spec; registers via init()
 	"github.com/Pradyothsp/govec/internal/api/handlers"
 	"github.com/Pradyothsp/govec/internal/api/response"
 	"github.com/Pradyothsp/govec/internal/core"

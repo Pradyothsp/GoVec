@@ -4,14 +4,14 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'
       - id: end-of-file-fixer
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'
       - id: check-yaml
       - id: check-merge-conflict
       - id: mixed-line-ending
         args: ["--fix=lf"]
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'
 
   # Go-specific hooks (run via local system tools)
   - repo: local
@@ -22,7 +22,7 @@ repos:
         entry: gofmt -l -w
         types: [go]
         pass_filenames: true
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'
 
       - id: go-vet
         name: go vet
@@ -30,7 +30,7 @@ repos:
         entry: go vet ./...
         types: [go]
         pass_filenames: false
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'
 
       - id: golangci-lint
         name: golangci-lint
@@ -38,7 +38,7 @@ repos:
         entry: golangci-lint run
         types: [go]
         pass_filenames: false
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'
 
       - id: govulncheck
         name: govulncheck
@@ -46,4 +46,4 @@ repos:
         entry: govulncheck ./...
         types: [go]
         pass_filenames: false
-        exclude: '^docs/'
+        exclude: '^(docs|build)/'

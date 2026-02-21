@@ -1,0 +1,195 @@
+basePath: /
+definitions:
+  api.HealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+  core.SearchResult:
+    properties:
+      ID:
+        example: vec-001
+        type: string
+      Meta:
+        type: object
+      Score:
+        example: 0.97
+        type: number
+    type: object
+  handlers.CreateVectorRequest:
+    properties:
+      id:
+        example: vec-001
+        type: string
+      metadata:
+        type: object
+      vector:
+        items:
+          type: number
+        type: array
+    required:
+    - id
+    - vector
+    type: object
+  handlers.DeleteResponse:
+    properties:
+      id:
+        example: vec-001
+        type: string
+      status:
+        example: deleted
+        type: string
+    type: object
+  handlers.InsertResponse:
+    properties:
+      status:
+        example: inserted
+        type: string
+    type: object
+  handlers.SearchRequest:
+    properties:
+      filter:
+        type: object
+      k:
+        example: 10
+        type: integer
+      vector:
+        items:
+          type: number
+        type: array
+    required:
+    - vector
+    type: object
+  response.Response:
+    properties:
+      data: {}
+      error:
+        type: string
+      success:
+        type: boolean
+    type: object
+host: localhost:8000
+info:
+  contact: {}
+  description: A vector database REST API for storing and querying vector embeddings.
+  title: GoVec API
+  version: "1.0"
+paths:
+  /api/v1/vectors:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Vector payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateVectorRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.InsertResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Insert or update a vector
+      tags:
+      - vectors
+  /api/v1/vectors/{id}:
+    delete:
+      parameters:
+      - description: Vector ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.DeleteResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Delete a vector by ID
+      tags:
+      - vectors
+  /api/v1/vectors/search:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Search payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SearchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/core.SearchResult'
+                  type: array
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: Search for similar vectors
+      tags:
+      - vectors
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.HealthResponse'
+              type: object
+      summary: Health check
+      tags:
+      - system
+schemes:
+- http
+swagger: "2.0"

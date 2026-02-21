@@ -89,5 +89,5 @@ jobs:
       - name: Check Swagger docs are up to date
         run: |
           go install github.com/swaggo/swag/cmd/swag@latest
-          swag init -g cmd/server/main.go --output docs
-          git diff --exit-code docs/
+          swag init -g cmd/server/main.go --output build/swagger
+          git diff --exit-code build/swagger
