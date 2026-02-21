@@ -57,25 +57,25 @@ func TestCosineSimilarity(t *testing.T) {
 			errorMsg:    "vector dimensions mismatch",
 		},
 		{
-			name:        "zero vector a",
-			a:           []float32{0.0, 0.0, 0.0},
-			b:           []float32{1.0, 2.0, 3.0},
-			expectError: true,
-			errorMsg:    "zero vector magnitude",
+			name:          "zero vector a",
+			a:             []float32{0.0, 0.0, 0.0},
+			b:             []float32{1.0, 2.0, 3.0},
+			expectedScore: 0.0, // Zero vectors have no meaningful similarity
+			expectError:   false,
 		},
 		{
-			name:        "zero vector b",
-			a:           []float32{1.0, 2.0, 3.0},
-			b:           []float32{0.0, 0.0, 0.0},
-			expectError: true,
-			errorMsg:    "zero vector magnitude",
+			name:          "zero vector b",
+			a:             []float32{1.0, 2.0, 3.0},
+			b:             []float32{0.0, 0.0, 0.0},
+			expectedScore: 0.0, // Zero vectors have no meaningful similarity
+			expectError:   false,
 		},
 		{
-			name:        "both zero vectors",
-			a:           []float32{0.0, 0.0},
-			b:           []float32{0.0, 0.0},
-			expectError: true,
-			errorMsg:    "zero vector magnitude",
+			name:          "both zero vectors",
+			a:             []float32{0.0, 0.0},
+			b:             []float32{0.0, 0.0},
+			expectedScore: 0.0, // Zero vectors have no meaningful similarity
+			expectError:   false,
 		},
 		{
 			name:          "single dimension vectors",

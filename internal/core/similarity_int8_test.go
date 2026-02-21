@@ -64,9 +64,14 @@ func TestCosineSimilarityInt8_ZeroVector(t *testing.T) {
 	a := []int8{0, 0, 0}
 	b := []int8{127, 63, 31}
 
-	_, err := CosineSimilarityInt8(a, b)
-	if err == nil {
-		t.Fatal("expected error for zero vector, got nil")
+	score, err := CosineSimilarityInt8(a, b)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Zero vectors should return 0.0 similarity (no meaningful similarity)
+	if score != 0.0 {
+		t.Errorf("expected score 0.0 for zero vector, got %f", score)
 	}
 }
 
