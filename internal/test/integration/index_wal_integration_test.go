@@ -41,13 +41,7 @@ func TestVectorIndex_Insert_WritesToWAL(t *testing.T) {
 	// Verify WAL contains correct data
 	assert.Equal(t, core.WALActionInsert, entry.Action)
 	assert.Equal(t, "vec1", entry.ID)
-	// Vector is unmarshaled as []interface{} with float64 elements
-	vecSlice, ok := entry.Vector.([]interface{})
-	require.True(t, ok, "Vector should be []interface{}")
-	assert.Len(t, vecSlice, 3, "Vector should have 3 elements")
-	assert.Equal(t, float64(1.0), vecSlice[0])
-	assert.Equal(t, float64(2.0), vecSlice[1])
-	assert.Equal(t, float64(3.0), vecSlice[2])
+	assert.Equal(t, []float32{1.0, 2.0, 3.0}, entry.Vector)
 	assert.Equal(t, "test", entry.Meta["label"])
 }
 

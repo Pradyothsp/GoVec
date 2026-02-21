@@ -19,10 +19,11 @@ const (
 )
 
 // WALEntry represents a single write-ahead log entry
+// Vector is always []float32 (canonical format from API), regardless of internal storage type
 type WALEntry struct {
 	Action WALAction      `json:"action"`
 	ID     string         `json:"id"`
-	Vector interface{}    `json:"vec,omitempty"` // Can be []float32 or []int8
+	Vector []float32      `json:"vec,omitempty"`
 	Meta   map[string]any `json:"meta,omitempty"`
 }
 
@@ -104,32 +105,11 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 
 		switch entry.Action {
 		case WALActionInsert:
-			// Convert Vector from interface{} to []float32
-			var vec []float32
-			if entry.Vector != nil {
-				switch v := entry.Vector.(type) {
-				case []interface{}:
-					// JSON unmarshals arrays as []interface{} with float64 elements
-					vec = make([]float32, len(v))
-					for i, val := range v {
-						if floatVal, ok := val.(float64); ok {
-							vec[i] = float32(floatVal)
-						}
-					}
-				case []float32:
-					vec = v
-				default:
-					log.Printf("WARNING: Skipping WAL entry at line %d: unexpected vector type %T", lineNum, v)
-					continue
-				}
-			}
-			// If entry.Vector is nil, vec remains nil (partial entry)
-
-			// Encode to storage format using encodeFunc
+			// Encode WAL vector ([]float32) to storage format (T)
 			idx.mu.Lock()
 			idx.Store[entry.ID] = &VectorNode[T]{
 				ID:       entry.ID,
-				Vector:   idx.encodeFunc(vec),
+				Vector:   idx.encodeFunc(entry.Vector),
 				Metadata: entry.Meta,
 			}
 			idx.mu.Unlock()

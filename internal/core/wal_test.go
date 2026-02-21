@@ -93,12 +93,7 @@ func TestWriteEntry_SingleInsertAction(t *testing.T) {
 
 	assert.Equal(t, WALActionInsert, parsed.Action)
 	assert.Equal(t, "vec1", parsed.ID)
-	// Vector is unmarshaled as []interface{} with float64 elements
-	vecSlice, ok := parsed.Vector.([]interface{})
-	require.True(t, ok, "Vector should be []interface{}")
-	assert.Len(t, vecSlice, 2, "Vector should have 2 elements")
-	assert.Equal(t, float64(1.0), vecSlice[0])
-	assert.Equal(t, float64(2.0), vecSlice[1])
+	assert.Equal(t, []float32{1.0, 2.0}, parsed.Vector)
 	assert.Equal(t, "test", parsed.Meta["label"])
 }
 
@@ -192,11 +187,8 @@ func TestWriteEntry_LargeVector(t *testing.T) {
 	err = json.Unmarshal(data[:len(data)-1], &parsed) // Strip newline
 	require.NoError(t, err)
 
-	// Vector is unmarshaled as []interface{} with float64 elements
-	vecSlice, ok := parsed.Vector.([]interface{})
-	require.True(t, ok, "Vector should be []interface{}")
-	assert.Equal(t, 1536, len(vecSlice), "Vector dimensions should be preserved")
-	// Note: We don't do exact comparison here since JSON unmarshals to []interface{}{float64...}
+	assert.Equal(t, 1536, len(parsed.Vector), "Vector dimensions should be preserved")
+	assert.Equal(t, vec, parsed.Vector, "All vector values should be preserved")
 }
 
 func TestWriteEntry_SpecialCharactersInMetadata(t *testing.T) {
