@@ -12,7 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
+
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -35,7 +36,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 		requestBody    interface{}
 		expectedStatus int
 		expectedBody   string
-		checkIndex     func(*testing.T, *core.VectorIndex[[]float32])
+		checkIndex     func(*testing.T, *index.VectorIndex[[]float32])
 	}{
 		{
 			name: "valid_request_with_metadata",
@@ -46,7 +47,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v1")
 				assert.Equal(t, "v1", idx.Store["v1"].ID)
 				assert.Equal(t, []float32{1.0, 2.0, 3.0}, idx.Store["v1"].Vector)
@@ -62,7 +63,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v2")
 				assert.Equal(t, []float32{4.0, 5.0}, idx.Store["v2"].Vector)
 				assert.Nil(t, idx.Store["v2"].Metadata)
@@ -77,7 +78,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v3")
 				assert.Empty(t, idx.Store["v3"].Metadata)
 			},
@@ -88,7 +89,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				"vector": []float32{1.0, 2.0},
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store, "No vector should be inserted")
 			},
 		},
@@ -98,7 +99,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				"id": "v4",
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store, "No vector should be inserted")
 			},
 		},
@@ -108,7 +109,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				"metadata": map[string]interface{}{"test": true},
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -116,7 +117,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			name:           "malformed_json",
 			requestBody:    "not a valid json",
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -127,7 +128,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 				Vector: []float32{1.0, 2.0},
 			},
 			expectedStatus: http.StatusBadRequest,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -139,7 +140,7 @@ func TestVectorHandler_Insert(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"success":true,"data":{"status":"inserted"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				require.Contains(t, idx.Store, "v5")
 				assert.Empty(t, idx.Store["v5"].Vector)
 			},
@@ -427,8 +428,8 @@ func TestVectorHandler_Search_ValidRequest(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -467,8 +468,8 @@ func TestVectorHandler_Search_WithoutK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -604,8 +605,8 @@ func TestVectorHandler_Search_VariousKValues(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.Code)
 
 			var env struct {
-				Success bool                `json:"success"`
-				Data    []core.SearchResult `json:"data"`
+				Success bool                 `json:"success"`
+				Data    []index.SearchResult `json:"data"`
 			}
 			err := json.Unmarshal(w.Body.Bytes(), &env)
 			require.NoError(t, err)
@@ -646,8 +647,8 @@ func TestVectorHandler_Search_ReturnsCorrectJSONFormat(t *testing.T) {
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -689,8 +690,8 @@ func TestVectorHandler_Search_Integration(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -734,8 +735,8 @@ func TestVectorHandler_Search_EmptyIndex(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -812,8 +813,8 @@ func TestVectorHandler_Search_LargeVectors(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -879,8 +880,8 @@ func TestVectorHandler_Search_WithFilter(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -922,8 +923,8 @@ func TestVectorHandler_Search_FilterNoResults(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -959,8 +960,8 @@ func TestVectorHandler_Search_FilterAndK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -995,8 +996,8 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)
@@ -1008,41 +1009,41 @@ func TestVectorHandler_Search_NoFilterBackwardCompatible(t *testing.T) {
 func TestVectorHandler_Delete(t *testing.T) {
 	tests := []struct {
 		name           string
-		setup          func(*core.VectorIndex[[]float32])
+		setup          func(*index.VectorIndex[[]float32])
 		id             string
 		expectedStatus int
 		expectedBody   string
-		checkIndex     func(*testing.T, *core.VectorIndex[[]float32])
+		checkIndex     func(*testing.T, *index.VectorIndex[[]float32])
 	}{
 		{
 			name: "success",
-			setup: func(idx *core.VectorIndex[[]float32]) {
+			setup: func(idx *index.VectorIndex[[]float32]) {
 				idx.Insert("v1", []float32{1.0, 2.0}, nil)
 			},
 			id:             "v1",
 			expectedStatus: http.StatusOK,
 			expectedBody:   `{"success":true,"data":{"status":"deleted","id":"v1"}}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.NotContains(t, idx.Store, "v1")
 			},
 		},
 		{
 			name:           "not_found",
-			setup:          func(idx *core.VectorIndex[[]float32]) {},
+			setup:          func(idx *index.VectorIndex[[]float32]) {},
 			id:             "missing",
 			expectedStatus: http.StatusNotFound,
 			expectedBody:   `{"success":false,"data":null,"error":"vector not found"}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
 		{
 			name:           "empty_id",
-			setup:          func(idx *core.VectorIndex[[]float32]) {},
+			setup:          func(idx *index.VectorIndex[[]float32]) {},
 			id:             "",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   `{"success":false,"data":null,"error":"id is required"}`,
-			checkIndex: func(t *testing.T, idx *core.VectorIndex[[]float32]) {
+			checkIndex: func(t *testing.T, idx *index.VectorIndex[[]float32]) {
 				assert.Empty(t, idx.Store)
 			},
 		},
@@ -1148,8 +1149,8 @@ func TestVectorHandler_Search_MultipleFilterKeys(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []core.SearchResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    []index.SearchResult `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &env)
 	require.NoError(t, err)

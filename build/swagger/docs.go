@@ -103,7 +103,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/core.SearchResult"
+                                                "$ref": "#/definitions/index.SearchResult"
                                             }
                                         }
                                     }
@@ -220,22 +220,6 @@ const docTemplate = `{
                 }
             }
         },
-        "core.SearchResult": {
-            "type": "object",
-            "properties": {
-                "ID": {
-                    "type": "string",
-                    "example": "vec-001"
-                },
-                "Meta": {
-                    "type": "object"
-                },
-                "Score": {
-                    "type": "number",
-                    "example": 0.97
-                }
-            }
-        },
         "handlers.CreateVectorRequest": {
             "type": "object",
             "required": [
@@ -298,6 +282,22 @@ const docTemplate = `{
                     "items": {
                         "type": "number"
                     }
+                }
+            }
+        },
+        "index.SearchResult": {
+            "type": "object",
+            "properties": {
+                "ID": {
+                    "type": "string",
+                    "example": "vec-001"
+                },
+                "Meta": {
+                    "type": "object"
+                },
+                "Score": {
+                    "type": "number",
+                    "example": 0.97
                 }
             }
         },

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Pradyothsp/govec/internal/config"
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
 )
 
 // BenchmarkResults holds metrics for comparison
@@ -19,7 +19,7 @@ type BenchmarkResults struct {
 	SearchTime       time.Duration
 	MemoryAllocated  uint64
 	FileSize         int64
-	TopSearchResults []core.SearchResult
+	TopSearchResults []index.SearchResult
 }
 
 func BenchmarkQuantization_Comprehensive(b *testing.B) {
@@ -51,7 +51,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 	dataPath := tmpDir + "/test.bin"
 
 	// Create engine
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		b.Fatalf("failed to create WAL: %v", err)
 	}
@@ -62,7 +62,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := core.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {
 		b.Fatalf("NewEngine failed: %v", err)
 	}

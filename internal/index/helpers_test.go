@@ -1,8 +1,10 @@
-package core
+package index
 
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // newTestIndex creates a VectorIndex backed by a temp WAL for testing.
@@ -15,7 +17,7 @@ func newTestIndex(t testing.TB) *VectorIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() })
 
-	// Create index with identity encode function and cosine similarity
+	// Create an index with identity encode function and cosine similarity
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, identityFunc, CosineSimilarity)
+	return NewVectorIndex[[]float32](wal, identityFunc, core.CosineSimilarity)
 }

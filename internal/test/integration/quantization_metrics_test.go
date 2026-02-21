@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Pradyothsp/govec/internal/config"
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
 )
 
 // AdvancedMetrics holds detailed performance and accuracy metrics
@@ -74,7 +74,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 	tmpDir := b.TempDir()
 	walPath := tmpDir + "/test.wal"
 
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		b.Fatalf("failed to create WAL: %v", err)
 	}
@@ -85,7 +85,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := core.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {
 		b.Fatalf("NewEngine failed: %v", err)
 	}
@@ -187,13 +187,13 @@ func BenchmarkQuantizationMetrics_Accuracy(b *testing.B) {
 	// Create both engines with same data
 	tmpDir := b.TempDir()
 
-	wal1, _ := core.NewWAL(tmpDir + "/none.wal")
+	wal1, _ := index.NewWAL(tmpDir + "/none.wal")
 	defer wal1.Close()
-	engineNone, _ := core.NewEngine(config.EngineConfig{Quantization: "none", DistanceMetric: "cosine"}, wal1)
+	engineNone, _ := index.NewEngine(config.EngineConfig{Quantization: "none", DistanceMetric: "cosine"}, wal1)
 
-	wal2, _ := core.NewWAL(tmpDir + "/scalar.wal")
+	wal2, _ := index.NewWAL(tmpDir + "/scalar.wal")
 	defer wal2.Close()
-	engineScalar, _ := core.NewEngine(config.EngineConfig{Quantization: "scalar", DistanceMetric: "cosine"}, wal2)
+	engineScalar, _ := index.NewEngine(config.EngineConfig{Quantization: "scalar", DistanceMetric: "cosine"}, wal2)
 
 	// Insert same vectors
 	vectors := generateDiverseVectors(numVectors, vectorDim)
@@ -312,11 +312,11 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 	tmpDir := b.TempDir()
 	walPath := tmpDir + "/test.wal"
 
-	wal, _ := core.NewWAL(walPath)
+	wal, _ := index.NewWAL(walPath)
 	defer wal.Close()
 
 	cfg := config.EngineConfig{Quantization: quantization, DistanceMetric: "cosine"}
-	engine, _ := core.NewEngine(cfg, wal)
+	engine, _ := index.NewEngine(cfg, wal)
 
 	// Pre-populate with initial vectors
 	vectors := generateDiverseVectors(numVectors, vectorDim)
@@ -398,7 +398,7 @@ func calculatePercentile(durations []time.Duration, percentile float64) float64 
 	return float64(sorted[idx].Microseconds())
 }
 
-func calculateRecall(groundTruth, results []core.SearchResult) float64 {
+func calculateRecall(groundTruth, results []index.SearchResult) float64 {
 	truthSet := make(map[string]bool)
 	for _, r := range groundTruth {
 		truthSet[r.ID] = true
@@ -417,7 +417,7 @@ func calculateRecall(groundTruth, results []core.SearchResult) float64 {
 	return float64(matches) / float64(len(groundTruth))
 }
 
-func calculateMAP(groundTruth, results []core.SearchResult) float64 {
+func calculateMAP(groundTruth, results []index.SearchResult) float64 {
 	truthSet := make(map[string]bool)
 	for _, r := range groundTruth {
 		truthSet[r.ID] = true
@@ -439,7 +439,7 @@ func calculateMAP(groundTruth, results []core.SearchResult) float64 {
 	return precisionSum / float64(len(groundTruth))
 }
 
-func calculateNDCG(groundTruth, results []core.SearchResult) float64 {
+func calculateNDCG(groundTruth, results []index.SearchResult) float64 {
 	truthMap := make(map[string]float32)
 	for i, r := range groundTruth {
 		truthMap[r.ID] = float32(len(groundTruth) - i) // Relevance score

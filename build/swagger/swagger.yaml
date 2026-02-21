@@ -6,17 +6,6 @@ definitions:
         example: ok
         type: string
     type: object
-  core.SearchResult:
-    properties:
-      ID:
-        example: vec-001
-        type: string
-      Meta:
-        type: object
-      Score:
-        example: 0.97
-        type: number
-    type: object
   handlers.CreateVectorRequest:
     properties:
       id:
@@ -60,6 +49,17 @@ definitions:
         type: array
     required:
     - vector
+    type: object
+  index.SearchResult:
+    properties:
+      ID:
+        example: vec-001
+        type: string
+      Meta:
+        type: object
+      Score:
+        example: 0.97
+        type: number
     type: object
   response.Response:
     properties:
@@ -159,7 +159,7 @@ paths:
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/core.SearchResult'
+                    $ref: '#/definitions/index.SearchResult'
                   type: array
               type: object
         "400":

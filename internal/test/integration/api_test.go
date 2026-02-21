@@ -12,14 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/Pradyothsp/govec/internal/index"
+
 	"github.com/Pradyothsp/govec/internal/api"
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
 type APITestSuite struct {
 	suite.Suite
-	index  *core.VectorIndex[[]float32]
+	index  *index.VectorIndex[[]float32]
 	router *gin.Engine
 }
 

@@ -1,4 +1,4 @@
-package core
+package index
 
 import (
 	"bufio"
@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"sync"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // WALAction represents the type of operation in a WAL entry
@@ -107,7 +109,7 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 		case WALActionInsert:
 			// Encode WAL vector ([]float32) to storage format (T)
 			idx.mu.Lock()
-			idx.Store[entry.ID] = &VectorNode[T]{
+			idx.Store[entry.ID] = &core.VectorNode[T]{
 				ID:       entry.ID,
 				Vector:   idx.encodeFunc(entry.Vector),
 				Metadata: entry.Meta,

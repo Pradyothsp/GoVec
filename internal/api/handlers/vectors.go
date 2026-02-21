@@ -5,8 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Pradyothsp/govec/internal/index"
+
 	"github.com/Pradyothsp/govec/internal/api/response"
-	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // CreateVectorRequest is the JSON payload for inserting a vector.
@@ -36,11 +37,11 @@ type DeleteResponse struct {
 
 // VectorHandler holds a reference to the core logic
 type VectorHandler struct {
-	Engine core.Engine
+	Engine index.Engine
 }
 
 // NewVectorHandler creates a VectorHandler with the given engine dependency.
-func NewVectorHandler(engine core.Engine) *VectorHandler {
+func NewVectorHandler(engine index.Engine) *VectorHandler {
 	return &VectorHandler{Engine: engine}
 }
 
@@ -77,7 +78,7 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      SearchRequest     true  "Search payload"
-// @Success      200   {object}  response.Response{data=[]core.SearchResult}
+// @Success      200   {object}  response.Response{data=[]index.SearchResult}
 // @Failure      400   {object}  response.Response
 // @Failure      500   {object}  response.Response
 // @Router       /api/v1/vectors/search [post]
@@ -100,7 +101,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 	}
 
 	if results == nil {
-		results = []core.SearchResult{}
+		results = []index.SearchResult{}
 	}
 
 	response.OK(c, http.StatusOK, results)

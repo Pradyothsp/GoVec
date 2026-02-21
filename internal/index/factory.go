@@ -1,15 +1,16 @@
-package core
+package index
 
 import (
 	"fmt"
 
 	"github.com/Pradyothsp/govec/internal/config"
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // NewEngine creates a new vector engine based on the configuration
 func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 	// Get math functions
-	mathBlock, err := resolveMetric(cfg.DistanceMetric)
+	mathBlock, err := core.ResolveMetric(cfg.DistanceMetric)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +24,7 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		}
 		return NewVectorIndex[[]int8](
 			wal,
-			QuantizeVector,
+			core.QuantizeVector,
 			mathBlock.Int8Func,
 		), nil
 

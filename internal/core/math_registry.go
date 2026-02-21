@@ -8,8 +8,8 @@ type MathBlock struct {
 	Int8Func  func([]int8, []int8) (float32, error) // For Stage 2
 }
 
-// resolveMetric returns the appropriate math block for the given distance metric
-func resolveMetric(metric string) (MathBlock, error) {
+// ResolveMetric returns the appropriate math block for the given distance metric
+func ResolveMetric(metric string) (MathBlock, error) {
 	switch metric {
 	case "cosine":
 		return MathBlock{

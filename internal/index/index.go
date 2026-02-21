@@ -1,17 +1,19 @@
-package core
+package index
 
 import (
 	"errors"
 	"log"
 	"sort"
 	"sync"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // VectorIndex is a thread-safe in-memory store for vector embeddings.
 // T is the vector storage type (e.g., []float32 for no quantization, []int8 for scalar quantization)
 type VectorIndex[T any] struct {
 	mu           sync.RWMutex
-	Store        map[string]*VectorNode[T]
+	Store        map[string]*core.VectorNode[T]
 	wal          *WAL
 	encodeFunc   func([]float32) T           // Converts input vectors to storage format
 	distanceFunc func(T, T) (float32, error) // Computes distance between stored vectors
@@ -20,7 +22,7 @@ type VectorIndex[T any] struct {
 // NewVectorIndex creates an empty VectorIndex ready for use.
 func NewVectorIndex[T any](wal *WAL, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error)) *VectorIndex[T] {
 	return &VectorIndex[T]{
-		Store:        make(map[string]*VectorNode[T]),
+		Store:        make(map[string]*core.VectorNode[T]),
 		wal:          wal,
 		encodeFunc:   encodeFunc,
 		distanceFunc: distanceFunc,
@@ -46,7 +48,7 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, meta map[string]any)
 	}
 
 	// Update memory (convert to storage format using encodeFunc)
-	idx.Store[id] = &VectorNode[T]{
+	idx.Store[id] = &core.VectorNode[T]{
 		ID:       id,
 		Vector:   idx.encodeFunc(vec),
 		Metadata: meta,
@@ -70,11 +72,11 @@ func (idx *VectorIndex[T]) Search(query []float32, limit int, filters map[string
 	results := make([]SearchResult, 0, limit)
 	for id, node := range idx.Store {
 		// Filter check
-		if !matchFilter(node.Metadata, filters) {
+		if !core.MatchFilter(node.Metadata, filters) {
 			continue
 		}
 
-		// Similarity calculation using injected distance function
+		// Similarity calculation using an injected distance function
 		score, err := idx.distanceFunc(encodedQuery, node.Vector)
 		if err != nil {
 			return nil, err
@@ -126,7 +128,7 @@ func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
 func (idx *VectorIndex[T]) Clear() {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-	idx.Store = make(map[string]*VectorNode[T])
+	idx.Store = make(map[string]*core.VectorNode[T])
 }
 
 // Len returns the number of vectors in the index

@@ -13,14 +13,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Pradyothsp/govec/internal/index"
+
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // NewTestIndex creates an empty VectorIndex backed by a temp WAL for testing.
 // The WAL is closed automatically via t.Cleanup.
-func NewTestIndex(t testing.TB) *core.VectorIndex[[]float32] {
+func NewTestIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	t.Helper()
-	wal, err := core.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	wal, err := index.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
 	if err != nil {
 		t.Fatalf("NewTestIndex: failed to create WAL: %v", err)
 	}
@@ -28,11 +30,11 @@ func NewTestIndex(t testing.TB) *core.VectorIndex[[]float32] {
 
 	// Create index with identity encode function and cosine similarity
 	identityFunc := func(v []float32) []float32 { return v }
-	return core.NewVectorIndex[[]float32](wal, identityFunc, core.CosineSimilarity)
+	return index.NewVectorIndex[[]float32](wal, identityFunc, core.CosineSimilarity)
 }
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing.
-func NewTestVectorIndex(t testing.TB) *core.VectorIndex[[]float32] {
+func NewTestVectorIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	t.Helper()
 	idx := NewTestIndex(t)
 
@@ -132,7 +134,7 @@ func NewCreateVectorRequest(id string, dimensions int, withMetadata bool) Create
 }
 
 // AssertVectorInIndex verifies a vector exists in the index with expected values
-func AssertVectorInIndex(t *testing.T, idx *core.VectorIndex[[]float32], id string, expectedVector []float32, expectedMetadata map[string]any) {
+func AssertVectorInIndex(t *testing.T, idx *index.VectorIndex[[]float32], id string, expectedVector []float32, expectedMetadata map[string]any) {
 	t.Helper()
 
 	require.Contains(t, idx.Store, id, "Vector %s should exist in index", id)
@@ -144,7 +146,7 @@ func AssertVectorInIndex(t *testing.T, idx *core.VectorIndex[[]float32], id stri
 }
 
 // AssertVectorCount verifies the number of vectors in the index
-func AssertVectorCount(t *testing.T, idx *core.VectorIndex[[]float32], expectedCount int) {
+func AssertVectorCount(t *testing.T, idx *index.VectorIndex[[]float32], expectedCount int) {
 	t.Helper()
 	assert.Len(t, idx.Store, expectedCount, "Index should contain %d vectors", expectedCount)
 }
@@ -168,7 +170,7 @@ func CleanupStorageFile(t *testing.T, path string) {
 }
 
 // PopulateIndexWithVectors inserts N vectors into an index for testing
-func PopulateIndexWithVectors(idx *core.VectorIndex[[]float32], count int) {
+func PopulateIndexWithVectors(idx *index.VectorIndex[[]float32], count int) {
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("vec%d", i)
 		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
@@ -215,16 +217,16 @@ func CreateReadOnlyFile(t *testing.T, path string) {
 // =============================================================================
 
 // NewWALWithPath creates a WAL at a specific path for testing
-func NewWALWithPath(t testing.TB, path string) *core.WAL {
+func NewWALWithPath(t testing.TB, path string) *index.WAL {
 	t.Helper()
-	wal, err := core.NewWAL(path)
+	wal, err := index.NewWAL(path)
 	require.NoError(t, err, "Failed to create WAL at path: %s", path)
 	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
 	return wal
 }
 
 // WriteWALEntry manually writes entries for test setup
-func WriteWALEntry(t testing.TB, path string, entry core.WALEntry) {
+func WriteWALEntry(t testing.TB, path string, entry index.WALEntry) {
 	t.Helper()
 	wal := NewWALWithPath(t, path)
 	err := wal.WriteEntry(entry)
@@ -232,17 +234,17 @@ func WriteWALEntry(t testing.TB, path string, entry core.WALEntry) {
 }
 
 // ReadWALEntries reads all entries from a WAL file
-func ReadWALEntries(t testing.TB, path string) []core.WALEntry {
+func ReadWALEntries(t testing.TB, path string) []index.WALEntry {
 	t.Helper()
 
 	file, err := os.Open(path) //nolint:gosec // path is test-controlled
 	require.NoError(t, err, "Failed to open WAL file")
 	defer file.Close() //nolint:errcheck // read-only test operation
 
-	var entries []core.WALEntry
+	var entries []index.WALEntry
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		var entry core.WALEntry
+		var entry index.WALEntry
 		err := json.Unmarshal(scanner.Bytes(), &entry)
 		require.NoError(t, err, "Failed to unmarshal WAL entry")
 		entries = append(entries, entry)

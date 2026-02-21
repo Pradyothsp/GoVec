@@ -7,14 +7,15 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
+	"github.com/Pradyothsp/govec/internal/index"
+
 	_ "github.com/Pradyothsp/govec/build/swagger" // generated spec; registers via init()
 	"github.com/Pradyothsp/govec/internal/api/handlers"
 	"github.com/Pradyothsp/govec/internal/api/response"
-	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // SetupRouter configures the Gin engine with all routes and injects dependencies.
-func SetupRouter(engine core.Engine) *gin.Engine {
+func SetupRouter(engine index.Engine) *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/health", healthCheck)

@@ -11,7 +11,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/config"
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
 )
 
 // @title           GoVec API
@@ -25,7 +25,7 @@ func main() {
 	cfg := loadConfiguration()
 
 	// Initialize WAL
-	wal, err := core.NewWAL(cfg.Storage.WalPath)
+	wal, err := index.NewWAL(cfg.Storage.WalPath)
 	if err != nil {
 		log.Fatal("Failed to open WAL:", err)
 	}
@@ -34,7 +34,7 @@ func main() {
 	log.Println("Starting server...")
 
 	// Create engine via factory
-	engine, err := core.NewEngine(cfg.Engine, wal)
+	engine, err := index.NewEngine(cfg.Engine, wal)
 	if err != nil {
 		_ = wal.Close() //nolint:errcheck // best-effort cleanup before fatal exit
 		log.Fatalf("Failed to create engine: %v", err)

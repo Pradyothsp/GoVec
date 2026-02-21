@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/config"
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
 )
 
 func TestScalarQuantization_EndToEnd(t *testing.T) {
 	// Create temporary WAL file
 	walPath := t.TempDir() + "/test.wal"
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestScalarQuantization_EndToEnd(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := core.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestScalarQuantization_EndToEnd(t *testing.T) {
 func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 	// Create two engines: one with none, one with scalar
 	walPath1 := t.TempDir() + "/test1.wal"
-	wal1, err := core.NewWAL(walPath1)
+	wal1, err := index.NewWAL(walPath1)
 	if err != nil {
 		t.Fatalf("failed to create WAL1: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 	defer os.Remove(walPath1)
 
 	walPath2 := t.TempDir() + "/test2.wal"
-	wal2, err := core.NewWAL(walPath2)
+	wal2, err := index.NewWAL(walPath2)
 	if err != nil {
 		t.Fatalf("failed to create WAL2: %v", err)
 	}
@@ -96,12 +96,12 @@ func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engineNone, err := core.NewEngine(cfg1, wal1)
+	engineNone, err := index.NewEngine(cfg1, wal1)
 	if err != nil {
 		t.Fatalf("NewEngine (none) failed: %v", err)
 	}
 
-	engineScalar, err := core.NewEngine(cfg2, wal2)
+	engineScalar, err := index.NewEngine(cfg2, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (scalar) failed: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 	dataPath := tmpDir + "/test.bin"
 
 	// Create engine and insert data
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := core.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -207,13 +207,13 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 	wal.Close()
 
 	// Create new engine and load
-	wal2, err := core.NewWAL(walPath)
+	wal2, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL2: %v", err)
 	}
 	defer wal2.Close()
 
-	engine2, err := core.NewEngine(cfg, wal2)
+	engine2, err := index.NewEngine(cfg, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (2) failed: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 	walPath := tmpDir + "/test.wal"
 
 	// Create engine and insert data
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := core.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -276,13 +276,13 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 	wal.Close()
 
 	// Create new engine and replay WAL
-	wal2, err := core.NewWAL(walPath)
+	wal2, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL2: %v", err)
 	}
 	defer wal2.Close()
 
-	engine2, err := core.NewEngine(cfg, wal2)
+	engine2, err := index.NewEngine(cfg, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (2) failed: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestScalarQuantization_MemoryUsage(t *testing.T) {
 
 	// Create engine with scalar quantization
 	walPath := tmpDir + "/test.wal"
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestScalarQuantization_MemoryUsage(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := core.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	dataPath := tmpDir + "/test.bin"
 
 	// Create engine with "none" quantization
-	wal, err := core.NewWAL(walPath)
+	wal, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine1, err := core.NewEngine(cfg1, wal)
+	engine1, err := index.NewEngine(cfg1, wal)
 	if err != nil {
 		t.Fatalf("NewEngine (none) failed: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	wal.Close()
 
 	// Try to load with "scalar" quantization (should fail or produce errors)
-	wal2, err := core.NewWAL(walPath)
+	wal2, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL2: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine2, err := core.NewEngine(cfg2, wal2)
+	engine2, err := index.NewEngine(cfg2, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (scalar) failed: %v", err)
 	}
@@ -437,13 +437,13 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	os.Remove(walPath)
 
 	// Create fresh WAL and engine with scalar
-	wal3, err := core.NewWAL(walPath)
+	wal3, err := index.NewWAL(walPath)
 	if err != nil {
 		t.Fatalf("failed to create WAL3: %v", err)
 	}
 	defer wal3.Close()
 
-	engine3, err := core.NewEngine(cfg2, wal3)
+	engine3, err := index.NewEngine(cfg2, wal3)
 	if err != nil {
 		t.Fatalf("NewEngine (scalar fresh) failed: %v", err)
 	}

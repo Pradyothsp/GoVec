@@ -4,8 +4,8 @@ import (
 	"reflect"
 )
 
-// matchFilter checks if the document matches the user's filter criteria
-func matchFilter(docMeta, filters map[string]interface{}) bool {
+// MatchFilter checks if the document matches the user's filter criteria
+func MatchFilter(docMeta, filters map[string]interface{}) bool {
 	for filterKey, filterVal := range filters {
 		// 1. Check if the key exists in the document
 		docVal, exists := docMeta[filterKey]

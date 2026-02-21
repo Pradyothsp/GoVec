@@ -1,4 +1,4 @@
-package core
+package index
 
 // Engine defines the common interface for all vector storage engines
 // regardless of the underlying quantization method.
