@@ -3,6 +3,7 @@ package index
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"sync"
@@ -111,59 +112,29 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 		case WALActionInsert:
 			idx.mu.Lock()
 
-			// Translate string ID → uint32 ID (regenerate mapping during replay)
-			internalID, err := idx.IDMapper.GetOrCreate(entry.ID)
+			err := idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
 			if err != nil {
-				log.Printf("WARNING: Failed to create internal ID for '%s': %v", entry.ID, err)
+				log.Printf("WARNING: Failed to replay insert for '%s' at line %d: %v", entry.ID, lineNum, err)
 				idx.mu.Unlock()
 				continue
 			}
 
-			// If hybrid search is enabled, update inverted index
-			if idx.InvertedIndex != nil {
-				// Remove old postings if document exists (update case)
-				if existingNode, exists := idx.Store[internalID]; exists {
-					idx.removeFromInvertedIndex(internalID, existingNode.Sparse)
-				}
-				// Add new postings (now uses uint32 DocID)
-				idx.addToInvertedIndex(internalID, entry.Sparse)
-			}
-
-			// Store with uint32 key
-			idx.Store[internalID] = &core.VectorNode[T]{
-				InternalID: internalID,
-				ExternalID: entry.ID,
-				Vector:     idx.encodeFunc(entry.Vector),
-				Sparse:     entry.Sparse,
-				Metadata:   entry.Meta,
-			}
 			idx.mu.Unlock()
 
 		case WALActionDelete:
 			idx.mu.Lock()
 
-			// Translate string ID → uint32 ID
-			internalID, err := idx.IDMapper.ToUint32ID(entry.ID)
+			err := idx.deleteInternal(entry.ID)
 			if err != nil {
-				// ID doesn't exist (already deleted or never inserted)
+				// Not found is OK during replay (idempotent)
+				if errors.Is(err, core.ErrNotFound) {
+					idx.mu.Unlock()
+					continue
+				}
+
+				log.Printf("WARNING: Failed to replay delete for '%s' at line %d: %v", entry.ID, lineNum, err)
 				idx.mu.Unlock()
 				continue
-			}
-
-			// If hybrid search is enabled, remove from inverted index
-			if idx.InvertedIndex != nil {
-				if node, exists := idx.Store[internalID]; exists {
-					idx.removeFromInvertedIndex(internalID, node.Sparse)
-				}
-			}
-
-			// Delete it from the store
-			delete(idx.Store, internalID)
-
-			// Mark as tombstone
-			err = idx.IDMapper.Delete(entry.ID)
-			if err != nil {
-				return err
 			}
 
 			idx.mu.Unlock()

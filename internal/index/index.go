@@ -40,10 +40,9 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVe
 	defer idx.mu.Unlock()
 
 	// 1. Write to WAL FIRST (write-ahead guarantee)
-	// This ensures durability before any in-memory changes
 	err := idx.wal.WriteEntry(&WALEntry{
 		Action: WALActionInsert,
-		ID:     id, // Keep string ID in WAL
+		ID:     id,
 		Vector: vec,
 		Sparse: sparse,
 		Meta:   meta,
@@ -51,28 +50,38 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVe
 
 	if err != nil {
 		log.Printf("Failed to write WAL entry: %v", err)
-		return err // If disk fails, we fail the request WITHOUT modifying memory
-	}
-
-	// 2. Translate string ID → uint32 ID (only after WAL succeeds)
-	internalID, err := idx.IDMapper.GetOrCreate(id)
-	if err != nil {
-		log.Printf("Failed to get/create internal ID: %v", err)
 		return err
 	}
 
-	// 3. If hybrid search is enabled, update the inverted index (now uses uint32 DocID)
+	// 2. Execute core insert logic
+	err = idx.insertInternal(id, vec, sparse, meta)
+	if err != nil {
+		log.Printf("Failed to insert vector: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// insertInternal performs the core insert logic without WAL writes.
+// PRECONDITION: idx.mu.Lock() must be held by caller.
+func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
+	// 1. Translate string ID → uint32 ID (create if doesn't exist)
+	internalID, err := idx.IDMapper.GetOrCreate(id)
+	if err != nil {
+		return err
+	}
+
+	// 2. If hybrid search is enabled, update inverted index
 	if idx.InvertedIndex != nil {
 		// Remove old postings if document exists (update case)
 		if existingNode, exists := idx.Store[internalID]; exists {
 			idx.removeFromInvertedIndex(internalID, existingNode.Sparse)
 		}
-
-		// Add new postings for the new sparse vector
 		idx.addToInvertedIndex(internalID, sparse)
 	}
 
-	// 4. Update memory (store with uint32 key, convert to storage format using encodeFunc)
+	// 3. Update store
 	idx.Store[internalID] = &core.VectorNode[T]{
 		InternalID: internalID,
 		ExternalID: id,
@@ -180,47 +189,71 @@ func (idx *VectorIndex[T]) computeSparseScores(sparseQuery core.SparseVector) ma
 
 // Delete removes a vector from the index by ID
 func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
-	idx.mu.Lock() // BLOCK everyone (Reads & Writes)
+	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// 1. Translate string ID → uint32 ID
+	// 1. Check if vector exists (needed for bool return value)
 	internalID, err := idx.IDMapper.ToUint32ID(id)
 	if err != nil {
-		// ID doesn't exist in mapper (already deleted or never inserted)
 		return false, nil
 	}
 
-	// 2. Check if the vector exists
-	node, exists := idx.Store[internalID]
+	_, exists := idx.Store[internalID]
 	if !exists {
 		return false, nil
 	}
 
-	// 3. Update WAL (keeps string ID for portability)
+	// 2. Write to WAL
 	err = idx.wal.WriteEntry(&WALEntry{
 		Action: WALActionDelete,
-		ID:     id, // Keep string ID in WAL
+		ID:     id,
 	})
 	if err != nil {
 		log.Printf("Failed to write WAL entry: %v", err)
 		return false, err
 	}
 
-	// 4. If hybrid search is enabled, remove from the inverted index
-	if idx.InvertedIndex != nil {
-		idx.removeFromInvertedIndex(internalID, node.Sparse)
-	}
-
-	// 5. Update memory
-	delete(idx.Store, internalID) // Delete from store using uint32 key
-
-	// 6. Mark as tombstone in IDMapper (never recycle this ID)
-	err = idx.IDMapper.Delete(id)
+	// 3. Execute core delete logic
+	err = idx.deleteInternal(id)
 	if err != nil {
+		log.Printf("Failed to delete vector: %v", err)
 		return false, err
 	}
 
 	return true, nil
+}
+
+// deleteInternal performs the core delete logic without WAL writes.
+// PRECONDITION: idx.mu.Lock() must be held by caller.
+// Returns core.ErrNotFound if ID doesn't exist.
+func (idx *VectorIndex[T]) deleteInternal(id string) error {
+	// 1. Translate string ID → uint32 ID
+	internalID, err := idx.IDMapper.ToUint32ID(id)
+	if err != nil {
+		return core.ErrNotFound
+	}
+
+	// 2. Check if vector exists in store
+	node, exists := idx.Store[internalID]
+	if !exists {
+		return core.ErrNotFound
+	}
+
+	// 3. If hybrid search enabled, remove from inverted index
+	if idx.InvertedIndex != nil {
+		idx.removeFromInvertedIndex(internalID, node.Sparse)
+	}
+
+	// 4. Delete from store
+	delete(idx.Store, internalID)
+
+	// 5. Mark as tombstone in IDMapper
+	err = idx.IDMapper.Delete(id)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Clear removes all vectors from the index
