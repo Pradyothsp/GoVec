@@ -28,9 +28,10 @@ func NewTestIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
 
-	// Create index with identity encode function and cosine similarity
+	// Create index with IDMapper, identity encode function and cosine similarity
+	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return index.NewVectorIndex[[]float32](wal, nil, identityFunc, core.CosineSimilarity)
+	return index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity)
 }
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing.
@@ -137,10 +138,14 @@ func NewCreateVectorRequest(id string, dimensions int, withMetadata bool) Create
 func AssertVectorInIndex(t *testing.T, idx *index.VectorIndex[[]float32], id string, expectedVector []float32, expectedMetadata map[string]any) {
 	t.Helper()
 
-	require.Contains(t, idx.Store, id, "Vector %s should exist in index", id)
+	// Translate string ID → uint32 ID
+	internalID, err := idx.IDMapper.ToUint32ID(id)
+	require.NoError(t, err, "Vector %s should exist in IDMapper", id)
 
-	node := idx.Store[id]
-	assert.Equal(t, id, node.ID, "Vector ID should match")
+	require.Contains(t, idx.Store, internalID, "Vector %s (internal ID %d) should exist in index", id, internalID)
+
+	node := idx.Store[internalID]
+	assert.Equal(t, id, node.ExternalID, "Vector external ID should match")
 	assert.Equal(t, expectedVector, node.Vector, "Vector data should match")
 	assert.Equal(t, expectedMetadata, node.Metadata, "Metadata should match")
 }

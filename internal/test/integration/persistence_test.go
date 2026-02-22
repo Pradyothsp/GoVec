@@ -88,10 +88,12 @@ func (s *PersistenceIntegrationTestSuite) TestServerRestart_PreservesData() {
 
 	for i := 0; i < numVectors; i++ {
 		vecID := fmt.Sprintf("vec%d", i)
-		s.Require().Contains(newIndex.Store, vecID, "Vector %s should exist", vecID)
+		internalID, err := newIndex.IDMapper.ToUint32ID(vecID)
+		s.Require().NoError(err, "Vector %s should exist", vecID)
+		s.Require().Contains(newIndex.Store, internalID, "Vector %s should exist", vecID)
 
-		node := newIndex.Store[vecID]
-		s.Assert().Equal(vecID, node.ID)
+		node := newIndex.Store[internalID]
+		s.Assert().Equal(vecID, node.ExternalID)
 		s.Assert().Equal([]float32{float32(i), float32(i * 2)}, node.Vector)
 		s.Assert().Equal(float64(i), node.Metadata["index"])
 	}
@@ -188,12 +190,15 @@ func (s *PersistenceIntegrationTestSuite) TestRecoveryFromCrash_OnlyAutoSaveData
 
 	for i := 0; i < 10; i++ {
 		vecID := fmt.Sprintf("vec%d", i)
-		s.Assert().Contains(recoveredIndex.Store, vecID)
+		internalID, err := recoveredIndex.IDMapper.ToUint32ID(vecID)
+		s.Require().NoError(err, "Vector %s should exist", vecID)
+		s.Assert().Contains(recoveredIndex.Store, internalID)
 	}
 
 	for i := 10; i < 15; i++ {
 		vecID := fmt.Sprintf("vec%d", i)
-		s.Assert().NotContains(recoveredIndex.Store, vecID, "Unsaved vectors should be lost")
+		_, err := recoveredIndex.IDMapper.ToUint32ID(vecID)
+		s.Assert().Error(err, "Unsaved vector %s should be lost", vecID)
 	}
 }
 
@@ -349,9 +354,12 @@ func (s *PersistenceIntegrationTestSuite) TestLargeDataset_Persistence() {
 	s.Assert().Len(loadedIndex.Store, numVectors, "All 1000 vectors should be loaded")
 
 	// Spot check a few vectors
-	s.Assert().Contains(loadedIndex.Store, "vec0")
-	s.Assert().Contains(loadedIndex.Store, "vec500")
-	s.Assert().Contains(loadedIndex.Store, "vec999")
+	vec0ID, _ := loadedIndex.IDMapper.ToUint32ID("vec0")
+	vec500ID, _ := loadedIndex.IDMapper.ToUint32ID("vec500")
+	vec999ID, _ := loadedIndex.IDMapper.ToUint32ID("vec999")
+	s.Assert().Contains(loadedIndex.Store, vec0ID)
+	s.Assert().Contains(loadedIndex.Store, vec500ID)
+	s.Assert().Contains(loadedIndex.Store, vec999ID)
 }
 
 // =============================================================================

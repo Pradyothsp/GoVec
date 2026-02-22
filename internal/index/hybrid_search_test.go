@@ -22,8 +22,9 @@ func newTestIndexWithHybrid(t testing.TB) *VectorIndex[[]float32] {
 	// Create inverted index (enables hybrid search)
 	invertedIndex := make(map[uint32][]core.Posting)
 
+	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, invertedIndex, identityFunc, core.CosineSimilarity)
+	return NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity)
 }
 
 func TestHybridSearch_DenseOnly(t *testing.T) {

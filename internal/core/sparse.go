@@ -18,9 +18,9 @@ func (sv *SparseVector) IsValid() bool {
 }
 
 // Posting represents a single document's score for a specific keyword.
-// We use string IDs to keep architecture simple, trading ~1.8GB per million docs
-// for a massive 10x-50x search speedup.
+// Uses uint32 DocID for 77.8% memory reduction (8 bytes vs 36 bytes per posting).
+// External string IDs are translated via IDMapper at API boundaries.
 type Posting struct {
-	DocID  string
+	DocID  uint32
 	Weight float32
 }

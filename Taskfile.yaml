@@ -96,10 +96,14 @@ tasks:
     desc: Check if code is formatted (exits non-zero if not)
     cmds:
       - |
-        unformatted=$(gofmt -l . | grep -v "build/swagger")
-        if [ -n "$unformatted" ]; then
+        # Get list of unformatted files
+        UNFORMATTED_FILES=$(gofmt -l .)
+        # Filter out swagger files, ignore grep's exit 1 if no matches
+        FILTERED_UNFORMATTED=$(echo "$UNFORMATTED_FILES" | grep -v "build/swagger" || true)
+
+        if [ -n "$FILTERED_UNFORMATTED" ]; then
           echo "Unformatted files:"
-          echo "$unformatted"
+          echo "$FILTERED_UNFORMATTED"
           exit 1
         fi
         echo "All files are formatted."

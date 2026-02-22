@@ -90,10 +90,12 @@ func (s *APITestSuite) TestVectorInsertFlow() {
 	s.Assert().Len(s.index.Store, len(vectors), "All vectors should be in the index")
 
 	for _, vec := range vectors {
-		s.Require().Contains(s.index.Store, vec.id, "Vector %s should exist", vec.id)
-		s.Assert().Equal(vec.id, s.index.Store[vec.id].ID)
-		s.Assert().Equal(vec.vector, s.index.Store[vec.id].Vector)
-		s.Assert().Equal(vec.metadata, s.index.Store[vec.id].Metadata)
+		internalID, err := s.index.IDMapper.ToUint32ID(vec.id)
+		s.Require().NoError(err, "Should be able to map %s", vec.id)
+		s.Require().Contains(s.index.Store, internalID, "Vector %s should exist", vec.id)
+		s.Assert().Equal(vec.id, s.index.Store[internalID].ExternalID)
+		s.Assert().Equal(vec.vector, s.index.Store[internalID].Vector)
+		s.Assert().Equal(vec.metadata, s.index.Store[internalID].Metadata)
 	}
 }
 
@@ -112,8 +114,10 @@ func (s *APITestSuite) TestVectorInsertAndOverwrite() {
 	s.router.ServeHTTP(w1, req1)
 
 	s.Assert().Equal(http.StatusCreated, w1.Code)
-	s.Require().Contains(s.index.Store, "test_vec")
-	s.Assert().Equal([]float32{1.0, 2.0}, s.index.Store["test_vec"].Vector)
+	internalID, err := s.index.IDMapper.ToUint32ID("test_vec")
+	s.Require().NoError(err)
+	s.Require().Contains(s.index.Store, internalID)
+	s.Assert().Equal([]float32{1.0, 2.0}, s.index.Store[internalID].Vector)
 
 	payload2 := map[string]interface{}{
 		"id":       "test_vec",
@@ -129,9 +133,11 @@ func (s *APITestSuite) TestVectorInsertAndOverwrite() {
 	s.router.ServeHTTP(w2, req2)
 
 	s.Assert().Equal(http.StatusCreated, w2.Code)
-	s.Require().Contains(s.index.Store, "test_vec")
-	s.Assert().Equal([]float32{3.0, 4.0, 5.0}, s.index.Store["test_vec"].Vector)
-	s.Assert().Equal(float64(2), s.index.Store["test_vec"].Metadata["version"])
+	internalID2, err2 := s.index.IDMapper.ToUint32ID("test_vec")
+	s.Require().NoError(err2)
+	s.Require().Contains(s.index.Store, internalID2)
+	s.Assert().Equal([]float32{3.0, 4.0, 5.0}, s.index.Store[internalID2].Vector)
+	s.Assert().Equal(float64(2), s.index.Store[internalID2].Metadata["version"])
 	s.Assert().Len(s.index.Store, 1, "Should still have only one vector")
 }
 
@@ -197,8 +203,10 @@ func (s *APITestSuite) TestLargeVectorInsertion() {
 	s.router.ServeHTTP(w, req)
 
 	s.Assert().Equal(http.StatusCreated, w.Code)
-	s.Require().Contains(s.index.Store, "large_embedding")
-	s.Assert().Len(s.index.Store["large_embedding"].Vector, 1536)
+	largeID, err := s.index.IDMapper.ToUint32ID("large_embedding")
+	s.Require().NoError(err)
+	s.Require().Contains(s.index.Store, largeID)
+	s.Assert().Len(s.index.Store[largeID].Vector, 1536)
 }
 
 func (s *APITestSuite) TestConcurrentInserts() {
@@ -236,7 +244,8 @@ func (s *APITestSuite) TestConcurrentInserts() {
 
 	for i := 0; i < numRequests; i++ {
 		vecID := fmt.Sprintf("vec%d", i)
-		s.Assert().Contains(s.index.Store, vecID, "Vector %s should exist", vecID)
+		_, err := s.index.IDMapper.ToUint32ID(vecID)
+		s.Assert().NoError(err, "Vector %s should exist", vecID)
 	}
 }
 
@@ -323,7 +332,9 @@ func (s *APITestSuite) TestEdgeCases() {
 		s.router.ServeHTTP(w, req)
 
 		s.Assert().Equal(http.StatusCreated, w.Code)
-		s.Require().Contains(s.index.Store, "complex_meta")
+		complexID, err := s.index.IDMapper.ToUint32ID("complex_meta")
+		s.Require().NoError(err)
+		s.Require().Contains(s.index.Store, complexID)
 	})
 }
 
@@ -853,8 +864,9 @@ func (s *APITestSuite) TestDeleteFlow() {
 	s.Assert().Equal(http.StatusOK, w.Code)
 	s.Assert().JSONEq(`{"success":true,"data":{"status":"deleted","id":"to_delete"}}`, w.Body.String())
 
-	// Step 3: Verify the index no longer contains the ID
-	s.Assert().NotContains(s.index.Store, "to_delete")
+	// Step 3: Verify the vector is deleted (IDMapper returns error)
+	_, err := s.index.IDMapper.ToUint32ID("to_delete")
+	s.Assert().Error(err, "Deleted ID should not be found")
 
 	// Step 4: Delete again — idempotency check must return 404
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/vectors/to_delete", nil)

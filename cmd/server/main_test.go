@@ -67,7 +67,8 @@ func TestRecoverySequence(t *testing.T) {
 	// Setup: Create snapshot with 3 vectors
 	setupWal, err := index.NewWAL(filepath.Join(tempDir, "setup.wal"))
 	require.NoError(t, err)
-	setupIdx := index.NewVectorIndex[[]float32](setupWal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	setupIDMapper := core.NewIDMapper()
+	setupIdx := index.NewVectorIndex[[]float32](setupWal, nil, setupIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	for i := 1; i <= 3; i++ {
 		err = setupIdx.Insert(fmt.Sprintf("snap%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
@@ -99,7 +100,8 @@ func TestRecoverySequence(t *testing.T) {
 	require.NoError(t, err)
 	defer recoveryWal.Close()
 
-	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, nil, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	recoveryIDMapper := core.NewIDMapper()
+	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, nil, recoveryIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity)
 
 	// CORRECT sequence: LoadFromFile(DataPath) then ReplayWAL(WalPath)
 	err = recoveredIdx.LoadFromFile(snapPath) // Load snapshot
@@ -110,9 +112,14 @@ func TestRecoverySequence(t *testing.T) {
 
 	// Verify: Should have 5 vectors (3 from snapshot + 2 from WAL)
 	assert.Len(t, recoveredIdx.Store, 5, "Should recover all 5 vectors")
-	assert.Contains(t, recoveredIdx.Store, "snap1")
-	assert.Contains(t, recoveredIdx.Store, "snap2")
-	assert.Contains(t, recoveredIdx.Store, "snap3")
-	assert.Contains(t, recoveredIdx.Store, "wal1")
-	assert.Contains(t, recoveredIdx.Store, "wal2")
+	snap1ID, _ := recoveredIdx.IDMapper.ToUint32ID("snap1")
+	snap2ID, _ := recoveredIdx.IDMapper.ToUint32ID("snap2")
+	snap3ID, _ := recoveredIdx.IDMapper.ToUint32ID("snap3")
+	wal1ID, _ := recoveredIdx.IDMapper.ToUint32ID("wal1")
+	wal2ID, _ := recoveredIdx.IDMapper.ToUint32ID("wal2")
+	assert.Contains(t, recoveredIdx.Store, snap1ID)
+	assert.Contains(t, recoveredIdx.Store, snap2ID)
+	assert.Contains(t, recoveredIdx.Store, snap3ID)
+	assert.Contains(t, recoveredIdx.Store, wal1ID)
+	assert.Contains(t, recoveredIdx.Store, wal2ID)
 }

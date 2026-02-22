@@ -15,6 +15,9 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		return nil, err
 	}
 
+	// Create IDMapper for string ↔ uint32 ID translation
+	idMapper := core.NewIDMapper()
+
 	// Create an inverted index if hybrid search is enabled
 	var invertedIndex map[uint32][]core.Posting
 	if cfg.EnableHybridSearch {
@@ -31,6 +34,7 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		return NewVectorIndex[[]int8](
 			wal,
 			invertedIndex,
+			idMapper, // Inject IDMapper
 			core.QuantizeVector,
 			mathBlock.Int8Func,
 		), nil
@@ -41,6 +45,7 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		return NewVectorIndex[[]float32](
 			wal,
 			invertedIndex,
+			idMapper, // Inject IDMapper
 			identityFunc,
 			mathBlock.FloatFunc,
 		), nil

@@ -18,7 +18,7 @@ func init() {
 
 // SnapshotHeader contains metadata about the snapshot file format
 type SnapshotHeader struct {
-	Version             int    // File format version (currently 2)
+	Version             int    // File format version (currently 3: IDMapper + uint32 IDs)
 	Quantization        string // "none" or "scalar"
 	DistanceMetric      string // "cosine", etc.
 	HybridSearchEnabled bool   // Whether inverted index is included
@@ -58,7 +58,7 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 
 	// Write header first
 	header := SnapshotHeader{
-		Version:             2,
+		Version:             3, // Bumped to v3 for IDMapper support
 		Quantization:        quantType,
 		DistanceMetric:      "cosine", // TODO: Make this configurable when we support multiple metrics
 		HybridSearchEnabled: idx.InvertedIndex != nil,
@@ -69,7 +69,14 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 		return err
 	}
 
-	// Write store (vector data)
+	// Write IDMapper state (v3+)
+	if err := idx.IDMapper.EncodeGOB(encoder); err != nil {
+		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+
+	// Write store (vector data with uint32 keys in v3)
 	if err := encoder.Encode(idx.Store); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
@@ -127,9 +134,14 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 		return fmt.Errorf("failed to decode snapshot header: %w", err)
 	}
 
-	// Validate header version (support v1 and v2)
-	if header.Version != 1 && header.Version != 2 {
-		return fmt.Errorf("unsupported snapshot version: %d", header.Version)
+	// Validate header version (support v1, v2, and v3)
+	if header.Version < 1 || header.Version > 3 {
+		return fmt.Errorf("unsupported snapshot version: %d (expected 1-3)", header.Version)
+	}
+
+	// v1 and v2 used string IDs - incompatible with v3 (uint32 IDs)
+	if header.Version < 3 {
+		return fmt.Errorf("snapshot version %d uses string IDs (incompatible with v3 uint32 IDs). Delete data files and re-insert data", header.Version)
 	}
 
 	// Determine expected quantization type from T
@@ -146,6 +158,13 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 	// Validate quantization matches
 	if header.Quantization != expectedQuant {
 		return fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
+	}
+
+	// Read IDMapper state (v3+)
+	if header.Version >= 3 {
+		if err := idx.IDMapper.DecodeGOB(decoder); err != nil {
+			return fmt.Errorf("failed to decode IDMapper: %w", err)
+		}
 	}
 
 	// Read store (vector data)

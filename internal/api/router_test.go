@@ -137,8 +137,12 @@ func TestRouterConfiguration(t *testing.T) {
 
 		assert.Equal(t, http.StatusCreated, w.Code)
 		assert.Len(t, idx.Store, 2, "Index should now have both vectors")
-		require.Contains(t, idx.Store, "existing")
-		require.Contains(t, idx.Store, "new_vector")
+		existingID, err := idx.IDMapper.ToUint32ID("existing")
+		require.NoError(t, err)
+		require.Contains(t, idx.Store, existingID)
+		newID, err := idx.IDMapper.ToUint32ID("new_vector")
+		require.NoError(t, err)
+		require.Contains(t, idx.Store, newID)
 	})
 
 	t.Run("api_v1_group_prefix", func(t *testing.T) {

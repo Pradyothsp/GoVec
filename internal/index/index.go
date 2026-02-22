@@ -12,8 +12,9 @@ import (
 // VectorIndex is a thread-safe in-memory store for vector embeddings.
 // T is the vector storage type (e.g., []float32 for no quantization, []int8 for scalar quantization)
 type VectorIndex[T any] struct {
-	Store         map[string]*core.VectorNode[T]
+	Store         map[uint32]*core.VectorNode[T] // Changed from map[string] to map[uint32]
 	InvertedIndex map[uint32][]core.Posting
+	IDMapper      *core.IDMapper // Translates string ↔ uint32 IDs
 
 	mu           sync.RWMutex
 	wal          *WAL
@@ -22,10 +23,11 @@ type VectorIndex[T any] struct {
 }
 
 // NewVectorIndex creates an empty VectorIndex ready for use.
-func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error)) *VectorIndex[T] {
+func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error)) *VectorIndex[T] {
 	return &VectorIndex[T]{
-		Store:         make(map[string]*core.VectorNode[T]),
+		Store:         make(map[uint32]*core.VectorNode[T]), // Changed to uint32 keys
 		InvertedIndex: invertedIndex,
+		IDMapper:      idMapper,
 		wal:           wal,
 		encodeFunc:    encodeFunc,
 		distanceFunc:  distanceFunc,
@@ -37,10 +39,11 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVe
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// Update WAL (stores original float32)
+	// 1. Write to WAL FIRST (write-ahead guarantee)
+	// This ensures durability before any in-memory changes
 	err := idx.wal.WriteEntry(&WALEntry{
 		Action: WALActionInsert,
-		ID:     id,
+		ID:     id, // Keep string ID in WAL
 		Vector: vec,
 		Sparse: sparse,
 		Meta:   meta,
@@ -48,26 +51,34 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVe
 
 	if err != nil {
 		log.Printf("Failed to write WAL entry: %v", err)
-		return err // If disk fails, we fail the request
+		return err // If disk fails, we fail the request WITHOUT modifying memory
 	}
 
-	// If hybrid search is enabled, update the inverted index
+	// 2. Translate string ID → uint32 ID (only after WAL succeeds)
+	internalID, err := idx.IDMapper.GetOrCreate(id)
+	if err != nil {
+		log.Printf("Failed to get/create internal ID: %v", err)
+		return err
+	}
+
+	// 3. If hybrid search is enabled, update the inverted index (now uses uint32 DocID)
 	if idx.InvertedIndex != nil {
 		// Remove old postings if document exists (update case)
-		if existingNode, exists := idx.Store[id]; exists {
-			idx.removeFromInvertedIndex(id, existingNode.Sparse)
+		if existingNode, exists := idx.Store[internalID]; exists {
+			idx.removeFromInvertedIndex(internalID, existingNode.Sparse)
 		}
 
 		// Add new postings for the new sparse vector
-		idx.addToInvertedIndex(id, sparse)
+		idx.addToInvertedIndex(internalID, sparse)
 	}
 
-	// Update memory (convert to storage format using encodeFunc)
-	idx.Store[id] = &core.VectorNode[T]{
-		ID:       id,
-		Vector:   idx.encodeFunc(vec),
-		Sparse:   sparse,
-		Metadata: meta,
+	// 4. Update memory (store with uint32 key, convert to storage format using encodeFunc)
+	idx.Store[internalID] = &core.VectorNode[T]{
+		InternalID: internalID,
+		ExternalID: id,
+		Vector:     idx.encodeFunc(vec),
+		Sparse:     sparse,
+		Metadata:   meta,
 	}
 
 	return nil
@@ -98,13 +109,13 @@ func (idx *VectorIndex[T]) Search(query []float32, sparseQuery core.SparseVector
 	const alpha = 0.7
 
 	// Pre-compute sparse scores if doing hybrid search
-	var sparseScores map[string]float32
+	var sparseScores map[uint32]float32 // Changed to uint32 keys
 	if useHybridSearch {
 		sparseScores = idx.computeSparseScores(sparseQuery)
 	}
 
 	results := make([]SearchResult, 0, limit)
-	for id, node := range idx.Store {
+	for internalID, node := range idx.Store { // internalID is now uint32
 		// Filter check
 		if !core.MatchFilter(node.Metadata, filters) {
 			continue
@@ -120,7 +131,7 @@ func (idx *VectorIndex[T]) Search(query []float32, sparseQuery core.SparseVector
 		var finalScore float32
 		if useHybridSearch {
 			// Get sparse score for this document (0.0 if not in sparse results)
-			sparseScore := sparseScores[id]
+			sparseScore := sparseScores[internalID] // Use uint32 ID
 
 			// Combine dense and sparse scores
 			finalScore = alpha*denseScore + (1-alpha)*sparseScore
@@ -129,8 +140,9 @@ func (idx *VectorIndex[T]) Search(query []float32, sparseQuery core.SparseVector
 			finalScore = denseScore
 		}
 
+		// Translate uint32 → string ID for API response (use ExternalID from node)
 		results = append(results, SearchResult{
-			ID:    id,
+			ID:    node.ExternalID, // Return string ID to API
 			Score: finalScore,
 			Meta:  node.Metadata,
 		})
@@ -150,15 +162,15 @@ func (idx *VectorIndex[T]) Search(query []float32, sparseQuery core.SparseVector
 // computeSparseScores computes sparse similarity scores for all documents using the inverted index.
 // Uses the stored sparse vectors and computes dot product with the query.
 // MUST be called with idx.mu.RLock() held.
-func (idx *VectorIndex[T]) computeSparseScores(sparseQuery core.SparseVector) map[string]float32 {
-	scores := make(map[string]float32)
+func (idx *VectorIndex[T]) computeSparseScores(sparseQuery core.SparseVector) map[uint32]float32 {
+	scores := make(map[uint32]float32) // Changed to uint32 keys
 
 	// For each document in the store, compute sparse dot product
 	for id, node := range idx.Store {
 		if !node.Sparse.IsEmpty() {
 			score := core.SparseDotProduct(sparseQuery, node.Sparse)
 			if score > 0 {
-				scores[id] = score
+				scores[id] = score // id is now uint32
 			}
 		}
 	}
@@ -171,28 +183,43 @@ func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
 	idx.mu.Lock() // BLOCK everyone (Reads & Writes)
 	defer idx.mu.Unlock()
 
-	node, exists := idx.Store[id]
+	// 1. Translate string ID → uint32 ID
+	internalID, err := idx.IDMapper.ToUint32ID(id)
+	if err != nil {
+		// ID doesn't exist in mapper (already deleted or never inserted)
+		return false, nil
+	}
+
+	// 2. Check if the vector exists
+	node, exists := idx.Store[internalID]
 	if !exists {
 		return false, nil
 	}
 
-	// Update WAL
-	err := idx.wal.WriteEntry(&WALEntry{
+	// 3. Update WAL (keeps string ID for portability)
+	err = idx.wal.WriteEntry(&WALEntry{
 		Action: WALActionDelete,
-		ID:     id,
+		ID:     id, // Keep string ID in WAL
 	})
 	if err != nil {
 		log.Printf("Failed to write WAL entry: %v", err)
 		return false, err
 	}
 
-	// If hybrid search is enabled, remove from the inverted index
+	// 4. If hybrid search is enabled, remove from the inverted index
 	if idx.InvertedIndex != nil {
-		idx.removeFromInvertedIndex(id, node.Sparse)
+		idx.removeFromInvertedIndex(internalID, node.Sparse)
 	}
 
-	// Update memory
-	delete(idx.Store, id) // The built-in Go delete function
+	// 5. Update memory
+	delete(idx.Store, internalID) // Delete from store using uint32 key
+
+	// 6. Mark as tombstone in IDMapper (never recycle this ID)
+	err = idx.IDMapper.Delete(id)
+	if err != nil {
+		return false, err
+	}
+
 	return true, nil
 }
 
@@ -200,7 +227,7 @@ func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
 func (idx *VectorIndex[T]) Clear() {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-	idx.Store = make(map[string]*core.VectorNode[T])
+	idx.Store = make(map[uint32]*core.VectorNode[T]) // Changed to uint32 keys
 
 	// Clear inverted index if hybrid search is enabled
 	if idx.InvertedIndex != nil {
@@ -217,7 +244,7 @@ func (idx *VectorIndex[T]) Len() int {
 
 // addToInvertedIndex adds postings for a document's sparse vector to the inverted index.
 // MUST be called with idx.mu.Lock() held.
-func (idx *VectorIndex[T]) addToInvertedIndex(docID string, sparse core.SparseVector) {
+func (idx *VectorIndex[T]) addToInvertedIndex(docID uint32, sparse core.SparseVector) {
 	if sparse.IsEmpty() {
 		return // No sparse vector, nothing to add
 	}
@@ -229,7 +256,7 @@ func (idx *VectorIndex[T]) addToInvertedIndex(docID string, sparse core.SparseVe
 
 		// Append posting to the token's posting list
 		idx.InvertedIndex[tokenID] = append(idx.InvertedIndex[tokenID], core.Posting{
-			DocID:  docID,
+			DocID:  docID, // Now uses uint32 DocID
 			Weight: weight,
 		})
 	}
@@ -237,7 +264,7 @@ func (idx *VectorIndex[T]) addToInvertedIndex(docID string, sparse core.SparseVe
 
 // removeFromInvertedIndex removes all postings for a document from the inverted index.
 // MUST be called with idx.mu.Lock() held.
-func (idx *VectorIndex[T]) removeFromInvertedIndex(docID string, sparse core.SparseVector) {
+func (idx *VectorIndex[T]) removeFromInvertedIndex(docID uint32, sparse core.SparseVector) {
 	if sparse.IsEmpty() {
 		return // No sparse vector, nothing to remove
 	}
@@ -249,7 +276,7 @@ func (idx *VectorIndex[T]) removeFromInvertedIndex(docID string, sparse core.Spa
 		// Filter out the posting for this document
 		filtered := make([]core.Posting, 0, len(postings))
 		for _, posting := range postings {
-			if posting.DocID != docID {
+			if posting.DocID != docID { // Now compares uint32 IDs
 				filtered = append(filtered, posting)
 			}
 		}
