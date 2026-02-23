@@ -10,3 +10,4 @@
 *.wal
 
 govec
+internal/hnsw/
