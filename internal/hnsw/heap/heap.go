@@ -27,6 +27,7 @@ func (h *innerHeap[T]) Swap(i, j int) {
 }
 
 func (h *innerHeap[T]) Push(x interface{}) {
+	//nolint:errcheck // Type assertion safe: heap only contains T
 	h.data = append(h.data, x.(T))
 }
 
@@ -67,9 +68,11 @@ func (h *Heap[T]) Push(x T) {
 // The complexity is O(log n) where n = h.Len().
 // Pop is equivalent to Remove(h, 0).
 func (h *Heap[T]) Pop() T {
+	//nolint:errcheck // Type assertion safe: heap only contains T
 	return heap.Pop(&h.inner).(T)
 }
 
+// PopLast removes and returns the last (worst) element from the heap.
 func (h *Heap[T]) PopLast() T {
 	return h.Remove(h.Len() - 1)
 }
@@ -77,6 +80,7 @@ func (h *Heap[T]) PopLast() T {
 // Remove removes and returns the element at index i from the heap.
 // The complexity is O(log n) where n = h.Len().
 func (h *Heap[T]) Remove(i int) T {
+	//nolint:errcheck // Type assertion safe: heap only contains T
 	return heap.Remove(&h.inner, i).(T)
 }
 
@@ -90,6 +94,7 @@ func (h *Heap[T]) Max() T {
 	return h.inner.data[h.inner.Len()-1]
 }
 
+// Slice returns a copy of the heap's underlying data as a slice.
 func (h *Heap[T]) Slice() []T {
 	return h.inner.data
 }

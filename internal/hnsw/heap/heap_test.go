@@ -1,3 +1,4 @@
+//nolint:revive // Package name matches directory, not stdlib conflict in practice
 package heap
 
 import (

@@ -10,6 +10,7 @@ type Analyzer[K cmp.Ordered] struct {
 	Graph *Graph[K]
 }
 
+// Height returns the maximum layer height in the HNSW graph.
 func (a *Analyzer[T]) Height() int {
 	return len(a.Graph.layers)
 }
@@ -36,7 +37,8 @@ func (a *Analyzer[T]) Connectivity() []float64 {
 
 // Topography returns the number of nodes in each layer of the graph.
 func (a *Analyzer[T]) Topography() []int {
-	var topography []int
+	height := a.Height()
+	topography := make([]int, 0, height)
 	for _, layer := range a.Graph.layers {
 		topography = append(topography, len(layer.nodes))
 	}

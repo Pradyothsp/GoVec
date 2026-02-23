@@ -278,11 +278,17 @@ type SavedGraph[K cmp.Ordered] struct {
 // It does not hold open a file descriptor, so SavedGraph can be forgotten
 // without ever calling Save.
 func LoadSavedGraph[K cmp.Ordered](path string) (*SavedGraph[K], error) {
+	//nolint:gosec // G304: Path from function parameter is acceptable
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			// Already returned error from the main function, log only
+			_ = err
+		}
+	}()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -305,7 +311,10 @@ func (g *SavedGraph[K]) Save() error {
 	if err != nil {
 		return err
 	}
-	defer tmp.Cleanup()
+	defer func() {
+		//nolint:errcheck // Best effort cleanup
+		_ = tmp.Cleanup()
+	}()
 
 	wr := bufio.NewWriter(tmp)
 	err = g.Export(wr)

@@ -8,10 +8,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Pradyothsp/govec/internal/hnsw/heap"
 	"golang.org/x/exp/maps"
+
+	"github.com/Pradyothsp/govec/internal/hnsw/heap"
 )
 
+// Vector is a type alias for float32 slices representing embeddings.
 type Vector = []float32
 
 // Node is a node in the graph.
@@ -20,6 +22,7 @@ type Node[K cmp.Ordered] struct {
 	Value Vector
 }
 
+// MakeNode creates a new Node with the given key and vector.
 func MakeNode[K cmp.Ordered](key K, vec Vector) Node[K] {
 	return Node[K]{Key: key, Value: vec}
 }
@@ -245,6 +248,7 @@ type Graph[K cmp.Ordered] struct {
 }
 
 func defaultRand() *rand.Rand {
+	//nolint:gosec // G404: Non-crypto RNG acceptable for HNSW layer generation
 	return rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
@@ -281,17 +285,17 @@ func maxLevel(ml float64, numNodes int) int {
 
 // randomLevel generates a random level for a new node.
 func (h *Graph[K]) randomLevel() int {
-	// max avoids having to accept an additional parameter for the maximum level
+	// maxLvl avoids having to accept an additional parameter for the maximum level
 	// by calculating a probably good one from the size of the base layer.
-	max := 1
+	maxLvl := 1
 	if len(h.layers) > 0 {
 		if h.Ml == 0 {
 			panic("(*Graph).Ml must be greater than 0")
 		}
-		max = maxLevel(h.Ml, h.layers[0].size())
+		maxLvl = maxLevel(h.Ml, h.layers[0].size())
 	}
 
-	for level := 0; level < max; level++ {
+	for level := 0; level < maxLvl; level++ {
 		if h.Rng == nil {
 			h.Rng = defaultRand()
 		}
@@ -301,7 +305,7 @@ func (h *Graph[K]) randomLevel() int {
 		}
 	}
 
-	return max
+	return maxLvl
 }
 
 func (g *Graph[K]) assertDims(n Vector) {
@@ -428,6 +432,7 @@ func (h *Graph[K]) SearchWithDistance(near Vector, k int) []SearchResult[K] {
 	return h.search(near, k)
 }
 
+// SearchResult represents a single result from a nearest neighbor search.
 type SearchResult[T cmp.Ordered] struct {
 	Node[T]
 	Distance float32
