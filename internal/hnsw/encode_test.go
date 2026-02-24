@@ -49,7 +49,7 @@ func Test_binaryWrite_string(t *testing.T) {
 	require.Empty(t, buf.Bytes())
 }
 
-func verifyGraphNodes[K cmp.Ordered](t *testing.T, g *Graph[K]) {
+func verifyGraphNodes[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) {
 	for _, layer := range g.layers {
 		for _, node := range layer.nodes {
 			for neighborKey, neighbor := range node.neighbors {
@@ -73,10 +73,10 @@ func verifyGraphNodes[K cmp.Ordered](t *testing.T, g *Graph[K]) {
 }
 
 // requireGraphApproxEquals checks that two graphs are equal.
-func requireGraphApproxEquals[K cmp.Ordered](t *testing.T, g1, g2 *Graph[K]) {
+func requireGraphApproxEquals[K cmp.Ordered, V VectorType](t *testing.T, g1, g2 *Graph[K, V]) {
 	require.Equal(t, g1.Len(), g2.Len())
-	a1 := Analyzer[K]{g1}
-	a2 := Analyzer[K]{g2}
+	a1 := Analyzer[K, V]{g1}
+	a2 := Analyzer[K, V]{g2}
 
 	require.Equal(
 		t,
@@ -92,10 +92,20 @@ func requireGraphApproxEquals[K cmp.Ordered](t *testing.T, g1, g2 *Graph[K]) {
 
 	require.NotNil(t, g1.Distance)
 	require.NotNil(t, g2.Distance)
+	// Test distance function by creating sample vectors of the correct type V
+	var testVec1, testVec2 V
+	switch any(testVec1).(type) {
+	case []float32:
+		testVec1 = any([]float32{0.5}).(V)
+		testVec2 = any([]float32{1}).(V)
+	case []int8:
+		testVec1 = any([]int8{63}).(V)
+		testVec2 = any([]int8{127}).(V)
+	}
 	require.Equal(
 		t,
-		g1.Distance([]float32{0.5}, []float32{1}),
-		g2.Distance([]float32{0.5}, []float32{1}),
+		g1.Distance(testVec1, testVec2),
+		g2.Distance(testVec1, testVec2),
 	)
 
 	require.Equal(t,
@@ -121,7 +131,7 @@ func TestGraph_ExportImport(t *testing.T) {
 	g1 := newTestGraph[int]()
 	for i := 0; i < 128; i++ {
 		g1.Add(
-			Node[int]{
+			Node[int, []float32]{
 				i, randFloats(1),
 			},
 		)
@@ -133,7 +143,7 @@ func TestGraph_ExportImport(t *testing.T) {
 
 	// Don't use newTestGraph to ensure parameters
 	// are imported.
-	g2 := &Graph[int]{}
+	g2 := &Graph[int, []float32]{}
 	err = g2.Import(buf)
 	require.NoError(t, err)
 
@@ -158,12 +168,13 @@ func TestGraph_ExportImport(t *testing.T) {
 func TestSavedGraph(t *testing.T) {
 	dir := t.TempDir()
 
-	g1, err := LoadSavedGraph[int](dir + "/graph")
+	g1, err := LoadSavedGraph[int, []float32](dir + "/graph")
 	require.NoError(t, err)
 	require.Equal(t, 0, g1.Len())
+	g1.Distance = EuclideanDistanceFloat32
 	for i := 0; i < 128; i++ {
 		g1.Add(
-			Node[int]{
+			Node[int, []float32]{
 				i, randFloats(1),
 			},
 		)
@@ -172,7 +183,7 @@ func TestSavedGraph(t *testing.T) {
 	err = g1.Save()
 	require.NoError(t, err)
 
-	g2, err := LoadSavedGraph[int](dir + "/graph")
+	g2, err := LoadSavedGraph[int, []float32](dir + "/graph")
 	require.NoError(t, err)
 
 	requireGraphApproxEquals(t, g1.Graph, g2.Graph)
@@ -185,7 +196,7 @@ func BenchmarkGraph_Import(b *testing.B) {
 	g := newTestGraph[int]()
 	for i := 0; i < benchGraphSize; i++ {
 		g.Add(
-			Node[int]{
+			Node[int, []float32]{
 				i, randFloats(256),
 			},
 		)
@@ -213,7 +224,7 @@ func BenchmarkGraph_Export(b *testing.B) {
 	g := newTestGraph[int]()
 	for i := 0; i < benchGraphSize; i++ {
 		g.Add(
-			Node[int]{
+			Node[int, []float32]{
 				i, randFloats(256),
 			},
 		)

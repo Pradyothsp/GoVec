@@ -6,18 +6,18 @@ import "cmp"
 // methods for analyzing it. It offers no compatibility guarantee
 // as the methods of measuring the graph's health with change
 // with the implementation.
-type Analyzer[K cmp.Ordered] struct {
-	Graph *Graph[K]
+type Analyzer[K cmp.Ordered, V VectorType] struct {
+	Graph *Graph[K, V]
 }
 
 // Height returns the maximum layer height in the HNSW graph.
-func (a *Analyzer[T]) Height() int {
+func (a *Analyzer[K, V]) Height() int {
 	return len(a.Graph.layers)
 }
 
 // Connectivity returns the average number of edges in the
 // graph for each non-empty layer.
-func (a *Analyzer[T]) Connectivity() []float64 {
+func (a *Analyzer[K, V]) Connectivity() []float64 {
 	var layerConnectivity []float64
 	for _, layer := range a.Graph.layers {
 		if len(layer.nodes) == 0 {
@@ -36,7 +36,7 @@ func (a *Analyzer[T]) Connectivity() []float64 {
 }
 
 // Topography returns the number of nodes in each layer of the graph.
-func (a *Analyzer[T]) Topography() []int {
+func (a *Analyzer[K, V]) Topography() []int {
 	height := a.Height()
 	topography := make([]int, 0, height)
 	for _, layer := range a.Graph.layers {

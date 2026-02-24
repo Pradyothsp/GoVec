@@ -1,6 +1,7 @@
 package hnsw
 
 import (
+	"bytes"
 	"cmp"
 	"math/rand"
 	"strconv"
@@ -20,39 +21,39 @@ func Test_maxLevel(t *testing.T) {
 }
 
 func Test_layerNode_search(t *testing.T) {
-	entry := &layerNode[int]{
-		Node: Node[int]{
-			Value: Vector{0},
+	entry := &layerNode[int, []float32]{
+		Node: Node[int, []float32]{
+			Value: []float32{0},
 			Key:   0,
 		},
-		neighbors: map[int]*layerNode[int]{
+		neighbors: map[int]*layerNode[int, []float32]{
 			1: {
-				Node: Node[int]{
-					Value: Vector{1},
+				Node: Node[int, []float32]{
+					Value: []float32{1},
 					Key:   1,
 				},
 			},
 			2: {
-				Node: Node[int]{
-					Value: Vector{2},
+				Node: Node[int, []float32]{
+					Value: []float32{2},
 					Key:   2,
 				},
 			},
 			3: {
-				Node: Node[int]{
-					Value: Vector{3},
+				Node: Node[int, []float32]{
+					Value: []float32{3},
 					Key:   3,
 				},
-				neighbors: map[int]*layerNode[int]{
+				neighbors: map[int]*layerNode[int, []float32]{
 					4: {
-						Node: Node[int]{
-							Value: Vector{4},
+						Node: Node[int, []float32]{
+							Value: []float32{4},
 							Key:   5,
 						},
 					},
 					5: {
-						Node: Node[int]{
-							Value: Vector{5},
+						Node: Node[int, []float32]{
+							Value: []float32{5},
 							Key:   5,
 						},
 					},
@@ -61,17 +62,17 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, EuclideanDistance)
+	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32)
 
 	require.Equal(t, 5, best[0].node.Key)
 	require.Equal(t, 3, best[1].node.Key)
 	require.Len(t, best, 2)
 }
 
-func newTestGraph[K cmp.Ordered]() *Graph[K] {
-	return &Graph[K]{
+func newTestGraph[K cmp.Ordered]() *Graph[K, []float32] {
+	return &Graph[K, []float32]{
 		M:        6,
-		Distance: EuclideanDistance,
+		Distance: EuclideanDistanceFloat32,
 		Ml:       0.5,
 		EfSearch: 20,
 		Rng:      rand.New(rand.NewSource(0)),
@@ -85,14 +86,14 @@ func TestGraph_AddSearch(t *testing.T) {
 
 	for i := 0; i < 128; i++ {
 		g.Add(
-			Node[int]{
+			Node[int, []float32]{
 				Key:   i,
-				Value: Vector{float32(i)},
+				Value: []float32{float32(i)},
 			},
 		)
 	}
 
-	al := Analyzer[int]{Graph: g}
+	al := Analyzer[int, []float32]{Graph: g}
 
 	// Layers should be approximately log2(128) = 7
 	// Look for an approximate doubling of the number of nodes in each layer.
@@ -115,11 +116,11 @@ func TestGraph_AddSearch(t *testing.T) {
 	require.Len(t, nearest, 4)
 	require.EqualValues(
 		t,
-		[]Node[int]{
-			{64, Vector{64}},
-			{65, Vector{65}},
-			{62, Vector{62}},
-			{63, Vector{63}},
+		[]Node[int, []float32]{
+			{64, []float32{64}},
+			{65, []float32{65}},
+			{62, []float32{62}},
+			{63, []float32{63}},
 		},
 		nearest,
 	)
@@ -130,14 +131,14 @@ func TestGraph_AddDelete(t *testing.T) {
 
 	g := newTestGraph[int]()
 	for i := 0; i < 128; i++ {
-		g.Add(Node[int]{
+		g.Add(Node[int, []float32]{
 			Key:   i,
-			Value: Vector{float32(i)},
+			Value: []float32{float32(i)},
 		})
 	}
 
 	require.Equal(t, 128, g.Len())
-	an := Analyzer[int]{Graph: g}
+	an := Analyzer[int, []float32]{Graph: g}
 
 	preDeleteConnectivity := an.Connectivity()
 
@@ -171,13 +172,13 @@ func Benchmark_HSNW(b *testing.B) {
 	// Use this to ensure that complexity is O(log n) where n = h.Len().
 	for _, size := range sizes {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
-			g := Graph[int]{}
+			g := Graph[int, []float32]{}
 			g.Ml = 0.5
-			g.Distance = EuclideanDistance
+			g.Distance = EuclideanDistanceFloat32
 			for i := 0; i < size; i++ {
-				g.Add(Node[int]{
+				g.Add(Node[int, []float32]{
 					Key:   i,
-					Value: Vector{float32(i)},
+					Value: []float32{float32(i)},
 				})
 			}
 			b.ResetTimer()
@@ -207,11 +208,11 @@ func Benchmark_HNSW_1536(b *testing.B) {
 
 	g := newTestGraph[int]()
 	const size = 1000
-	points := make([]Node[int], size)
+	points := make([]Node[int, []float32], size)
 	for i := 0; i < size; i++ {
-		points[i] = Node[int]{
+		points[i] = Node[int, []float32]{
 			Key:   i,
-			Value: Vector(randFloats(1536)),
+			Value: randFloats(1536),
 		}
 		g.Add(points[i])
 	}
@@ -228,11 +229,12 @@ func Benchmark_HNSW_1536(b *testing.B) {
 }
 
 func TestGraph_DefaultCosine(t *testing.T) {
-	g := NewGraph[int]()
+	g := NewGraph[int, []float32]()
+	g.Distance = CosineDistanceFloat32
 	g.Add(
-		Node[int]{Key: 1, Value: Vector{1, 1}},
-		Node[int]{Key: 2, Value: Vector{0, 1}},
-		Node[int]{Key: 3, Value: Vector{1, -1}},
+		Node[int, []float32]{Key: 1, Value: []float32{1, 1}},
+		Node[int, []float32]{Key: 2, Value: []float32{0, 1}},
+		Node[int, []float32]{Key: 3, Value: []float32{1, -1}},
 	)
 
 	neighbors := g.Search(
@@ -242,8 +244,8 @@ func TestGraph_DefaultCosine(t *testing.T) {
 
 	require.Equal(
 		t,
-		[]Node[int]{
-			{1, Vector{1, 1}},
+		[]Node[int, []float32]{
+			{1, []float32{1, 1}},
 		},
 		neighbors,
 	)
@@ -253,9 +255,117 @@ func TestGraph_RemoveAllNodes(t *testing.T) {
 	var vec = []float32{1}
 
 	for i := 0; i < 10; i++ {
-		g := NewGraph[int]()
+		g := NewGraph[int, []float32]()
+		g.Distance = CosineDistanceFloat32
 		g.Add(MakeNode(1, vec))
 		g.Delete(1)
 		g.Add(MakeNode(1, vec))
 	}
+}
+
+// TestGraph_Int8_AddSearch tests basic int8 vector operations
+func TestGraph_Int8_AddSearch(t *testing.T) {
+	t.Parallel()
+
+	g := NewGraph[int, []int8]()
+	g.Distance = CosineDistanceInt8
+	g.M = 6
+	g.Ml = 0.5
+	g.EfSearch = 20
+
+	// Add int8 vectors (quantized values in range -127 to 127)
+	g.Add(
+		Node[int, []int8]{Key: 1, Value: []int8{127, 0, 0, 0}},
+		Node[int, []int8]{Key: 2, Value: []int8{0, 127, 0, 0}},
+		Node[int, []int8]{Key: 3, Value: []int8{0, 0, 127, 0}},
+		Node[int, []int8]{Key: 4, Value: []int8{0, 0, 0, 127}},
+		Node[int, []int8]{Key: 5, Value: []int8{127, 127, 0, 0}},
+	)
+
+	require.Equal(t, 5, g.Len())
+
+	// Search for nearest neighbors
+	results := g.Search([]int8{120, 10, 0, 0}, 3)
+
+	require.Len(t, results, 3)
+	// First result should be node 1 (closest to [120, 10, 0, 0])
+	require.Equal(t, 1, results[0].Key)
+	// Other results should be valid neighbors (2 or 5 are both reasonable)
+	// HNSW is probabilistic, so exact order may vary
+	foundKeys := make(map[int]bool)
+	for _, r := range results {
+		foundKeys[r.Key] = true
+	}
+	require.True(t, foundKeys[1], "Should find node 1")
+	require.True(t, foundKeys[2] || foundKeys[5], "Should find node 2 or 5")
+}
+
+// TestGraph_Int8_ExportImport tests persistence with int8 vectors
+func TestGraph_Int8_ExportImport(t *testing.T) {
+	g1 := NewGraph[uint32, []int8]()
+	g1.Distance = CosineDistanceInt8
+	g1.M = 8
+	g1.Ml = 0.25
+	g1.EfSearch = 16
+
+	// Add test vectors
+	for i := uint32(0); i < 50; i++ {
+		vec := make([]int8, 128)
+		for j := range vec {
+			vec[j] = int8((i*7+uint32(j)*3)%256 - 128)
+		}
+		g1.Add(Node[uint32, []int8]{
+			Key:   i,
+			Value: vec,
+		})
+	}
+
+	// Export to buffer
+	buf := &bytes.Buffer{}
+	err := g1.Export(buf)
+	require.NoError(t, err)
+
+	// Import into new graph
+	g2 := NewGraph[uint32, []int8]()
+	err = g2.Import(buf)
+	require.NoError(t, err)
+
+	// Verify graphs are equivalent
+	require.Equal(t, g1.Len(), g2.Len())
+	require.Equal(t, g1.M, g2.M)
+	require.Equal(t, g1.Ml, g2.Ml)
+	require.Equal(t, g1.EfSearch, g2.EfSearch)
+
+	// Verify search results are identical
+	query := make([]int8, 128)
+	for j := range query {
+		query[j] = int8((j*5)%256 - 128)
+	}
+
+	results1 := g1.Search(query, 10)
+	results2 := g2.Search(query, 10)
+
+	require.Equal(t, results1, results2)
+}
+
+// TestGraph_Int8_DistanceAccuracy compares int8 vs float32 distance calculations
+func TestGraph_Int8_DistanceAccuracy(t *testing.T) {
+	// Test that int8 cosine distance is reasonably accurate
+	aF32 := []float32{0.8, 0.6, 0.0, -0.4}
+	bF32 := []float32{0.7, 0.7, 0.1, -0.3}
+
+	// Quantize to int8 (scale by 127)
+	aI8 := []int8{102, 76, 0, -51} // 0.8*127≈102, 0.6*127≈76, -0.4*127≈-51
+	bI8 := []int8{89, 89, 13, -38} // 0.7*127≈89, 0.1*127≈13, -0.3*127≈-38
+
+	distFloat := CosineDistanceFloat32(aF32, bF32)
+	distInt8 := CosineDistanceInt8(aI8, bI8)
+
+	// Distance should be very close (within 0.01)
+	require.InDelta(t, distFloat, distInt8, 0.01,
+		"Int8 distance should be within 0.01 of float32 distance")
+
+	t.Logf("Float32 distance: %.6f", distFloat)
+	t.Logf("Int8 distance:    %.6f", distInt8)
+	t.Logf("Difference:       %.6f", distFloat-distInt8)
 }

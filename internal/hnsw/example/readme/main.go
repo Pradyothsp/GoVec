@@ -7,7 +7,8 @@ import (
 )
 
 func main() {
-	g := hnsw.NewGraph[int]()
+	g := hnsw.NewGraph[int, []float32]()
+	g.Distance = hnsw.CosineDistanceFloat32
 	g.Add(
 		hnsw.MakeNode(1, []float32{1, 1, 1}),
 		hnsw.MakeNode(2, []float32{1, -1, 0.999}),

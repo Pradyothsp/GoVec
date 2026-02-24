@@ -54,6 +54,16 @@ func binaryRead(r io.Reader, data interface{}) (int, error) {
 		*v = make([]float32, ln)
 		return binary.Size(*v), binary.Read(r, byteOrder, *v)
 
+	case *[]int8:
+		var ln int
+		_, err := binaryRead(r, &ln)
+		if err != nil {
+			return 0, err
+		}
+
+		*v = make([]int8, ln)
+		return binary.Size(*v), binary.Read(r, byteOrder, *v)
+
 	case io.ReaderFrom:
 		n, err := v.ReadFrom(r)
 		return int(n), err
@@ -85,6 +95,12 @@ func binaryWrite(w io.Writer, data any) (int, error) {
 
 		return n + n2, nil
 	case []float32:
+		n, err := binaryWrite(w, len(v))
+		if err != nil {
+			return n, err
+		}
+		return n + binary.Size(v), binary.Write(w, byteOrder, v)
+	case []int8:
 		n, err := binaryWrite(w, len(v))
 		if err != nil {
 			return n, err
@@ -130,8 +146,21 @@ const encodingVersion = 1
 // Export writes the graph to a writer.
 //
 // T must implement io.WriterTo.
-func (h *Graph[K]) Export(w io.Writer) error {
-	distFuncName, ok := distanceFuncToName(h.Distance)
+func (h *Graph[K, V]) Export(w io.Writer) error {
+	// Determine distance function name based on vector type
+	var distFuncName string
+	var ok bool
+
+	// Use type assertion to determine which distance function map to use
+	switch fn := any(h.Distance).(type) {
+	case DistanceFunc[[]float32]:
+		distFuncName, ok = distanceFuncToNameFloat32(fn)
+	case DistanceFunc[[]int8]:
+		distFuncName, ok = distanceFuncToNameInt8(fn)
+	default:
+		return fmt.Errorf("unsupported vector type in distance function")
+	}
+
 	if !ok {
 		return fmt.Errorf("distance function %v must be registered with RegisterDistanceFunc", h.Distance)
 	}
@@ -177,7 +206,7 @@ func (h *Graph[K]) Export(w io.Writer) error {
 // T must implement io.ReaderFrom.
 // The imported graph does not have to match the exported graph's parameters (except for
 // dimensionality). The graph will converge onto the new parameters.
-func (h *Graph[K]) Import(r io.Reader) error {
+func (h *Graph[K, V]) Import(r io.Reader) error {
 	var (
 		version int
 		dist    string
@@ -189,10 +218,32 @@ func (h *Graph[K]) Import(r io.Reader) error {
 		return err
 	}
 
-	var ok bool
-	h.Distance, ok = distanceFuncs[dist]
-	if !ok {
-		return fmt.Errorf("unknown distance function %q", dist)
+	// Determine which distance function map to use based on vector type V
+	switch any(h.Distance).(type) {
+	case DistanceFunc[[]float32]:
+		distFunc, found := distanceFuncsFloat32[dist]
+		if !found {
+			return fmt.Errorf("unknown distance function %q for float32", dist)
+		}
+		// Type assertion is safe here because we're in the float32 case
+		if converted, assertOk := any(distFunc).(DistanceFunc[V]); assertOk {
+			h.Distance = converted
+		} else {
+			return fmt.Errorf("type assertion failed for distance function %q", dist)
+		}
+	case DistanceFunc[[]int8]:
+		distFunc, found := distanceFuncsInt8[dist]
+		if !found {
+			return fmt.Errorf("unknown distance function %q for int8", dist)
+		}
+		// Type assertion is safe here because we're in the int8 case
+		if converted, assertOk := any(distFunc).(DistanceFunc[V]); assertOk {
+			h.Distance = converted
+		} else {
+			return fmt.Errorf("type assertion failed for distance function %q", dist)
+		}
+	default:
+		return fmt.Errorf("unsupported vector type for distance function %q", dist)
 	}
 	if h.Rng == nil {
 		h.Rng = defaultRand()
@@ -208,7 +259,7 @@ func (h *Graph[K]) Import(r io.Reader) error {
 		return err
 	}
 
-	h.layers = make([]*layer[K], nLayers)
+	h.layers = make([]*layer[K, V], nLayers)
 	for i := 0; i < nLayers; i++ {
 		var nNodes int
 		_, err = binaryRead(r, &nNodes)
@@ -216,10 +267,10 @@ func (h *Graph[K]) Import(r io.Reader) error {
 			return err
 		}
 
-		nodes := make(map[K]*layerNode[K], nNodes)
+		nodes := make(map[K]*layerNode[K, V], nNodes)
 		for j := 0; j < nNodes; j++ {
 			var key K
-			var vec Vector
+			var vec V
 			var nNeighbors int
 			_, err = multiBinaryRead(r, &key, &vec, &nNeighbors)
 			if err != nil {
@@ -236,12 +287,12 @@ func (h *Graph[K]) Import(r io.Reader) error {
 				neighbors[k] = neighbor
 			}
 
-			node := &layerNode[K]{
-				Node: Node[K]{
+			node := &layerNode[K, V]{
+				Node: Node[K, V]{
 					Key:   key,
 					Value: vec,
 				},
-				neighbors: make(map[K]*layerNode[K]),
+				neighbors: make(map[K]*layerNode[K, V]),
 			}
 
 			nodes[key] = node
@@ -255,7 +306,7 @@ func (h *Graph[K]) Import(r io.Reader) error {
 				node.neighbors[key] = nodes[key]
 			}
 		}
-		h.layers[i] = &layer[K]{nodes: nodes}
+		h.layers[i] = &layer[K, V]{nodes: nodes}
 	}
 
 	return nil
@@ -265,8 +316,8 @@ func (h *Graph[K]) Import(r io.Reader) error {
 // changes to a file upon calls to Save. It is more convenient
 // but less powerful than calling Graph.Export and Graph.Import
 // directly.
-type SavedGraph[K cmp.Ordered] struct {
-	*Graph[K]
+type SavedGraph[K cmp.Ordered, V VectorType] struct {
+	*Graph[K, V]
 	Path string
 }
 
@@ -277,7 +328,7 @@ type SavedGraph[K cmp.Ordered] struct {
 //
 // It does not hold open a file descriptor, so SavedGraph can be forgotten
 // without ever calling Save.
-func LoadSavedGraph[K cmp.Ordered](path string) (*SavedGraph[K], error) {
+func LoadSavedGraph[K cmp.Ordered, V VectorType](path string) (*SavedGraph[K, V], error) {
 	//nolint:gosec // G304: Path from function parameter is acceptable
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -294,7 +345,7 @@ func LoadSavedGraph[K cmp.Ordered](path string) (*SavedGraph[K], error) {
 		return nil, err
 	}
 
-	g := NewGraph[K]()
+	g := NewGraph[K, V]()
 	if info.Size() > 0 {
 		err = g.Import(bufio.NewReader(f))
 		if err != nil {
@@ -302,11 +353,11 @@ func LoadSavedGraph[K cmp.Ordered](path string) (*SavedGraph[K], error) {
 		}
 	}
 
-	return &SavedGraph[K]{Graph: g, Path: path}, nil
+	return &SavedGraph[K, V]{Graph: g, Path: path}, nil
 }
 
 // Save writes the graph to the file.
-func (g *SavedGraph[K]) Save() error {
+func (g *SavedGraph[K, V]) Save() error {
 	tmp, err := renameio.TempFile("", g.Path)
 	if err != nil {
 		return err
