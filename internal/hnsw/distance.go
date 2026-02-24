@@ -5,6 +5,8 @@ import (
 	"reflect"
 
 	"github.com/viterin/vek/vek32"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // DistanceFunc is a function that computes the distance between two vectors of type V.
@@ -12,14 +14,14 @@ import (
 type DistanceFunc[V VectorType] func(a, b V) float32
 
 // CosineDistanceFloat32 computes the cosine distance between two float32 vectors.
+// Uses vek32 optimized implementation for float32 performance.
 func CosineDistanceFloat32(a, b []float32) float32 {
 	return 1 - vek32.CosineSimilarity(a, b)
 }
 
 // EuclideanDistanceFloat32 computes the Euclidean distance between two float32 vectors.
 func EuclideanDistanceFloat32(a, b []float32) float32 {
-	// TODO: can we speedup with vek?
-	var sum float32 = 0
+	var sum float32
 	for i := range a {
 		diff := a[i] - b[i]
 		sum += diff * diff
@@ -28,20 +30,16 @@ func EuclideanDistanceFloat32(a, b []float32) float32 {
 }
 
 // CosineDistanceInt8 computes the cosine distance between two int8 vectors.
-// Uses int64 intermediate calculations to prevent overflow.
+// Reuses internal/core implementation which uses int64 intermediate calculations to prevent overflow.
 func CosineDistanceInt8(a, b []int8) float32 {
-	var dot, magA, magB int64
-	for i := range a {
-		dot += int64(a[i]) * int64(b[i])
-		magA += int64(a[i]) * int64(a[i])
-		magB += int64(b[i]) * int64(b[i])
-	}
-
-	if magA == 0 || magB == 0 {
+	// Use core implementation (returns similarity, error never occurs in valid HNSW graph)
+	similarity, err := core.CosineSimilarityInt8(a, b)
+	if err != nil {
+		// This should never happen in a well-formed HNSW graph (dimensions always match)
+		// Return maximum distance as fallback
 		return 1.0
 	}
-
-	return 1.0 - float32(dot)/float32(math.Sqrt(float64(magA*magB)))
+	return 1.0 - similarity
 }
 
 // EuclideanDistanceInt8 computes the Euclidean distance between two int8 vectors.
@@ -54,22 +52,14 @@ func EuclideanDistanceInt8(a, b []int8) float32 {
 	return float32(math.Sqrt(float64(sum)))
 }
 
-// CosineDistance is an alias for CosineDistanceFloat32.
-// Backward compatibility - keep old names for float32.
-var CosineDistance = CosineDistanceFloat32
-
-// EuclideanDistance is an alias for EuclideanDistanceFloat32.
-// Backward compatibility - keep old names for float32.
-var EuclideanDistance = EuclideanDistanceFloat32
-
 var distanceFuncsFloat32 = map[string]DistanceFunc[[]float32]{
-	"euclidean": EuclideanDistanceFloat32,
-	"cosine":    CosineDistanceFloat32,
+	"euclidean_float32": EuclideanDistanceFloat32,
+	"cosine_float32":    CosineDistanceFloat32,
 }
 
 var distanceFuncsInt8 = map[string]DistanceFunc[[]int8]{
-	"euclidean": EuclideanDistanceInt8,
-	"cosine":    CosineDistanceInt8,
+	"euclidean_int8": EuclideanDistanceInt8,
+	"cosine_int8":    CosineDistanceInt8,
 }
 
 func distanceFuncToNameFloat32(fn DistanceFunc[[]float32]) (string, bool) {
