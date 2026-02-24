@@ -15,6 +15,9 @@ import (
 
 var byteOrder = binary.LittleEndian
 
+// binaryRead reads data from an io.Reader into the provided data interface, handling various types.
+// It supports reading integers, strings, slices of float32, and slices of int8.
+// The size (in bytes) of the data read is returned along with any error.
 func binaryRead(r io.Reader, data interface{}) (int, error) {
 	switch v := data.(type) {
 	case *int:
@@ -29,85 +32,90 @@ func binaryRead(r io.Reader, data interface{}) (int, error) {
 		}
 
 		*v = int(i)
-		// TODO: this will usually overshoot size.
+		// TODO: this will usually overshoot size, consider returning actual varint size.
 		return binary.MaxVarintLen64, nil
 
 	case *string:
 		var ln int
-		_, err := binaryRead(r, &ln)
+		_, err := binaryRead(r, &ln) // Read string length first.
 		if err != nil {
 			return 0, err
 		}
 
 		s := make([]byte, ln)
-		_, err = binaryRead(r, &s)
+		bytesRead, err := binaryRead(r, &s) // Read string bytes.
 		*v = string(s)
-		return len(s), err
+		return bytesRead + binary.MaxVarintLen64, err // Include length of the varint.
 
 	case *[]float32:
 		var ln int
-		_, err := binaryRead(r, &ln)
+		_, err := binaryRead(r, &ln) // Read slice length.
 		if err != nil {
 			return 0, err
 		}
 
 		*v = make([]float32, ln)
-		return binary.Size(*v), binary.Read(r, byteOrder, *v)
+		return binary.Size(*v) + binary.MaxVarintLen64, binary.Read(r, byteOrder, *v) // Read slice elements.
 
 	case *[]int8:
 		var ln int
-		_, err := binaryRead(r, &ln)
+		_, err := binaryRead(r, &ln) // Read slice length.
 		if err != nil {
 			return 0, err
 		}
 
 		*v = make([]int8, ln)
-		return binary.Size(*v), binary.Read(r, byteOrder, *v)
+		return binary.Size(*v) + binary.MaxVarintLen64, binary.Read(r, byteOrder, *v) // Read slice elements.
 
 	case io.ReaderFrom:
 		n, err := v.ReadFrom(r)
 		return int(n), err
 
 	default:
+		// For other types, use standard binary.Read.
 		return binary.Size(data), binary.Read(r, byteOrder, data)
 	}
 }
 
+// binaryWrite writes data to an io.Writer from the provided data interface, handling various types.
+// It supports writing integers, strings, slices of float32, and slices of int8.
+// The size (in bytes) of the data written is returned along with any error.
 func binaryWrite(w io.Writer, data any) (int, error) {
 	switch v := data.(type) {
 	case int:
 		var buf [binary.MaxVarintLen64]byte
 		n := binary.PutVarint(buf[:], int64(v))
-		n, err := w.Write(buf[:n])
-		return n, err
+		bytesWritten, err := w.Write(buf[:n])
+		return bytesWritten, err
 	case io.WriterTo:
 		n, err := v.WriteTo(w)
 		return int(n), err
 	case string:
-		n, err := binaryWrite(w, len(v))
+		n1, err := binaryWrite(w, len(v)) // Write string length first.
 		if err != nil {
-			return n, err
+			return n1, err
 		}
-		n2, err := io.WriteString(w, v)
+		n2, err := io.WriteString(w, v) // Write string bytes.
 		if err != nil {
-			return n + n2, err
+			return n1 + n2, err
 		}
 
-		return n + n2, nil
+		return n1 + n2, nil
 	case []float32:
-		n, err := binaryWrite(w, len(v))
+		n1, err := binaryWrite(w, len(v)) // Write slice length.
 		if err != nil {
-			return n, err
+			return n1, err
 		}
-		return n + binary.Size(v), binary.Write(w, byteOrder, v)
+		return n1 + binary.Size(v), binary.Write(w, byteOrder, v) // Write slice elements.
 	case []int8:
-		n, err := binaryWrite(w, len(v))
+		n1, err := binaryWrite(w, len(v)) // Write slice length.
 		if err != nil {
-			return n, err
+			return n1, err
 		}
-		return n + binary.Size(v), binary.Write(w, byteOrder, v)
+		return n1 + binary.Size(v), binary.Write(w, byteOrder, v) // Write slice elements.
 
 	default:
+		// For other types, use standard binary.Write.
 		sz := binary.Size(data)
 		err := binary.Write(w, byteOrder, data)
 		if err != nil {
@@ -117,6 +125,8 @@ func binaryWrite(w io.Writer, data any) (int, error) {
 	}
 }
 
+// multiBinaryWrite writes multiple data elements sequentially to an io.Writer.
+// It uses binaryWrite for each element and aggregates the total bytes written.
 func multiBinaryWrite(w io.Writer, data ...any) (int, error) {
 	var written int
 	for _, d := range data {
@@ -129,6 +139,9 @@ func multiBinaryWrite(w io.Writer, data ...any) (int, error) {
 	return written, nil
 }
 
+// multiBinaryRead reads multiple data elements sequentially from an io.Reader.
+// It uses binaryRead for each element and aggregates the total bytes read.
+// An error includes the type and index of the element that failed to be read.
 func multiBinaryRead(r io.Reader, data ...any) (int, error) {
 	var read int
 	for i, d := range data {
@@ -141,59 +154,75 @@ func multiBinaryRead(r io.Reader, data ...any) (int, error) {
 	return read, nil
 }
 
-const encodingVersion = 1
+const encodingVersion = 1 // encodingVersion tracks the current binary encoding format for the graph.
+// Increment this version if the serialization format changes to prevent
+// loading of incompatible older graph files.
 
-// Export writes the graph to a writer.
+// Export writes the entire graph's structure and node data to the provided io.Writer
+// in a binary format. This includes graph parameters (M, Ml, EfSearch), the
+// registered name of the distance function used, and the nodes across all layers.
+// It determines the appropriate distance function name based on the graph's
+// generic vector type (V) and uses a custom binary encoding scheme.
 //
-// T must implement io.WriterTo.
+// The generic type V of the Graph must be compatible with the encoding/decoding
+// operations (i.e., []float32 or []int8).
 func (h *Graph[K, V]) Export(w io.Writer) error {
-	// Determine distance function name based on vector type
+	// Determine distance function name based on vector type V.
+	// This name is saved so the correct function can be restored during Import.
 	var distFuncName string
 	var ok bool
 
-	// Use type assertion to determine which distance function map to use
+	// Use type assertion on the underlying function type to find its registered name.
 	switch fn := any(h.Distance).(type) {
 	case DistanceFunc[[]float32]:
 		distFuncName, ok = distanceFuncToNameFloat32(fn)
 	case DistanceFunc[[]int8]:
 		distFuncName, ok = distanceFuncToNameInt8(fn)
 	default:
-		return fmt.Errorf("unsupported vector type in distance function")
+		return fmt.Errorf("unsupported vector type in distance function for Export: %T", h.Distance)
 	}
 
 	if !ok {
-		return fmt.Errorf("distance function %v must be registered with RegisterDistanceFunc", h.Distance)
+		return fmt.Errorf("distance function %v must be registered with RegisterDistanceFuncFloat32 or RegisterDistanceFuncInt8 for persistence", h.Distance)
 	}
+
+	// Write graph metadata and parameters.
 	_, err := multiBinaryWrite(
 		w,
-		encodingVersion,
+		encodingVersion, // Protocol version for compatibility checks.
 		h.M,
 		h.Ml,
 		h.EfSearch,
-		distFuncName,
+		distFuncName, // Store the name of the distance function.
 	)
 	if err != nil {
-		return fmt.Errorf("encode parameters: %w", err)
+		return fmt.Errorf("encode graph parameters: %w", err)
 	}
+
+	// Write the number of layers.
 	_, err = binaryWrite(w, len(h.layers))
 	if err != nil {
 		return fmt.Errorf("encode number of layers: %w", err)
 	}
+
+	// Iterate through each layer and encode its nodes and their neighbors.
 	for _, layer := range h.layers {
-		_, err = binaryWrite(w, len(layer.nodes))
+		_, err = binaryWrite(w, len(layer.nodes)) // Number of nodes in current layer.
 		if err != nil {
-			return fmt.Errorf("encode number of nodes: %w", err)
+			return fmt.Errorf("encode number of nodes in layer: %w", err)
 		}
 		for _, node := range layer.nodes {
+			// Encode node key, vector value, and number of neighbors.
 			_, err = multiBinaryWrite(w, node.Key, node.Value, len(node.neighbors))
 			if err != nil {
-				return fmt.Errorf("encode node data: %w", err)
+				return fmt.Errorf("encode node data for key %v: %w", node.Key, err)
 			}
 
+			// Encode keys of all neighbors.
 			for neighbor := range node.neighbors {
 				_, err = binaryWrite(w, neighbor)
 				if err != nil {
-					return fmt.Errorf("encode neighbor %v: %w", neighbor, err)
+					return fmt.Errorf("encode neighbor key %v for node %v: %w", neighbor, node.Key, err)
 				}
 			}
 		}
@@ -202,87 +231,96 @@ func (h *Graph[K, V]) Export(w io.Writer) error {
 	return nil
 }
 
-// Import reads the graph from a reader.
-// T must implement io.ReaderFrom.
-// The imported graph does not have to match the exported graph's parameters (except for
-// dimensionality). The graph will converge onto the new parameters.
+// Import reads a graph from the provided io.Reader, reconstructing its structure
+// and node data. It expects the binary format to match that produced by Export.
+//
+// The generic type V of the Graph must be compatible with the encoded data
+// (i.e., []float32 or []int8).
+// The imported graph's parameters (M, Ml, EfSearch) will be set from the
+// stored data, potentially overriding the current graph's values.
 func (h *Graph[K, V]) Import(r io.Reader) error {
 	var (
-		version int
-		dist    string
+		version      int    // Protocol version.
+		distFuncName string // Name of the distance function.
 	)
-	_, err := multiBinaryRead(r, &version, &h.M, &h.Ml, &h.EfSearch,
-		&dist,
-	)
+	// Read graph metadata and parameters.
+	_, err := multiBinaryRead(r, &version, &h.M, &h.Ml, &h.EfSearch, &distFuncName)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode graph parameters: %w", err)
 	}
 
-	// Determine which distance function map to use based on vector type V
+	// Check encoding version for compatibility.
+	if version != encodingVersion {
+		return fmt.Errorf("incompatible encoding version: expected %d, got %d", encodingVersion, version)
+	}
+
+	// Restore the distance function based on its name and the graph's vector type V.
 	switch any(h.Distance).(type) {
 	case DistanceFunc[[]float32]:
-		distFunc, found := distanceFuncsFloat32[dist]
+		distFunc, found := distanceFuncsFloat32[distFuncName]
 		if !found {
-			return fmt.Errorf("unknown distance function %q for float32", dist)
+			return fmt.Errorf("unknown distance function %q for float32 vectors during import", distFuncName)
 		}
-		// Type assertion is safe here because we're in the float32 case
+		// Type assertion is safe here because we're in the float32 case and the function is known.
 		if converted, assertOk := any(distFunc).(DistanceFunc[V]); assertOk {
 			h.Distance = converted
 		} else {
-			return fmt.Errorf("type assertion failed for distance function %q", dist)
+			return fmt.Errorf("type assertion failed for float32 distance function %q: received incompatible type", distFuncName)
 		}
 	case DistanceFunc[[]int8]:
-		distFunc, found := distanceFuncsInt8[dist]
+		distFunc, found := distanceFuncsInt8[distFuncName]
 		if !found {
-			return fmt.Errorf("unknown distance function %q for int8", dist)
+			return fmt.Errorf("unknown distance function %q for int8 vectors during import", distFuncName)
 		}
-		// Type assertion is safe here because we're in the int8 case
+		// Type assertion is safe here because we're in the int8 case and the function is known.
 		if converted, assertOk := any(distFunc).(DistanceFunc[V]); assertOk {
 			h.Distance = converted
 		} else {
-			return fmt.Errorf("type assertion failed for distance function %q", dist)
+			return fmt.Errorf("type assertion failed for int8 distance function %q: received incompatible type", distFuncName)
 		}
 	default:
-		return fmt.Errorf("unsupported vector type for distance function %q", dist)
+		return fmt.Errorf("unsupported vector type for distance function %q during import: %T", distFuncName, h.Distance)
 	}
+
+	// Initialize RNG if it's not set.
 	if h.Rng == nil {
 		h.Rng = defaultRand()
 	}
 
-	if version != encodingVersion {
-		return fmt.Errorf("incompatible encoding version: %d", version)
-	}
-
+	// Read the number of layers.
 	var nLayers int
 	_, err = binaryRead(r, &nLayers)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode number of layers: %w", err)
 	}
 
 	h.layers = make([]*layer[K, V], nLayers)
+	// Read each layer's nodes.
 	for i := 0; i < nLayers; i++ {
 		var nNodes int
-		_, err = binaryRead(r, &nNodes)
+		_, err = binaryRead(r, &nNodes) // Number of nodes in current layer.
 		if err != nil {
-			return err
+			return fmt.Errorf("decode number of nodes in layer %d: %w", i, err)
 		}
 
 		nodes := make(map[K]*layerNode[K, V], nNodes)
+		// Read each node's data.
 		for j := 0; j < nNodes; j++ {
 			var key K
 			var vec V
 			var nNeighbors int
 			_, err = multiBinaryRead(r, &key, &vec, &nNeighbors)
 			if err != nil {
-				return fmt.Errorf("decoding node %d: %w", j, err)
+				return fmt.Errorf("decode node %d in layer %d: %w", j, i, err)
 			}
 
+			// Read neighbor keys (pointers will be filled in later).
 			neighbors := make([]K, nNeighbors)
 			for k := 0; k < nNeighbors; k++ {
 				var neighbor K
 				_, err = binaryRead(r, &neighbor)
 				if err != nil {
-					return fmt.Errorf("decoding neighbor %d for node %d: %w", k, j, err)
+					return fmt.Errorf("decode neighbor %d for node %v in layer %d: %w", k, key, i, err)
 				}
 				neighbors[k] = neighbor
 			}
@@ -296,14 +334,21 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 			}
 
 			nodes[key] = node
-			for _, neighbor := range neighbors {
-				node.neighbors[neighbor] = nil
+			// Temporarily store neighbor keys, will resolve pointers after all nodes are read.
+			for _, neighborKey := range neighbors {
+				node.neighbors[neighborKey] = nil
 			}
 		}
-		// Fill in neighbor pointers
+
+		// After all nodes in the layer are read, fill in the actual neighbor pointers.
 		for _, node := range nodes {
 			for key := range node.neighbors {
-				node.neighbors[key] = nodes[key]
+				if neighborNode, found := nodes[key]; found {
+					node.neighbors[key] = neighborNode
+				} else {
+					// This indicates data corruption or an invalid neighbor key.
+					return fmt.Errorf("failed to resolve neighbor %v for node %v in layer %d", key, node.Key, i)
+				}
 			}
 		}
 		h.layers[i] = &layer[K, V]{nodes: nodes}
@@ -312,75 +357,76 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 	return nil
 }
 
-// SavedGraph is a wrapper around a graph that persists
-// changes to a file upon calls to Save. It is more convenient
-// but less powerful than calling Graph.Export and Graph.Import
-// directly.
+// SavedGraph is a convenience wrapper around a Graph that simplifies persistence
+// to and from a specified file path. It handles file operations and atomic
+// saving, making it more user-friendly than directly calling Graph.Export and Graph.Import.
 type SavedGraph[K cmp.Ordered, V VectorType] struct {
-	*Graph[K, V]
-	Path string
+	*Graph[K, V]        // Embeds the HNSW graph itself.
+	Path         string // The file path where the graph data is stored.
 }
 
-// LoadSavedGraph opens a graph from a file, reads it, and returns it.
+// LoadSavedGraph opens a graph from a file at the given path.
+// If the file exists and contains data, the graph is imported from it.
+// If the file does not exist or is empty, a new, empty graph with default
+// parameters is returned.
 //
-// If the file does not exist (i.e. this is a new graph),
-// the equivalent of NewGraph is returned.
-//
-// It does not hold open a file descriptor, so SavedGraph can be forgotten
-// without ever calling Save.
+// This function does not keep the file descriptor open; the file is read
+// (or created) and then closed, allowing for flexible usage.
 func LoadSavedGraph[K cmp.Ordered, V VectorType](path string) (*SavedGraph[K, V], error) {
-	//nolint:gosec // G304: Path from function parameter is acceptable
+	//nolint:gosec // G304: Path from the function parameter is acceptable as it's an intended file operation.
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open/create graph file at %q: %w", path, err)
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
-			// Already returned error from the main function, log only
+			// Log the error but don't return it, as a primary error might already be set.
 			_ = err
 		}
 	}()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to stat graph file %q: %w", path, err)
 	}
 
-	g := NewGraph[K, V]()
-	if info.Size() > 0 {
+	g := NewGraph[K, V]() // Always start with a new graph instance.
+	if info.Size() > 0 {  // If the file has content, try to import.
 		err = g.Import(bufio.NewReader(f))
 		if err != nil {
-			return nil, fmt.Errorf("import: %w", err)
+			return nil, fmt.Errorf("failed to import graph from %q: %w", path, err)
 		}
 	}
 
 	return &SavedGraph[K, V]{Graph: g, Path: path}, nil
 }
 
-// Save writes the graph to the file.
+// Save writes the current state of the encapsulated Graph to its configured Path.
+// It uses renameio.TempFile for atomic writes, ensuring data integrity by
+// writing to a temporary file first and then atomically replacing the original.
 func (g *SavedGraph[K, V]) Save() error {
 	tmp, err := renameio.TempFile("", g.Path)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temporary file for saving graph: %w", err)
 	}
 	defer func() {
-		//nolint:errcheck // Best effort cleanup
+		//nolint:errcheck // Best effort cleanup if atomic replacement fails or is not reached.
 		_ = tmp.Cleanup()
 	}()
 
 	wr := bufio.NewWriter(tmp)
-	err = g.Export(wr)
+	err = g.Export(wr) // Export the graph data to the temporary file.
 	if err != nil {
-		return fmt.Errorf("exporting: %w", err)
+		return fmt.Errorf("failed to export graph to temporary file: %w", err)
 	}
 
-	err = wr.Flush()
+	err = wr.Flush() // Ensure all buffered data is written to the temporary file.
 	if err != nil {
-		return fmt.Errorf("flushing: %w", err)
+		return fmt.Errorf("failed to flush temporary file writer: %w", err)
 	}
 
-	err = tmp.CloseAtomicallyReplace()
+	err = tmp.CloseAtomicallyReplace() // Atomically replace the original file with the temporary one.
 	if err != nil {
-		return fmt.Errorf("closing atomically: %w", err)
+		return fmt.Errorf("failed to atomically replace graph file %q: %w", g.Path, err)
 	}
 
 	return nil
