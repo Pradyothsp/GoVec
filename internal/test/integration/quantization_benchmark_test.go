@@ -59,7 +59,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 	defer wal.Close()
 
 	cfg := config.EngineConfig{
-		Quantization:   quantization,
+		Quantization:   config.Quantization(quantization),
 		DistanceMetric: "cosine",
 	}
 

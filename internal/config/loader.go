@@ -88,6 +88,28 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		}
 	}
 
+	// Engine configuration
+	if val := os.Getenv("GOVEC_INDEX_TYPE"); val != "" {
+		cfg.Engine.IndexType = IndexType(val)
+	}
+	if val := os.Getenv("GOVEC_QUANTIZATION"); val != "" {
+		cfg.Engine.Quantization = Quantization(val)
+	}
+	if val := os.Getenv("GOVEC_HNSW_M"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			cfg.Engine.HnswM = n
+		} else {
+			log.Printf("WARNING: Failed to parse GOVEC_HNSW_M='%s' as integer: %v. Using previous value.\n", val, err)
+		}
+	}
+	if val := os.Getenv("GOVEC_HNSW_EF_SEARCH"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			cfg.Engine.HnswEfSearch = n
+		} else {
+			log.Printf("WARNING: Failed to parse GOVEC_HNSW_EF_SEARCH='%s' as integer: %v. Using previous value.\n", val, err)
+		}
+	}
+
 	// Storage configuration
 	if val := os.Getenv("GOVEC_STORAGE_PATH"); val != "" {
 		cfg.Storage.DataPath = val

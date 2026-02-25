@@ -82,7 +82,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 	defer wal.Close()
 
 	cfg := config.EngineConfig{
-		Quantization:   quantization,
+		Quantization:   config.Quantization(quantization),
 		DistanceMetric: "cosine",
 	}
 
@@ -320,7 +320,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 	wal, _ := index.NewWAL(walPath)
 	defer wal.Close()
 
-	cfg := config.EngineConfig{Quantization: quantization, DistanceMetric: "cosine"}
+	cfg := config.EngineConfig{Quantization: config.Quantization(quantization), DistanceMetric: "cosine"}
 	engine, _ := index.NewEngine(cfg, wal)
 
 	// Pre-populate with initial vectors

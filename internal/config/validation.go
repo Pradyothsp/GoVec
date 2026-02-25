@@ -55,15 +55,20 @@ func ValidateStorageConfig(cfg StorageConfig) error {
 
 // ValidateEngineConfig validates engine configuration
 func ValidateEngineConfig(cfg EngineConfig) error {
-	// Validate quantization type
-	validQuant := map[string]bool{"none": true, "scalar": true}
-	if !validQuant[cfg.Quantization] {
+	indexType := cfg.IndexType
+	if indexType == "" {
+		indexType = IndexTypeBrute
+	}
+
+	if indexType != IndexTypeBrute && indexType != IndexTypeHNSW {
+		return fmt.Errorf("invalid index_type: '%s', must be 'brute' or 'hnsw'", cfg.IndexType)
+	}
+
+	if cfg.Quantization != QuantizationNone && cfg.Quantization != QuantizationScalar {
 		return fmt.Errorf("invalid quantization: '%s', must be 'none' or 'scalar'", cfg.Quantization)
 	}
 
-	// Only cosine distance metric is currently supported
-	validMetrics := map[string]bool{"cosine": true}
-	if !validMetrics[cfg.DistanceMetric] {
+	if cfg.DistanceMetric != DistanceMetricCosine {
 		return fmt.Errorf("invalid distance metric: '%s', must be 'cosine'", cfg.DistanceMetric)
 	}
 

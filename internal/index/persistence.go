@@ -18,10 +18,11 @@ func init() {
 
 // SnapshotHeader contains metadata about the snapshot file format
 type SnapshotHeader struct {
-	Version             int    // File format version (currently 3: IDMapper + uint32 IDs)
+	Version             int    // File format version (3=VectorIndex, 4=HNSWIndex)
 	Quantization        string // "none" or "scalar"
 	DistanceMetric      string // "cosine", etc.
 	HybridSearchEnabled bool   // Whether inverted index is included
+	IndexType           string // "" or "brute" = VectorIndex; "hnsw" = HNSWIndex
 }
 
 // SaveToFile serializes the index to a specific path
@@ -134,9 +135,14 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 		return fmt.Errorf("failed to decode snapshot header: %w", err)
 	}
 
-	// Validate header version (support v1, v2, and v3)
-	if header.Version < 1 || header.Version > 3 {
-		return fmt.Errorf("unsupported snapshot version: %d (expected 1-3)", header.Version)
+	// Validate header version (support v1–v4)
+	if header.Version < 1 || header.Version > 4 {
+		return fmt.Errorf("unsupported snapshot version: %d (expected 1-4)", header.Version)
+	}
+
+	// v4 snapshots belong to HNSWIndex — reject with actionable message
+	if header.IndexType == "hnsw" {
+		return fmt.Errorf("snapshot was created with HNSW index. Delete data files or change index_type to 'hnsw' in config")
 	}
 
 	// v1 and v2 used string IDs - incompatible with v3 (uint32 IDs)
