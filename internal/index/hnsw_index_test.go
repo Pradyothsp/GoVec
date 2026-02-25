@@ -516,3 +516,138 @@ func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, results, "deleted vector must not appear in filtered results")
 }
+
+// =============================================================================
+// Persistence/WAL verification: InvertedIndex and metadata GOB round-trip
+// =============================================================================
+
+// TestHNSWIndex_InvertedIndex_SaveLoad_HybridSearchRestored verifies that
+// InvertedIndex is serialised by SaveToFile and correctly restored by LoadFromFile,
+// so hybrid (dense+sparse) search continues to work on a freshly-loaded index.
+func TestHNSWIndex_InvertedIndex_SaveLoad_HybridSearchRestored(t *testing.T) {
+	idx := newTestHNSWIndexWithHybrid(t)
+
+	// doc1: strong dense match AND strong sparse hit on term 10.
+	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
+		Indices: []uint32{10}, Values: []float32{10.0},
+	}, nil))
+	// doc2: nearly identical dense, but no sparse hit — should lose to doc1 after hybrid scoring.
+	require.NoError(t, idx.Insert("doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
+	// doc3: orthogonal to query, strong sparse on an unrelated term.
+	require.NoError(t, idx.Insert("doc3", []float32{0, 1, 0}, core.SparseVector{
+		Indices: []uint32{99}, Values: []float32{9.0},
+	}, nil))
+
+	path := filepath.Join(t.TempDir(), "hnsw_hybrid.bin")
+	require.NoError(t, idx.SaveToFile(path))
+
+	// Load into a fresh hybrid-enabled index.
+	idx2 := newTestHNSWIndexWithHybrid(t)
+	require.NoError(t, idx2.LoadFromFile(path))
+	require.Equal(t, 3, idx2.Len())
+
+	// Sparse query targets term 10 — doc1 must rank first because its InvertedIndex
+	// entry boosted the hybrid score; if InvertedIndex were lost, doc1 and doc2
+	// would be tied on dense score alone.
+	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
+	results, err := idx2.Search([]float32{1, 0, 0}, sparseQuery, 2, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "doc1", results[0].ID, "InvertedIndex must be restored: sparse boost must elevate doc1")
+}
+
+// TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex verifies that
+// replaying a WAL into a hybrid-enabled index reconstructs the InvertedIndex
+// from the sparse vectors stored in WAL entries.
+func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "hybrid_wal.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+
+	invertedIndex := make(map[uint32][]core.Posting)
+	idMapper := core.NewIDMapper()
+	identityFunc := func(v []float32) []float32 { return v }
+	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+
+	// Insert with sparse data — WAL entries carry the full SparseVector.
+	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
+		Indices: []uint32{10}, Values: []float32{10.0},
+	}, nil))
+	require.NoError(t, idx.Insert("doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
+
+	// Simulate crash: close WAL without saving a snapshot.
+	require.NoError(t, wal.Close())
+
+	// Recovery: create a fresh hybrid-enabled index and replay the WAL.
+	wal2, err := NewWAL(filepath.Join(t.TempDir(), "dummy.wal"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = wal2.Close() })
+
+	invertedIndex2 := make(map[uint32][]core.Posting)
+	idMapper2 := core.NewIDMapper()
+	recovered := NewHNSWIndex[[]float32](wal2, invertedIndex2, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+
+	require.NoError(t, recovered.ReplayWAL(walPath))
+	require.Equal(t, 2, recovered.Len(), "both docs must be recovered from WAL")
+
+	// Sparse query on term 10 must rank doc1 first — proving the InvertedIndex
+	// was rebuilt from the SparseVector fields in the replayed WAL entries.
+	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
+	results, err := recovered.Search([]float32{1, 0, 0}, sparseQuery, 2, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "doc1", results[0].ID, "InvertedIndex must be rebuilt from WAL sparse vectors")
+}
+
+// TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability verifies that
+// metadata of various types (string, int, float64, bool) survives a SaveToFile →
+// LoadFromFile round-trip and that all filter types continue to match correctly.
+// Note: metaindex.normalise() unifies numeric types via toFloat(), so int(42) and
+// float64(42) produce the same filter key — the test exercises both.
+func TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+
+	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{
+		"label":  "alpha",
+		"count":  42,
+		"score":  3.14,
+		"active": true,
+	}))
+	require.NoError(t, idx.Insert("doc2", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{
+		"label":  "beta",
+		"count":  99,
+		"active": false,
+	}))
+
+	path := filepath.Join(t.TempDir(), "hnsw_meta.bin")
+	require.NoError(t, idx.SaveToFile(path))
+
+	idx2 := newTestHNSWIndex(t)
+	require.NoError(t, idx2.LoadFromFile(path))
+	require.Equal(t, 2, idx2.Len())
+
+	// String filter must survive GOB round-trip verbatim.
+	results, err := idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"label": "alpha"})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "string filter must work after GOB round-trip")
+	assert.Equal(t, "doc1", results[0].ID)
+
+	// Numeric filter: normalise() converts int/float64 to the same key, so 42 matches
+	// regardless of whether GOB preserves the exact int type or widens to int64/float64.
+	results, err = idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"count": 42})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "numeric filter must work after GOB round-trip")
+	assert.Equal(t, "doc1", results[0].ID)
+
+	// Bool filter must survive GOB round-trip.
+	results, err = idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"active": true})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "bool filter must work after GOB round-trip")
+	assert.Equal(t, "doc1", results[0].ID)
+
+	// Float filter.
+	results, err = idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"score": 3.14})
+	require.NoError(t, err)
+	require.Len(t, results, 1, "float filter must work after GOB round-trip")
+	assert.Equal(t, "doc1", results[0].ID)
+}
