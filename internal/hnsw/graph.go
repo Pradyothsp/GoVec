@@ -108,6 +108,10 @@ func (n *layerNode[K, V]) search(
 	efSearch int,
 	target V,
 	distance DistanceFunc[V],
+	// allowlist restricts which nodes may appear in the result set.
+	// nil means no filter (all nodes qualify). An empty map means no nodes qualify.
+	// Non-matching nodes are still explored for graph connectivity.
+	allowlist map[K]struct{},
 ) []searchCandidate[K, V] {
 	// candidates is a min-heap storing nodes to visit, prioritized by their distance to the target.
 	candidates := heap.Heap[searchCandidate[K, V]]{}
@@ -126,8 +130,13 @@ func (n *layerNode[K, V]) search(
 	)
 	result.Init(make([]searchCandidate[K, V], 0, k))
 
-	// Start with the initial node in the result set.
-	result.Push(candidates.Min())
+	// Start with the initial node in the result set only if it passes the allowlist.
+	// It is always in candidates so its neighbors are explored regardless.
+	if allowlist == nil {
+		result.Push(candidates.Min())
+	} else if _, ok := allowlist[n.Key]; ok {
+		result.Push(candidates.Min())
+	}
 	visited[n.Key] = true
 
 	for candidates.Len() > 0 {
@@ -147,19 +156,30 @@ func (n *layerNode[K, V]) search(
 			visited[neighborID] = true
 
 			dist := distance(neighbor.Value, target)
+
+			// Always push to candidates — non-matching nodes still serve as stepping
+			// stones for graph connectivity, ensuring reachability of distant matching nodes.
+			candidates.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
+			// Maintain 'candidates' size up to 'efSearch'. If it exceeds, remove the furthest.
+			if candidates.Len() > efSearch {
+				candidates.PopLast()
+			}
+
+			// Only add to result if this node passes the allowlist filter.
+			if allowlist != nil {
+				if _, ok := allowlist[neighborID]; !ok {
+					continue
+				}
+			}
+
 			// Check if this new neighbor improves the current best result.
-			improved = improved || dist < result.Min().dist
+			// Guard result.Min() — result may be empty if all nodes so far were filtered.
+			improved = improved || result.Len() == 0 || dist < result.Min().dist
 			if result.Len() < k {
 				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
 			} else if dist < result.Max().dist { // If new node is better than the worst in result set
 				result.PopLast()                                               // Remove worst
 				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist}) // Add new best
-			}
-
-			candidates.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
-			// Maintain 'candidates' size up to 'efSearch'. If it exceeds, remove the furthest.
-			if candidates.Len() > efSearch {
-				candidates.PopLast()
 			}
 		}
 
@@ -454,7 +474,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 			}
 
 			// Find the 'M' nearest neighbors in the current layer's local neighborhood.
-			neighborhood := searchPoint.search(g.M, g.EfSearch, vec, g.Distance)
+			neighborhood := searchPoint.search(g.M, g.EfSearch, vec, g.Distance, nil)
 			if len(neighborhood) == 0 {
 				// This should ideally not happen as the searchPoint itself should be in the result set.
 				panic("search returned no nodes")
@@ -495,7 +515,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 // The underlying search algorithm utilizes the HNSW graph structure to efficiently
 // navigate and find approximate nearest neighbors.
 func (h *Graph[K, V]) Search(near V, k int) []Node[K, V] {
-	sr := h.search(near, k)
+	sr := h.search(near, k, nil, 0)
 	out := make([]Node[K, V], len(sr))
 	for i, node := range sr {
 		out[i] = node.Node
@@ -506,8 +526,11 @@ func (h *Graph[K, V]) Search(near V, k int) []Node[K, V] {
 // SearchWithDistance finds the 'k' nearest neighbors from the target vector 'near',
 // returning them as SearchResult objects which include both the Node and its distance
 // to the query vector. The results are ordered by increasing distance.
-func (h *Graph[K, V]) SearchWithDistance(near V, k int) []SearchResult[K, V] {
-	return h.search(near, k)
+//
+// allowlist restricts which nodes may appear in results — nil means no filter.
+// efSearch overrides the graph's default exploration factor — 0 means use the default.
+func (h *Graph[K, V]) SearchWithDistance(near V, k int, allowlist map[K]struct{}, efSearch int) []SearchResult[K, V] {
+	return h.search(near, k, allowlist, efSearch)
 }
 
 // SearchResult represents a single result from a nearest neighbor search.
@@ -516,17 +539,17 @@ type SearchResult[K cmp.Ordered, V VectorType] struct {
 	Distance float32
 }
 
-func (h *Graph[K, V]) search(near V, k int) []SearchResult[K, V] {
+func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch int) []SearchResult[K, V] {
 	h.assertDims(near) // Ensure query vector dimensions match graph dimensions.
 	if len(h.layers) == 0 {
 		return nil // No nodes in the graph to search.
 	}
 
-	var (
+	if efSearch <= 0 {
 		efSearch = h.EfSearch // Use the graph's configured EfSearch parameter.
+	}
 
-		elevator *K // Key of the node that serves as the entry point to the next lower layer.
-	)
+	var elevator *K // Key of the node that serves as the entry point to the next lower layer.
 
 	// Traverse the graph from the highest layer down to the base layer (0).
 	// In higher layers, the search is primarily to find a good starting point (elevator)
@@ -542,7 +565,7 @@ func (h *Graph[K, V]) search(near V, k int) []SearchResult[K, V] {
 		// For layers above the base layer, perform a limited search (k=1) to find the best
 		// entry point for the layer below.
 		if layerIdx > 0 {
-			nodes := searchPoint.search(1, efSearch, near, h.Distance)
+			nodes := searchPoint.search(1, efSearch, near, h.Distance, nil)
 			if len(nodes) == 0 {
 				// This implies an issue in graph construction or an empty layer.
 				// For robustness, if no nodes found, try to use the current searchPoint as elevator.
@@ -554,7 +577,7 @@ func (h *Graph[K, V]) search(near V, k int) []SearchResult[K, V] {
 		}
 
 		// At the base layer (layerIdx == 0), perform the full search for 'k' nearest neighbors.
-		nodes := searchPoint.search(k, efSearch, near, h.Distance)
+		nodes := searchPoint.search(k, efSearch, near, h.Distance, allowlist)
 		out := make([]SearchResult[K, V], 0, len(nodes))
 
 		for _, node := range nodes {

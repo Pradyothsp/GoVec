@@ -22,6 +22,7 @@ import (
 type HNSWIndex[T hnsw.VectorType] struct {
 	graph         *hnsw.Graph[uint32, T]
 	metadata      map[uint32]*core.VectorNode[T]
+	metaIndex     *core.MetadataIndex // inverted index over metadata fields for O(1) allowlist computation
 	InvertedIndex map[uint32][]core.Posting
 	IDMapper      *core.IDMapper
 
@@ -53,6 +54,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 	return &HNSWIndex[T]{
 		graph:         g,
 		metadata:      make(map[uint32]*core.VectorNode[T]),
+		metaIndex:     core.NewMetadataIndex(),
 		InvertedIndex: invertedIndex,
 		IDMapper:      idMapper,
 		wal:           wal,
@@ -99,6 +101,12 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 		idx.addToInvertedIndex(internalID, sparse)
 	}
 
+	// Update MetadataIndex — always, regardless of hybrid search setting.
+	if existingNode, exists := idx.metadata[internalID]; exists {
+		idx.metaIndex.Remove(internalID, existingNode.Metadata)
+	}
+	idx.metaIndex.Add(internalID, meta)
+
 	encoded := idx.encodeFunc(vec)
 
 	// For updates (re-using the same internalID), explicitly remove the node
@@ -122,7 +130,10 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 }
 
 // Search finds the k nearest neighbors to the query vector using HNSW approximate search.
-// When filters are provided, over-fetching (k*5) compensates for candidates that fail the filter.
+// Filter strategy is chosen dynamically based on selectivity:
+//   - Selective filters (≤50% match): allowlist pushed into graph traversal + scaled efSearch.
+//   - Non-selective filters (>50% match): post-filter with mild over-fetch.
+//
 // When hybrid search is enabled, dense and sparse scores are combined with alpha=0.7.
 func (idx *HNSWIndex[T]) Search(query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error) {
 	idx.mu.RLock()
@@ -146,13 +157,40 @@ func (idx *HNSWIndex[T]) Search(query []float32, sparseQuery core.SparseVector, 
 		sparseScores = idx.computeSparseScores(sparseQuery)
 	}
 
-	// Over-fetch when filters are present: extra candidates compensate for filtered-out results.
-	fetchCount := k
+	// Compute allowlist via MetadataIndex — O(1) lookup, no scanning.
+	var allowlist map[uint32]struct{}
 	if filters != nil {
-		fetchCount = k * 5
+		allowlist = idx.metaIndex.Allowlist(filters)
+		if len(allowlist) == 0 {
+			return nil, nil // short-circuit: no documents match the filter
+		}
 	}
 
-	candidates := idx.graph.SearchWithDistance(encodedQuery, fetchCount)
+	// Choose search strategy based on filter selectivity.
+	const selectivityThreshold = 0.5
+	const maxEfScale = 10
+	fetchCount := k
+	var graphAllowlist map[uint32]struct{}
+	scaledEf := 0 // 0 → graph uses its configured default
+
+	if allowlist != nil {
+		selectivity := float64(len(allowlist)) / float64(idx.graph.Len())
+		if selectivity > selectivityThreshold {
+			// Non-selective: most docs match, post-filter is cheap enough.
+			fetchCount = k * 2
+		} else {
+			// Selective: push allowlist into graph so only matching nodes reach results.
+			// Scale efSearch by inverse selectivity (capped) to maintain recall.
+			graphAllowlist = allowlist
+			scale := 1.0 / selectivity
+			if scale > maxEfScale {
+				scale = maxEfScale
+			}
+			scaledEf = int(float64(idx.hnswEfSearch) * scale)
+		}
+	}
+
+	candidates := idx.graph.SearchWithDistance(encodedQuery, fetchCount, graphAllowlist, scaledEf)
 	results := make([]SearchResult, 0, len(candidates))
 
 	for _, candidate := range candidates {
@@ -240,6 +278,7 @@ func (idx *HNSWIndex[T]) deleteInternal(id string) error {
 
 	idx.graph.Delete(internalID)
 	delete(idx.metadata, internalID)
+	idx.metaIndex.Remove(internalID, node.Metadata)
 
 	return idx.IDMapper.Delete(id)
 }
@@ -414,7 +453,20 @@ func (idx *HNSWIndex[T]) LoadFromFile(path string) (err error) {
 		return fmt.Errorf("failed to import HNSW graph: %w", err)
 	}
 
+	// MetadataIndex is not persisted — rebuild it from the loaded metadata map.
+	idx.rebuildMetaIndex()
+
 	return nil
+}
+
+// rebuildMetaIndex reconstructs the MetadataIndex from the current metadata map.
+// Called after LoadFromFile since MetadataIndex is a derived, in-memory structure.
+// PRECONDITION: idx.mu.Lock() must be held by caller.
+func (idx *HNSWIndex[T]) rebuildMetaIndex() {
+	idx.metaIndex.Clear()
+	for internalID, node := range idx.metadata {
+		idx.metaIndex.Add(internalID, node.Metadata)
+	}
 }
 
 // ReplayWAL reads the WAL file and applies changes to the HNSW index.
@@ -480,6 +532,7 @@ func (idx *HNSWIndex[T]) Clear() {
 	idx.graph = g
 
 	idx.metadata = make(map[uint32]*core.VectorNode[T])
+	idx.metaIndex.Clear()
 	if idx.InvertedIndex != nil {
 		idx.InvertedIndex = make(map[uint32][]core.Posting)
 	}
@@ -544,6 +597,3 @@ func (idx *HNSWIndex[T]) removeFromInvertedIndex(docID uint32, sparse core.Spars
 		}
 	}
 }
-
-// Ensure sort is used (referenced in TODO(human) guidance).
-var _ = sort.Slice

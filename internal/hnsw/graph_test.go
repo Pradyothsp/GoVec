@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,7 +63,7 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32)
+	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32, nil)
 
 	require.Equal(t, 5, best[0].node.Key)
 	require.Equal(t, 3, best[1].node.Key)
@@ -349,6 +350,71 @@ func TestGraph_Int8_ExportImport(t *testing.T) {
 }
 
 // TestGraph_Int8_DistanceAccuracy compares int8 vs float32 distance calculations
+// TestGraph_SearchWithDistance_AllowlistFiltersResults verifies that nodes not in
+// the allowlist are excluded from results while graph traversal still proceeds normally.
+func TestGraph_SearchWithDistance_AllowlistFiltersResults(t *testing.T) {
+	g := newTestGraph[int]()
+	for i := 1; i <= 10; i++ {
+		g.Add(MakeNode(i, []float32{float32(i)}))
+	}
+
+	// Allow only even-numbered nodes
+	allowlist := map[int]struct{}{2: {}, 4: {}, 6: {}, 8: {}, 10: {}}
+	results := g.SearchWithDistance([]float32{5}, 3, allowlist, 0)
+
+	require.NotEmpty(t, results)
+	for _, r := range results {
+		_, allowed := allowlist[r.Key]
+		assert.True(t, allowed, "result key %d should be in allowlist", r.Key)
+	}
+}
+
+// TestGraph_SearchWithDistance_NilAllowlist_SameAsSearch confirms that nil allowlist
+// produces the same results as the unfiltered Search method — backward compatibility.
+func TestGraph_SearchWithDistance_NilAllowlist_SameAsSearch(t *testing.T) {
+	g := newTestGraph[int]()
+	for i := 1; i <= 10; i++ {
+		g.Add(MakeNode(i, []float32{float32(i)}))
+	}
+
+	unfiltered := g.Search([]float32{5}, 3)
+	withNil := g.SearchWithDistance([]float32{5}, 3, nil, 0)
+
+	require.Len(t, withNil, len(unfiltered))
+	for i, node := range unfiltered {
+		assert.Equal(t, node.Key, withNil[i].Key)
+	}
+}
+
+// TestGraph_SearchWithDistance_ConnectivityPreservation is the critical correctness test:
+// nodes NOT in the allowlist must still be traversed so the graph remains navigable.
+// Without this, nodes reachable only via excluded nodes would never be found.
+func TestGraph_SearchWithDistance_ConnectivityPreservation(t *testing.T) {
+	// Build a graph where the best matching node (key=10, vector=10.0) is only
+	// reachable through intermediate nodes that are excluded from the allowlist.
+	// With M=2 and deterministic RNG, the graph forms a sparse structure where
+	// lower-numbered nodes act as stepping stones.
+	g := &Graph[int, []float32]{
+		M:        2,
+		Distance: EuclideanDistanceFloat32,
+		Ml:       0.5,
+		EfSearch: 50, // high efSearch to ensure thorough exploration
+		Rng:      rand.New(rand.NewSource(42)),
+	}
+	for i := 1; i <= 10; i++ {
+		g.Add(MakeNode(i, []float32{float32(i)}))
+	}
+
+	// Allow only nodes 1 and 10 — the path to 10 goes through excluded nodes.
+	allowlist := map[int]struct{}{1: {}, 10: {}}
+	results := g.SearchWithDistance([]float32{10}, 1, allowlist, 0)
+
+	// Must find node 10 despite it being "behind" excluded nodes.
+	require.NotEmpty(t, results, "should find node 10 even though path goes through excluded nodes")
+	assert.Equal(t, 10, results[0].Key,
+		"closest allowed node to query 10.0 must be node 10")
+}
+
 func TestGraph_Int8_DistanceAccuracy(t *testing.T) {
 	// Test that int8 cosine distance is reasonably accurate
 	aF32 := []float32{0.8, 0.6, 0.0, -0.4}

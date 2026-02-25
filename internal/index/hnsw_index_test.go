@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -427,4 +428,91 @@ func TestHNSWIndex_Clear_AllowsReinsertion(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "v1", results[0].ID)
+}
+
+// =============================================================================
+// Filtered Search (MetadataIndex + Selectivity Strategy)
+// =============================================================================
+
+// TestHNSWIndex_FilteredSearch_NilFilter_Regression verifies that nil filters
+// still return the nearest neighbors unchanged — backward compatibility.
+func TestHNSWIndex_FilteredSearch_NilFilter_Regression(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
+	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"tier": "premium"}))
+
+	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 2, nil)
+	require.NoError(t, err)
+	assert.Len(t, results, 2, "nil filter must return all nearest neighbors")
+}
+
+// TestHNSWIndex_FilteredSearch_SelectiveFilter verifies that a highly selective filter
+// still returns the correct k results using the graph-allowlist path.
+func TestHNSWIndex_FilteredSearch_SelectiveFilter(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+
+	vecs := fixtures.GenerateVectors(50, 3)
+	// Insert 50 vectors: only 2 are "rare"
+	for i, vec := range vecs {
+		tier := "common"
+		if i == 10 || i == 20 {
+			tier = "rare"
+		}
+		require.NoError(t, idx.Insert(
+			fmt.Sprintf("v%d", i), vec, core.SparseVector{}, map[string]any{"tier": tier},
+		))
+	}
+
+	results, err := idx.Search(vecs[10], core.SparseVector{}, 2, map[string]any{"tier": "rare"})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	for _, r := range results {
+		assert.Equal(t, "rare", r.Meta["tier"], "all results must have tier=rare")
+	}
+}
+
+// TestHNSWIndex_FilteredSearch_NoMatch_ReturnsNil verifies the short-circuit path
+// when the filter matches zero documents.
+func TestHNSWIndex_FilteredSearch_NoMatch_ReturnsNil(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
+
+	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "nonexistent"})
+	require.NoError(t, err)
+	assert.Nil(t, results, "filter matching nothing must short-circuit and return nil")
+}
+
+// TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnOverwrite verifies that overwriting
+// a vector updates the MetadataIndex so old filters no longer match.
+func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnOverwrite(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
+
+	// Overwrite with new metadata
+	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "premium"}))
+
+	old, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "free"})
+	require.NoError(t, err)
+	assert.Nil(t, old, "old tier must no longer match after overwrite")
+
+	updated, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "premium"})
+	require.NoError(t, err)
+	require.Len(t, updated, 1)
+	assert.Equal(t, "v1", updated[0].ID)
+}
+
+// TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnDelete verifies that deleting
+// a vector removes it from the MetadataIndex.
+func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnDelete(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "premium"}))
+	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"tier": "free"}))
+
+	deleted, err := idx.Delete("v1")
+	require.NoError(t, err)
+	require.True(t, deleted)
+
+	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "premium"})
+	require.NoError(t, err)
+	assert.Nil(t, results, "deleted vector must not appear in filtered results")
 }
