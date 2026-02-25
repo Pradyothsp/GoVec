@@ -369,10 +369,13 @@ main.go
 - [x] Vector search and similarity queries (cosine similarity)
 - [x] Persistence layer (GOB encoding with atomic writes)
 - [x] Configuration system (YAML config with env var overrides)
-- [ ] Advanced indexing algorithms (HNSW, IVF)
+- [x] HNSW approximate nearest-neighbor index
+- [x] Metadata filtered search (`enable_metadata_index: true`)
+- [ ] Per-field metadata indexing (`indexed_metadata_fields: ["tier", "year"]`) — selective RAM usage for high-cardinality schemas
 - [ ] Batch operations (bulk insert, batch search)
-- [ ] Query filters based on metadata
 - [ ] Euclidean distance and other similarity metrics
+- [ ] Product & Binary quantization
+- [ ] Vector deletion and update endpoints
 - [ ] Go client library
 - [ ] CLI tool for management
 - [ ] Horizontal scaling support

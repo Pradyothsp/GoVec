@@ -14,7 +14,8 @@ import (
 type VectorIndex[T any] struct {
 	Store         map[uint32]*core.VectorNode[T] // Changed from map[string] to map[uint32]
 	InvertedIndex map[uint32][]core.Posting
-	IDMapper      *core.IDMapper // Translates string ↔ uint32 IDs
+	IDMapper      *core.IDMapper      // Translates string ↔ uint32 IDs
+	metaIndex     *core.MetadataIndex // nil when metadata index is disabled
 
 	mu           sync.RWMutex
 	wal          *WAL
@@ -81,7 +82,15 @@ func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.
 		idx.addToInvertedIndex(internalID, sparse)
 	}
 
-	// 3. Update store
+	// 3. If metadata index is enabled, keep it in sync
+	if idx.metaIndex != nil {
+		if existingNode, exists := idx.Store[internalID]; exists {
+			idx.metaIndex.Remove(internalID, existingNode.Metadata)
+		}
+		idx.metaIndex.Add(internalID, meta)
+	}
+
+	// 4. Update store
 	idx.Store[internalID] = &core.VectorNode[T]{
 		InternalID: internalID,
 		ExternalID: id,
@@ -124,34 +133,43 @@ func (idx *VectorIndex[T]) Search(query []float32, sparseQuery core.SparseVector
 	}
 
 	results := make([]SearchResult, 0, limit)
-	for internalID, node := range idx.Store { // internalID is now uint32
-		// Filter check
-		if !core.MatchFilter(node.Metadata, filters) {
-			continue
-		}
 
-		// Compute dense similarity score
+	var candidates []*core.VectorNode[T]
+	if idx.metaIndex != nil && filters != nil {
+		allowlist := idx.metaIndex.Allowlist(filters)
+		if len(allowlist) == 0 {
+			return nil, nil
+		}
+		candidates = make([]*core.VectorNode[T], 0, len(allowlist))
+		for id := range allowlist {
+			if node, ok := idx.Store[id]; ok {
+				candidates = append(candidates, node)
+			}
+		}
+	} else {
+		candidates = make([]*core.VectorNode[T], 0, len(idx.Store))
+		for _, node := range idx.Store {
+			if core.MatchFilter(node.Metadata, filters) {
+				candidates = append(candidates, node)
+			}
+		}
+	}
+
+	for _, node := range candidates {
 		denseScore, err := idx.distanceFunc(encodedQuery, node.Vector)
 		if err != nil {
 			return nil, err
 		}
 
-		// Compute final score (hybrid or dense-only)
 		var finalScore float32
 		if useHybridSearch {
-			// Get sparse score for this document (0.0 if not in sparse results)
-			sparseScore := sparseScores[internalID] // Use uint32 ID
-
-			// Combine dense and sparse scores
-			finalScore = alpha*denseScore + (1-alpha)*sparseScore
+			finalScore = alpha*denseScore + (1-alpha)*sparseScores[node.InternalID]
 		} else {
-			// Dense-only search
 			finalScore = denseScore
 		}
 
-		// Translate uint32 → string ID for API response (use ExternalID from node)
 		results = append(results, SearchResult{
-			ID:    node.ExternalID, // Return string ID to API
+			ID:    node.ExternalID,
 			Score: finalScore,
 			Meta:  node.Metadata,
 		})
@@ -244,7 +262,12 @@ func (idx *VectorIndex[T]) deleteInternal(id string) error {
 		idx.removeFromInvertedIndex(internalID, node.Sparse)
 	}
 
-	// 4. Delete from store
+	// 4. If metadata index is enabled, remove from it
+	if idx.metaIndex != nil {
+		idx.metaIndex.Remove(internalID, node.Metadata)
+	}
+
+	// 5. Delete from store
 	delete(idx.Store, internalID)
 
 	// 5. Mark as tombstone in IDMapper
@@ -265,6 +288,10 @@ func (idx *VectorIndex[T]) Clear() {
 	// Clear inverted index if hybrid search is enabled
 	if idx.InvertedIndex != nil {
 		idx.InvertedIndex = make(map[uint32][]core.Posting)
+	}
+
+	if idx.metaIndex != nil {
+		idx.metaIndex.Clear()
 	}
 }
 

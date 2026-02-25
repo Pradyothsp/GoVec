@@ -36,6 +36,8 @@ type HNSWIndex[T hnsw.VectorType] struct {
 }
 
 // NewHNSWIndex creates an empty HNSWIndex ready for use.
+// Pass a non-nil metaIndex to enable metadata-accelerated filtered search;
+// pass nil to disable it (filtered search falls back to post-filtering).
 func NewHNSWIndex[T hnsw.VectorType](
 	wal *WAL,
 	invertedIndex map[uint32][]core.Posting,
@@ -45,6 +47,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 	hnswDistFunc hnsw.DistanceFunc[T],
 	m int,
 	efSearch int,
+	metaIndex *core.MetadataIndex,
 ) *HNSWIndex[T] {
 	g := hnsw.NewGraph[uint32, T]()
 	g.M = m
@@ -54,7 +57,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 	return &HNSWIndex[T]{
 		graph:         g,
 		metadata:      make(map[uint32]*core.VectorNode[T]),
-		metaIndex:     core.NewMetadataIndex(),
+		metaIndex:     metaIndex,
 		InvertedIndex: invertedIndex,
 		IDMapper:      idMapper,
 		wal:           wal,
@@ -101,11 +104,13 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 		idx.addToInvertedIndex(internalID, sparse)
 	}
 
-	// Update MetadataIndex — always, regardless of hybrid search setting.
-	if existingNode, exists := idx.metadata[internalID]; exists {
-		idx.metaIndex.Remove(internalID, existingNode.Metadata)
+	// Update MetadataIndex when enabled.
+	if idx.metaIndex != nil {
+		if existingNode, exists := idx.metadata[internalID]; exists {
+			idx.metaIndex.Remove(internalID, existingNode.Metadata)
+		}
+		idx.metaIndex.Add(internalID, meta)
 	}
-	idx.metaIndex.Add(internalID, meta)
 
 	encoded := idx.encodeFunc(vec)
 
@@ -158,8 +163,9 @@ func (idx *HNSWIndex[T]) Search(query []float32, sparseQuery core.SparseVector, 
 	}
 
 	// Compute allowlist via MetadataIndex — O(1) lookup, no scanning.
+	// Falls back to post-filter-only when MetadataIndex is disabled (nil).
 	var allowlist map[uint32]struct{}
-	if filters != nil {
+	if filters != nil && idx.metaIndex != nil {
 		allowlist = idx.metaIndex.Allowlist(filters)
 		if len(allowlist) == 0 {
 			return nil, nil // short-circuit: no documents match the filter
@@ -278,7 +284,9 @@ func (idx *HNSWIndex[T]) deleteInternal(id string) error {
 
 	idx.graph.Delete(internalID)
 	delete(idx.metadata, internalID)
-	idx.metaIndex.Remove(internalID, node.Metadata)
+	if idx.metaIndex != nil {
+		idx.metaIndex.Remove(internalID, node.Metadata)
+	}
 
 	return idx.IDMapper.Delete(id)
 }
@@ -454,14 +462,16 @@ func (idx *HNSWIndex[T]) LoadFromFile(path string) (err error) {
 	}
 
 	// MetadataIndex is not persisted — rebuild it from the loaded metadata map.
-	idx.rebuildMetaIndex()
+	if idx.metaIndex != nil {
+		idx.rebuildMetaIndex()
+	}
 
 	return nil
 }
 
 // rebuildMetaIndex reconstructs the MetadataIndex from the current metadata map.
 // Called after LoadFromFile since MetadataIndex is a derived, in-memory structure.
-// PRECONDITION: idx.mu.Lock() must be held by caller.
+// PRECONDITION: idx.mu.Lock() must be held by caller. idx.metaIndex must not be nil.
 func (idx *HNSWIndex[T]) rebuildMetaIndex() {
 	idx.metaIndex.Clear()
 	for internalID, node := range idx.metadata {
@@ -532,7 +542,9 @@ func (idx *HNSWIndex[T]) Clear() {
 	idx.graph = g
 
 	idx.metadata = make(map[uint32]*core.VectorNode[T])
-	idx.metaIndex.Clear()
+	if idx.metaIndex != nil {
+		idx.metaIndex.Clear()
+	}
 	if idx.InvertedIndex != nil {
 		idx.InvertedIndex = make(map[uint32][]core.Posting)
 	}

@@ -22,25 +22,34 @@ func NewEngine(cfg config.EngineConfig, wal *WAL) (Engine, error) {
 		invertedIndex = make(map[uint32][]core.Posting)
 	}
 
-	if cfg.IndexType == config.IndexTypeHNSW {
-		return newHNSWEngine(cfg, wal, invertedIndex, idMapper, mathBlock)
+	var metaIndex *core.MetadataIndex
+	if cfg.EnableMetadataIndex {
+		metaIndex = core.NewMetadataIndex()
 	}
 
-	return newBruteEngine(cfg, wal, invertedIndex, idMapper, mathBlock)
+	if cfg.IndexType == config.IndexTypeHNSW {
+		return newHNSWEngine(cfg, wal, invertedIndex, metaIndex, idMapper, mathBlock)
+	}
+
+	return newBruteEngine(cfg, wal, invertedIndex, metaIndex, idMapper, mathBlock)
 }
 
 // newBruteEngine creates a VectorIndex using linear scan search.
-func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, mathBlock core.MathBlock) (Engine, error) {
+func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mathBlock core.MathBlock) (Engine, error) {
 	switch cfg.Quantization {
 	case config.QuantizationScalar:
 		if mathBlock.Int8Func == nil {
 			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
 		}
-		return NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, mathBlock.Int8Func), nil
+		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, mathBlock.Int8Func)
+		idx.metaIndex = metaIndex
+		return idx, nil
 
 	case config.QuantizationNone:
 		identityFunc := func(v []float32) []float32 { return v }
-		return NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, mathBlock.FloatFunc), nil
+		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, mathBlock.FloatFunc)
+		idx.metaIndex = metaIndex
+		return idx, nil
 
 	default:
 		return nil, fmt.Errorf("unknown quantization: '%s'", cfg.Quantization)
@@ -48,7 +57,7 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 }
 
 // newHNSWEngine creates an HNSWIndex using approximate nearest neighbor search.
-func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, mathBlock core.MathBlock) (Engine, error) {
+func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mathBlock core.MathBlock) (Engine, error) {
 	m := cfg.HnswM
 	if m <= 0 {
 		m = 16
@@ -64,13 +73,13 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
 		}
 		return NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
-			core.QuantizeVector, mathBlock.Int8Func, hnsw.CosineDistanceInt8, m, efSearch), nil
+			core.QuantizeVector, mathBlock.Int8Func, hnsw.CosineDistanceInt8, m, efSearch, metaIndex), nil
 	}
 
 	if cfg.Quantization == config.QuantizationNone {
 		identityFunc := func(v []float32) []float32 { return v }
 		return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
-			identityFunc, mathBlock.FloatFunc, hnsw.CosineDistanceFloat32, m, efSearch), nil
+			identityFunc, mathBlock.FloatFunc, hnsw.CosineDistanceFloat32, m, efSearch, metaIndex), nil
 	}
 
 	return nil, fmt.Errorf("unknown quantization: '%s'", cfg.Quantization)

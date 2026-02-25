@@ -27,9 +27,10 @@ func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.Engin
 		t.Fatalf("newHNSWEngine: failed to create WAL: %v", err)
 	}
 	cfg := config.EngineConfig{
-		Quantization:   q,
-		DistanceMetric: "cosine",
-		IndexType:      config.IndexTypeHNSW,
+		Quantization:        q,
+		DistanceMetric:      "cosine",
+		IndexType:           config.IndexTypeHNSW,
+		EnableMetadataIndex: true,
 	}
 	engine, err := index.NewEngine(cfg, wal)
 	if err != nil {

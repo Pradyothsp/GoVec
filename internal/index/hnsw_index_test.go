@@ -28,7 +28,7 @@ func newTestHNSWIndex(t testing.TB) *HNSWIndex[[]float32] {
 
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	return NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, core.NewMetadataIndex())
 }
 
 func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
@@ -42,7 +42,7 @@ func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
 	invertedIndex := make(map[uint32][]core.Posting)
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, core.NewMetadataIndex())
 }
 
 // =============================================================================
@@ -345,7 +345,7 @@ func TestHNSWIndex_WALReplay_Recovery(t *testing.T) {
 
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil)
 
 	// Insert writes go to WAL first
 	require.NoError(t, idx.Insert("v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
@@ -358,7 +358,7 @@ func TestHNSWIndex_WALReplay_Recovery(t *testing.T) {
 	t.Cleanup(func() { _ = wal2.Close() })
 
 	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, nil, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	recovered := NewHNSWIndex[[]float32](wal2, nil, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil)
 
 	require.NoError(t, recovered.ReplayWAL(walPath))
 	assert.Equal(t, 3, recovered.Len(), "all 3 inserts must be recovered from WAL")
@@ -372,7 +372,7 @@ func TestHNSWIndex_WALReplay_DeleteIsReplayed(t *testing.T) {
 
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil)
 
 	require.NoError(t, idx.Insert("v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
 	require.NoError(t, idx.Insert("v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
@@ -386,7 +386,7 @@ func TestHNSWIndex_WALReplay_DeleteIsReplayed(t *testing.T) {
 	t.Cleanup(func() { _ = wal2.Close() })
 
 	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, nil, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	recovered := NewHNSWIndex[[]float32](wal2, nil, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil)
 
 	require.NoError(t, recovered.ReplayWAL(walPath))
 	assert.Equal(t, 1, recovered.Len(), "v1 was deleted in WAL, only v2 survives")
@@ -567,7 +567,7 @@ func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
 	invertedIndex := make(map[uint32][]core.Posting)
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil)
 
 	// Insert with sparse data — WAL entries carry the full SparseVector.
 	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
@@ -585,7 +585,7 @@ func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
 
 	invertedIndex2 := make(map[uint32][]core.Posting)
 	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, invertedIndex2, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20)
+	recovered := NewHNSWIndex[[]float32](wal2, invertedIndex2, idMapper2, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil)
 
 	require.NoError(t, recovered.ReplayWAL(walPath))
 	require.Equal(t, 2, recovered.Len(), "both docs must be recovered from WAL")

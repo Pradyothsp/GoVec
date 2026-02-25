@@ -178,6 +178,14 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 		return fmt.Errorf("failed to decode store: %w", err)
 	}
 
+	// MetadataIndex is not persisted — rebuild it from the loaded store.
+	if idx.metaIndex != nil {
+		idx.metaIndex.Clear()
+		for internalID, node := range idx.Store {
+			idx.metaIndex.Add(internalID, node.Metadata)
+		}
+	}
+
 	// Read inverted index (if v2 and hybrid search was enabled)
 	if header.Version == 2 && header.HybridSearchEnabled {
 		// Only load if current index has inverted index enabled

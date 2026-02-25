@@ -35,12 +35,13 @@ const (
 
 // EngineConfig holds vector engine configuration
 type EngineConfig struct {
-	IndexType          IndexType      `yaml:"index_type"`
-	Quantization       Quantization   `yaml:"quantization"`
-	DistanceMetric     DistanceMetric `yaml:"distance_metric"`
-	EnableHybridSearch bool           `yaml:"enable_hybrid_search"`
-	HnswM              int            `yaml:"hnsw_m"`
-	HnswEfSearch       int            `yaml:"hnsw_ef_search"`
+	IndexType           IndexType      `yaml:"index_type"`
+	Quantization        Quantization   `yaml:"quantization"`
+	DistanceMetric      DistanceMetric `yaml:"distance_metric"`
+	EnableHybridSearch  bool           `yaml:"enable_hybrid_search"`
+	EnableMetadataIndex bool           `yaml:"enable_metadata_index"`
+	HnswM               int            `yaml:"hnsw_m"`
+	HnswEfSearch        int            `yaml:"hnsw_ef_search"`
 }
 
 // Config is the root configuration aggregate
@@ -86,12 +87,13 @@ func DefaultConfig() *Config {
 			AutoSaveInterval: 60 * time.Second,
 		},
 		Engine: EngineConfig{
-			IndexType:          IndexTypeBrute,
-			Quantization:       QuantizationNone,
-			DistanceMetric:     DistanceMetricCosine,
-			EnableHybridSearch: false,
-			HnswM:              16,
-			HnswEfSearch:       20,
+			IndexType:           IndexTypeBrute,
+			Quantization:        QuantizationNone,
+			DistanceMetric:      DistanceMetricCosine,
+			EnableHybridSearch:  false,
+			EnableMetadataIndex: false,
+			HnswM:               16,
+			HnswEfSearch:        20,
 		},
 	}
 }
