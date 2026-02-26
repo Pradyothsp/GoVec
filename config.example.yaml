@@ -1,9 +1,11 @@
 # GoVec Configuration File
+# See CLAUDE.md for detailed configuration documentation
 
 server:
   host: "" # Bind to all interfaces (0.0.0.0)
   port: 8000 # HTTP server port
   shutdown_timeout: 10s
+  api_key: "static_api_key"  # Optional: require Bearer token on all /api/v1/* routes. Override: GOVEC_API_KEY
 
 storage:
   data_path: "./govec_data.bin"

@@ -57,6 +57,7 @@ type ServerConfig struct {
 	Host            string        `yaml:"host"`
 	Port            int           `yaml:"port"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+	APIKey          string        `yaml:"api_key"`
 }
 
 // Address returns the server address in "host:port" format

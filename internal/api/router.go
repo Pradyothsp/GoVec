@@ -11,11 +11,13 @@ import (
 
 	_ "github.com/Pradyothsp/govec/build/swagger" // generated spec; registers via init()
 	"github.com/Pradyothsp/govec/internal/api/handlers"
+	"github.com/Pradyothsp/govec/internal/api/middleware"
 	"github.com/Pradyothsp/govec/internal/api/response"
 )
 
 // SetupRouter configures the Gin engine with all routes and injects dependencies.
-func SetupRouter(engine index.Engine) *gin.Engine {
+// If apiKey is non-empty, all /api/v1/* routes require a matching Bearer token.
+func SetupRouter(engine index.Engine, apiKey string) *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/health", healthCheck)
@@ -25,6 +27,8 @@ func SetupRouter(engine index.Engine) *gin.Engine {
 	vecHandler := handlers.NewVectorHandler(engine)
 
 	v1 := r.Group("api/v1")
+	v1.Use(middleware.BearerAuth(apiKey))
+
 	v1.POST("/vectors", vecHandler.Insert)
 	v1.POST("/vectors/search", vecHandler.Search)
 	v1.DELETE("/vectors/:id", vecHandler.Delete)

@@ -87,6 +87,9 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 			log.Printf("WARNING: Failed to parse GOVEC_SHUTDOWN_TIMEOUT='%s' as duration: %v. Using previous value.\n", val, err)
 		}
 	}
+	if val := os.Getenv("GOVEC_API_KEY"); val != "" {
+		cfg.Server.APIKey = val
+	}
 
 	// Engine configuration
 	if val := os.Getenv("GOVEC_INDEX_TYPE"); val != "" {
