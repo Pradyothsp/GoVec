@@ -56,7 +56,10 @@ func NewVectorHandler(engine index.Engine) *VectorHandler {
 // @Produce      json
 // @Param        body  body      CreateVectorRequest  true  "Vector payload"
 // @Success      201   {object}  response.Response{data=handlers.InsertResponse}
-// @Failure      400   {object}  response.Response
+// @Failure      400   {object}  response.ErrorResponse
+// @Failure      401   {object}  response.ErrorResponse
+// @Failure      500   {object}  response.ErrorResponse
+// @Security     BearerAuth
 // @Router       /api/v1/vectors [post]
 func (h *VectorHandler) Insert(c *gin.Context) {
 	var req CreateVectorRequest
@@ -94,8 +97,10 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 // @Produce      json
 // @Param        body  body      SearchRequest     true  "Search payload"
 // @Success      200   {object}  response.Response{data=[]index.SearchResult}
-// @Failure      400   {object}  response.Response
-// @Failure      500   {object}  response.Response
+// @Failure      400   {object}  response.ErrorResponse
+// @Failure      401   {object}  response.ErrorResponse
+// @Failure      500   {object}  response.ErrorResponse
+// @Security     BearerAuth
 // @Router       /api/v1/vectors/search [post]
 func (h *VectorHandler) Search(c *gin.Context) {
 	var req SearchRequest
@@ -141,8 +146,11 @@ func (h *VectorHandler) Search(c *gin.Context) {
 // @Produce      json
 // @Param        id   path      string            true  "Vector ID"
 // @Success      200  {object}  response.Response{data=handlers.DeleteResponse}
-// @Failure      400  {object}  response.Response
-// @Failure      404  {object}  response.Response
+// @Failure      400  {object}  response.ErrorResponse
+// @Failure      401  {object}  response.ErrorResponse
+// @Failure      404  {object}  response.ErrorResponse
+// @Failure      500  {object}  response.ErrorResponse
+// @Security     BearerAuth
 // @Router       /api/v1/vectors/{id} [delete]
 func (h *VectorHandler) Delete(c *gin.Context) {
 	id := c.Param("id")

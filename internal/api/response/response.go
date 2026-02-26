@@ -4,9 +4,16 @@ import "github.com/gin-gonic/gin"
 
 // Response is the standard JSON envelope for all API responses.
 type Response struct {
-	Success bool   `json:"success"`
+	Success bool   `json:"success" example:"true"`
 	Data    any    `json:"data"`
-	Error   string `json:"error,omitempty"`
+	Error   string `json:"error,omitempty" example:""`
+}
+
+// ErrorResponse is the standard JSON envelope for failed API responses.
+// Currently only used for Swagger response
+type ErrorResponse struct {
+	Success bool   `json:"success" example:"false"`
+	Error   string `json:"error" example:"error message"`
 }
 
 // OK writes a success response with the given HTTP status code and data payload.

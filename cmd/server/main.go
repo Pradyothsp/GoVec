@@ -20,6 +20,11 @@ import (
 // @host            localhost:8000
 // @BasePath        /
 // @schemes         http
+//
+// @securityDefinitions.apikey BearerAuth
+// @in                         header
+// @name                       Authorization
+// @description                Type 'Bearer ' followed by your API key.
 func main() {
 	// Load configuration
 	cfg := loadConfiguration()

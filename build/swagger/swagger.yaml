@@ -65,12 +65,23 @@ definitions:
         example: 0.97
         type: number
     type: object
+  response.ErrorResponse:
+    properties:
+      error:
+        example: error message
+        type: string
+      success:
+        example: false
+        type: boolean
+    type: object
   response.Response:
     properties:
       data: {}
       error:
+        example: ""
         type: string
       success:
+        example: true
         type: boolean
     type: object
 host: localhost:8000
@@ -106,7 +117,17 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/response.Response'
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Insert or update a vector
       tags:
       - vectors
@@ -133,11 +154,21 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/response.Response'
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/response.Response'
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Delete a vector by ID
       tags:
       - vectors
@@ -169,11 +200,17 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/response.Response'
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/response.Response'
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Search for similar vectors
       tags:
       - vectors
@@ -196,4 +233,10 @@ paths:
       - system
 schemes:
 - http
+securityDefinitions:
+  BearerAuth:
+    description: Type 'Bearer ' followed by your API key.
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
