@@ -7,10 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sort"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
@@ -92,7 +93,7 @@ func (idx *HNSWIndex[T]) Insert(id string, vec []float32, sparse core.SparseVect
 		Meta:   meta,
 	})
 	if err != nil {
-		log.Printf("Failed to write WAL entry: %v", err)
+		log.Error().Err(err).Msg("failed to write WAL entry")
 		return err
 	}
 
@@ -279,12 +280,12 @@ func (idx *HNSWIndex[T]) Delete(id string) (bool, error) {
 		ID:     id,
 	})
 	if err != nil {
-		log.Printf("Failed to write WAL entry: %v", err)
+		log.Error().Err(err).Msg("failed to write WAL entry")
 		return false, err
 	}
 
 	if err := idx.deleteInternal(id); err != nil {
-		log.Printf("Failed to delete vector: %v", err)
+		log.Error().Err(err).Msg("failed to delete vector")
 		return false, err
 	}
 
@@ -668,6 +669,8 @@ func (idx *HNSWIndex[T]) ReplayWAL(filepath string) error {
 	defer f.Close() //nolint:errcheck // read-only, close error not critical
 
 	scanner := bufio.NewScanner(f)
+	// Increase buffer to 4MB to handle large vector WAL entries (default 64KB is too small)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	count := 0
 	lineNum := 0
 
@@ -675,7 +678,7 @@ func (idx *HNSWIndex[T]) ReplayWAL(filepath string) error {
 		lineNum++
 		var entry WALEntry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			log.Printf("WARNING: Skipping malformed WAL entry at line %d: %v", lineNum, err)
+			log.Warn().Int("line", lineNum).Err(err).Msg("skipping malformed WAL entry")
 			continue
 		}
 
@@ -683,7 +686,7 @@ func (idx *HNSWIndex[T]) ReplayWAL(filepath string) error {
 		case WALActionInsert:
 			idx.mu.Lock()
 			if err := idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta); err != nil {
-				log.Printf("WARNING: Failed to replay insert for '%s' at line %d: %v", entry.ID, lineNum, err)
+				log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay insert")
 				idx.mu.Unlock()
 				continue
 			}
@@ -693,7 +696,7 @@ func (idx *HNSWIndex[T]) ReplayWAL(filepath string) error {
 			idx.mu.Lock()
 			if err := idx.deleteInternal(entry.ID); err != nil {
 				if !errors.Is(err, core.ErrNotFound) {
-					log.Printf("WARNING: Failed to replay delete for '%s' at line %d: %v", entry.ID, lineNum, err)
+					log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay delete")
 				}
 				idx.mu.Unlock()
 				continue
@@ -703,7 +706,11 @@ func (idx *HNSWIndex[T]) ReplayWAL(filepath string) error {
 		count++
 	}
 
-	log.Printf("Replayed %d WAL entries", count)
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("WAL scanner error at line %d: %w", lineNum, err)
+	}
+
+	log.Info().Int("count", count).Msg("WAL replay complete")
 	return nil
 }
 

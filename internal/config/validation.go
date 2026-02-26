@@ -23,7 +23,13 @@ func Validate(cfg *Config) error {
 	return nil
 }
 
+var validLogLevels = map[string]bool{
+	"trace": true, "debug": true, "info": true, "warn": true, "error": true,
+}
+
 // ValidateServerConfig validates server configuration
+//
+//nolint:gocritic // ServerConfig is passed by value to match existing codebase convention
 func ValidateServerConfig(cfg ServerConfig) error {
 	// Port must be in valid range
 	if cfg.Port < 1 || cfg.Port > 65535 {
@@ -33,6 +39,11 @@ func ValidateServerConfig(cfg ServerConfig) error {
 	// Shutdown timeout must be non-negative
 	if cfg.ShutdownTimeout < 0 {
 		return fmt.Errorf("shutdown_timeout must be non-negative, got %v", cfg.ShutdownTimeout)
+	}
+
+	// Log level must be one of the known zerolog levels
+	if cfg.LogLevel != "" && !validLogLevels[strings.ToLower(cfg.LogLevel)] {
+		return fmt.Errorf("invalid log_level: '%s', must be one of: trace, debug, info, warn, error", cfg.LogLevel)
 	}
 
 	return nil

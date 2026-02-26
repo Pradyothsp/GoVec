@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
 	"os"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
 )
@@ -60,8 +62,10 @@ func (w *WAL) WriteEntry(entry *WALEntry) error {
 	}
 
 	// Add newline so we can read it line-by-line later
-	_, err = w.file.Write(append(bytes, '\n'))
-	return err
+	if _, err = w.file.Write(append(bytes, '\n')); err != nil {
+		return err
+	}
+	return w.file.Sync()
 }
 
 // Clear wipes the WAL (used after a successful Snapshot)
@@ -97,6 +101,8 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 	defer f.Close() //nolint:errcheck // read-only operation, error on close is not critical
 
 	scanner := bufio.NewScanner(f)
+	// Increase buffer to 4MB to handle large vector WAL entries (default 64KB is too small)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	count := 0
 	lineNum := 0 // Track line number for logging
 
@@ -104,7 +110,7 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 		lineNum++
 		var entry WALEntry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			log.Printf("WARNING: Skipping malformed WAL entry at line %d: %v", lineNum, err)
+			log.Warn().Int("line", lineNum).Err(err).Msg("skipping malformed WAL entry")
 			continue
 		}
 
@@ -114,7 +120,7 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 
 			err := idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
 			if err != nil {
-				log.Printf("WARNING: Failed to replay insert for '%s' at line %d: %v", entry.ID, lineNum, err)
+				log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay insert")
 				idx.mu.Unlock()
 				continue
 			}
@@ -132,7 +138,7 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 					continue
 				}
 
-				log.Printf("WARNING: Failed to replay delete for '%s' at line %d: %v", entry.ID, lineNum, err)
+				log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay delete")
 				idx.mu.Unlock()
 				continue
 			}
@@ -142,7 +148,11 @@ func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
 		count++
 	}
 
-	log.Printf("Replayed %d WAL entries", count)
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("WAL scanner error at line %d: %w", lineNum, err)
+	}
+
+	log.Info().Int("count", count).Msg("WAL replay complete")
 
 	return nil
 }

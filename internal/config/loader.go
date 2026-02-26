@@ -2,12 +2,12 @@ package config
 
 import (
 	"fmt"
-	"log" // Added for logging warnings
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -77,18 +77,34 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		if port, err := strconv.Atoi(val); err == nil {
 			cfg.Server.Port = port
 		} else {
-			log.Printf("WARNING: Failed to parse GOVEC_SERVER_PORT='%s' as integer: %v. Using previous value.\n", val, err)
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_SERVER_PORT, using previous value")
 		}
 	}
 	if val := os.Getenv("GOVEC_SHUTDOWN_TIMEOUT"); val != "" {
 		if duration, err := time.ParseDuration(val); err == nil {
 			cfg.Server.ShutdownTimeout = duration
 		} else {
-			log.Printf("WARNING: Failed to parse GOVEC_SHUTDOWN_TIMEOUT='%s' as duration: %v. Using previous value.\n", val, err)
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_SHUTDOWN_TIMEOUT, using previous value")
 		}
 	}
 	if val := os.Getenv("GOVEC_API_KEY"); val != "" {
 		cfg.Server.APIKey = val
+	}
+	if val := os.Getenv("GOVEC_LOG_LEVEL"); val != "" {
+		cfg.Server.LogLevel = val
+	}
+	if val := os.Getenv("GOVEC_PPROF_ENABLED"); val != "" {
+		switch strings.ToLower(val) {
+		case "true":
+			cfg.Server.PprofEnabled = true
+		case "false":
+			cfg.Server.PprofEnabled = false
+		default:
+			log.Warn().Str("value", val).Msg("failed to parse GOVEC_PPROF_ENABLED, expected 'true' or 'false', using previous value")
+		}
+	}
+	if val := os.Getenv("GOVEC_PPROF_ADDR"); val != "" {
+		cfg.Server.PprofAddr = val
 	}
 
 	// Engine configuration
@@ -102,14 +118,14 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		if n, err := strconv.Atoi(val); err == nil {
 			cfg.Engine.HnswM = n
 		} else {
-			log.Printf("WARNING: Failed to parse GOVEC_HNSW_M='%s' as integer: %v. Using previous value.\n", val, err)
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_HNSW_M, using previous value")
 		}
 	}
 	if val := os.Getenv("GOVEC_HNSW_EF_SEARCH"); val != "" {
 		if n, err := strconv.Atoi(val); err == nil {
 			cfg.Engine.HnswEfSearch = n
 		} else {
-			log.Printf("WARNING: Failed to parse GOVEC_HNSW_EF_SEARCH='%s' as integer: %v. Using previous value.\n", val, err)
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_HNSW_EF_SEARCH, using previous value")
 		}
 	}
 
@@ -124,14 +140,14 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		case "false":
 			cfg.Storage.AutoSaveEnabled = false
 		default:
-			log.Printf("WARNING: Failed to parse GOVEC_AUTO_SAVE_ENABLED='%s' as boolean. Expected 'true' or 'false'. Using previous value.\n", val)
+			log.Warn().Str("value", val).Msg("failed to parse GOVEC_AUTO_SAVE_ENABLED, expected 'true' or 'false', using previous value")
 		}
 	}
 	if val := os.Getenv("GOVEC_AUTO_SAVE_INTERVAL"); val != "" {
 		if duration, err := time.ParseDuration(val); err == nil {
 			cfg.Storage.AutoSaveInterval = duration
 		} else {
-			log.Printf("WARNING: Failed to parse GOVEC_AUTO_SAVE_INTERVAL='%s' as duration: %v. Using previous value.\n", val, err)
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_AUTO_SAVE_INTERVAL, using previous value")
 		}
 	}
 }

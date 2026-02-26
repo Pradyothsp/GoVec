@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -19,7 +20,9 @@ import (
 // If apiKey is non-empty, all /api/v1/* routes require a matching Bearer token.
 // dataPath is the persistence path used by the flush endpoint.
 func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.RequestLogger())
 
 	r.GET("/health", healthCheck)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -30,6 +33,7 @@ func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
 
 	v1 := r.Group("api/v1")
 	v1.Use(middleware.BearerAuth(apiKey))
+	v1.Use(middleware.Timeout(30 * time.Second))
 
 	v1.POST("/vectors/batch", vecHandler.BatchInsert)
 	v1.POST("/vectors", vecHandler.Insert)

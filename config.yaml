@@ -6,6 +6,7 @@ server:
   port: 8000 # HTTP server port
   shutdown_timeout: 10s
   api_key: ""  # Optional: require Bearer token on all /api/v1/* routes. Override: GOVEC_API_KEY
+  log_level: "debug" # Options: "debug", "info", "warn", "error", "fatal"
 
 storage:
   data_path: "./govec_data.bin"

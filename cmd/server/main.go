@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
+	_ "net/http/pprof" //nolint:gosec // G108: pprof only starts when cfg.Server.PprofEnabled is true; addr is localhost-bound
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/config"
@@ -26,23 +29,50 @@ import (
 // @name                       Authorization
 // @description                Type 'Bearer ' followed by your API key.
 func main() {
+	// Structured JSON logging for production
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
+	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+
 	// Load configuration
 	cfg := loadConfiguration()
+
+	// Apply configured log level (parsed by zerolog; defaults to "info")
+	level, err := zerolog.ParseLevel(cfg.Server.LogLevel)
+	if err != nil {
+		level = zerolog.InfoLevel
+	}
+	zerolog.SetGlobalLevel(level)
+	log.Info().Str("level", level.String()).Msg("log level set")
+
+	// pprof debug server — config-driven, localhost-bound only
+	var debugSrv *http.Server
+	if cfg.Server.PprofEnabled {
+		debugSrv = &http.Server{
+			Addr:              cfg.Server.PprofAddr,
+			ReadHeaderTimeout: 5 * time.Second, // prevent Slowloris on debug port
+			Handler:           http.DefaultServeMux,
+		}
+		go func() {
+			log.Info().Str("addr", cfg.Server.PprofAddr).Msg("pprof debug server listening")
+			if err := debugSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { //nolint:gosec // localhost-bound
+				log.Error().Err(err).Msg("pprof server error")
+			}
+		}()
+	}
 
 	// Initialize WAL
 	wal, err := index.NewWAL(cfg.Storage.WalPath)
 	if err != nil {
-		log.Fatal("Failed to open WAL:", err)
+		log.Fatal().Err(err).Msg("failed to open WAL")
 	}
 
-	// Initialize components
-	log.Println("Starting server...")
+	log.Info().Msg("starting server")
 
 	// Create engine via factory
 	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
 	if err != nil {
 		_ = wal.Close() //nolint:errcheck // best-effort cleanup before fatal exit
-		log.Fatalf("Failed to create engine: %v", err)
+		log.Fatal().Err(err).Msg("failed to create engine")
 	}
 
 	// Engine created successfully, set up cleanup
@@ -52,23 +82,23 @@ func main() {
 
 	// RECOVERY SEQUENCE
 	// Step 1: Load the base snapshot from DataPath (GOB format)
-	log.Println("📂 Loading snapshot from disk...")
+	log.Info().Str("path", cfg.Storage.DataPath).Msg("loading snapshot from disk")
 	if err := engine.LoadFromFile(cfg.Storage.DataPath); err != nil {
 		if os.IsNotExist(err) {
-			log.Println("⚠️ No snapshot found, starting fresh.")
+			log.Info().Msg("no snapshot found, starting fresh")
 		} else {
-			log.Printf("⚠️ Warning: Could not load snapshot: %v", err)
+			log.Warn().Err(err).Msg("could not load snapshot")
 		}
 	} else {
-		log.Printf("✅ Loaded %d vectors from snapshot!", engine.Len())
+		log.Info().Int("vectors", engine.Len()).Msg("snapshot loaded")
 	}
 
 	// Step 2: Replay the WAL from WalPath (JSON format) to recover uncommitted changes
-	log.Println("🔄 Replaying WAL...")
+	log.Info().Str("path", cfg.Storage.WalPath).Msg("replaying WAL")
 	if err := engine.ReplayWAL(cfg.Storage.WalPath); err != nil {
-		log.Printf("⚠️ WAL Replay warning: %v", err)
+		log.Warn().Err(err).Msg("WAL replay warning")
 	} else {
-		log.Printf("✅ WAL replay complete. Total vectors: %d", engine.Len())
+		log.Info().Int("vectors", engine.Len()).Msg("WAL replay complete")
 	}
 
 	// Start Background Snapshotting (The "Auto-Save")
@@ -77,17 +107,17 @@ func main() {
 			ticker := time.NewTicker(cfg.Storage.AutoSaveInterval)
 			defer ticker.Stop()
 			for range ticker.C {
-				log.Println("💾 Auto-saving snapshot...")
+				log.Info().Msg("auto-saving snapshot")
 				if err := engine.SaveToFile(cfg.Storage.DataPath); err != nil {
-					log.Printf("❌ Failed to save snapshot: %v", err)
+					log.Error().Err(err).Msg("failed to save snapshot")
 				} else {
-					log.Println("✅ Snapshot saved.")
+					log.Info().Msg("snapshot saved")
 				}
 			}
 		}()
-		log.Printf("🔄 Auto-save enabled (interval: %v)", cfg.Storage.AutoSaveInterval)
+		log.Info().Dur("interval", cfg.Storage.AutoSaveInterval).Msg("auto-save enabled")
 	} else {
-		log.Println("⏸️  Auto-save disabled")
+		log.Info().Msg("auto-save disabled")
 	}
 
 	// Create HTTP server
@@ -99,11 +129,10 @@ func main() {
 
 	// Run server in goroutine
 	go func() {
-		log.Printf("GoVec server is running on %s\n", cfg.Server.Address())
-		log.Println("Press Ctrl+C to shutdown gracefully")
+		log.Info().Str("addr", cfg.Server.Address()).Msg("GoVec server running")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			log.Fatal().Err(err).Msg("failed to start server")
 		}
 	}()
 
@@ -112,32 +141,37 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// Graceful shutdown
-	log.Println("Received shutdown signal, shutting down gracefully...")
+	log.Info().Msg("shutdown signal received")
 
 	// Save data before shutdown
-	log.Println("💾 Saving data to disk...")
+	log.Info().Msg("saving data to disk")
 	if err := engine.SaveToFile(cfg.Storage.DataPath); err != nil {
-		log.Printf("❌ Error saving data on shutdown: %v", err)
+		log.Error().Err(err).Msg("error saving data on shutdown")
 	} else {
-		log.Println("✅ Data saved successfully")
+		log.Info().Msg("data saved successfully")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Println("Server forced to shutdown:", err)
+		log.Error().Err(err).Msg("server forced to shutdown")
 		return
 	}
 
-	log.Println("All requests completed, server stopped")
+	if debugSrv != nil {
+		if err := debugSrv.Shutdown(ctx); err != nil {
+			log.Error().Err(err).Msg("pprof server forced to shutdown")
+		}
+	}
+
+	log.Info().Msg("server stopped")
 }
 
 // loadConfiguration handles loading the application configuration from
 // file, environment variables, and defaults. It terminates on error.
 func loadConfiguration() *config.Config {
-	log.Println("Loading configuration...")
+	log.Info().Msg("loading configuration")
 
 	configPath := os.Getenv("GOVEC_CONFIG_PATH")
 	if configPath == "" {
@@ -147,9 +181,9 @@ func loadConfiguration() *config.Config {
 	loader := config.NewLoader(configPath)
 	cfg, err := loader.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		log.Fatal().Err(err).Msg("failed to load configuration")
 	}
 
-	log.Printf("✅ Configuration loaded: port=%d, storage=%s", cfg.Server.Port, cfg.Storage.DataPath)
+	log.Info().Int("port", cfg.Server.Port).Str("storage", cfg.Storage.DataPath).Msg("configuration loaded")
 	return cfg
 }

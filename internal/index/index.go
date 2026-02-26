@@ -3,9 +3,10 @@ package index
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sort"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/storage"
@@ -61,14 +62,14 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVe
 	})
 
 	if err != nil {
-		log.Printf("Failed to write WAL entry: %v", err)
+		log.Error().Err(err).Msg("failed to write WAL entry")
 		return err
 	}
 
 	// 2. Execute core insert logic
 	err = idx.insertInternal(id, vec, sparse, meta)
 	if err != nil {
-		log.Printf("Failed to insert vector: %v", err)
+		log.Error().Err(err).Msg("failed to insert vector")
 		return err
 	}
 
@@ -254,14 +255,14 @@ func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
 		ID:     id,
 	})
 	if err != nil {
-		log.Printf("Failed to write WAL entry: %v", err)
+		log.Error().Err(err).Msg("failed to write WAL entry")
 		return false, err
 	}
 
 	// 3. Execute core delete logic
 	err = idx.deleteInternal(id)
 	if err != nil {
-		log.Printf("Failed to delete vector: %v", err)
+		log.Error().Err(err).Msg("failed to delete vector")
 		return false, err
 	}
 

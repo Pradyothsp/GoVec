@@ -58,10 +58,13 @@ type ServerConfig struct {
 	Port            int           `yaml:"port"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 	APIKey          string        `yaml:"api_key"`
+	LogLevel        string        `yaml:"log_level"` // trace, debug, info, warn, error
+	PprofEnabled    bool          `yaml:"pprof_enabled"`
+	PprofAddr       string        `yaml:"pprof_addr"` // must be localhost-bound in production
 }
 
 // Address returns the server address in "host:port" format
-func (s ServerConfig) Address() string {
+func (s *ServerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
 }
 
@@ -83,6 +86,9 @@ func DefaultConfig() *Config {
 			Host:            "",
 			Port:            8000,
 			ShutdownTimeout: 10 * time.Second,
+			LogLevel:        "info",
+			PprofEnabled:    false,
+			PprofAddr:       "localhost:6060",
 		},
 		Storage: StorageConfig{
 			DataPath:         "./govec_data.bin",
