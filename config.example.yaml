@@ -1,18 +1,25 @@
-# Example GoVec Configuration
-# Copy this file to config.yaml and customize
+# GoVec Configuration File
 
 server:
-  host: "0.0.0.0" # Bind to all interfaces
-  port: 9000 # Custom port
-  shutdown_timeout: 15s
+  host: "" # Bind to all interfaces (0.0.0.0)
+  port: 8000 # HTTP server port
+  shutdown_timeout: 10s
 
 storage:
-  data_path: "/var/lib/govec/data.bin"
-  wal_path: "/var/lib/govec/govec.wal"
+  data_path: "./govec_data.bin"
+  wal_path: "./govec.wal"
   auto_save_enabled: true
-  auto_save_interval: 120s # Save every 2 minutes
+  auto_save_interval: 60s
+  enable_mmap: false           # Set to true to store vectors in OS-managed mmap files (requires dimensions > 0)
+  mmap_store_path: "./govec_mmap/" # Directory for .vec chunk files (used when enable_mmap: true)
 
 engine:
-  quantization: "scalar" # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
-  distance_metric: "cosine" # Options: "cosine"
-  enable_hybrid_search: true  # Enables the Inverted Index for Sparse Vectors
+  index_type: "brute"         # Options: "brute" (linear scan, default), "hnsw" (ANN, faster for >10k vectors)
+  quantization: "none"        # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
+  distance_metric: "cosine"   # Options: "cosine"
+  dimensions: 0               # Required when enable_mmap: true (e.g. 1536 for OpenAI embeddings)
+  enable_hybrid_search: true   # Enables the Inverted Index for Sparse Vectors
+  enable_metadata_index: false # Enables in-memory inverted index for fast filtered search (brute & HNSW)
+  # HNSW parameters (only used when index_type: "hnsw")
+  hnsw_m: 16                  # Max connections per node (higher = better recall, more memory)
+  hnsw_ef_search: 20          # Search candidates (higher = better recall, slower)
