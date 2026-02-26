@@ -2,6 +2,15 @@ package index
 
 import "github.com/Pradyothsp/govec/internal/core"
 
+// EngineInfo holds static and dynamic configuration details about the engine.
+type EngineInfo struct {
+	Quantization   string `json:"quantization" example:"none"`
+	IndexType      string `json:"index_type" example:"brute"`
+	DistanceMetric string `json:"distance_metric" example:"cosine"`
+	Dimensions     int    `json:"dimensions" example:"0"`
+	VectorCount    int    `json:"vector_count" example:"0"`
+}
+
 // Engine defines the common interface for all vector storage engines
 // regardless of the underlying quantization method.
 type Engine interface {
@@ -28,11 +37,14 @@ type Engine interface {
 
 	// Len returns the number of vectors in the index
 	Len() int
+
+	// Info returns engine configuration and runtime statistics
+	Info() EngineInfo
 }
 
 // SearchResult represents a single search result with score and metadata
 type SearchResult struct {
-	ID    string                 `json:"ID" example:"vec-001"`
-	Score float32                `json:"Score" example:"0.97"`
-	Meta  map[string]interface{} `json:"Meta" swaggertype:"object"`
+	ID    string                 `json:"id" example:"vec-001"`
+	Score float32                `json:"score" example:"0.97"`
+	Meta  map[string]interface{} `json:"meta" swaggertype:"object"`
 }

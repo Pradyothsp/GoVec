@@ -15,6 +15,138 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/admin/flush": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Flush index to disk",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/info": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get engine configuration info",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/index.EngineInfo"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get index statistics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handlers.StatsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/vectors": {
             "post": {
                 "security": [
@@ -76,6 +208,68 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vectors/batch": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vectors"
+                ],
+                "summary": "Batch insert vectors",
+                "parameters": [
+                    {
+                        "description": "Batch vector payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BatchInsertRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handlers.BatchInsertResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/response.ErrorResponse"
                         }
@@ -265,6 +459,45 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.BatchInsertRequest": {
+            "type": "object",
+            "required": [
+                "vectors"
+            ],
+            "properties": {
+                "vectors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.CreateVectorRequest"
+                    }
+                }
+            }
+        },
+        "handlers.BatchInsertResponse": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.BatchInsertResult"
+                    }
+                },
+                "inserted_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.BatchInsertResult": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.CreateVectorRequest": {
             "type": "object",
             "required": [
@@ -336,17 +569,51 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.StatsResponse": {
+            "type": "object",
+            "properties": {
+                "vector_count": {
+                    "type": "integer",
+                    "example": 42
+                }
+            }
+        },
+        "index.EngineInfo": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "distance_metric": {
+                    "type": "string",
+                    "example": "cosine"
+                },
+                "index_type": {
+                    "type": "string",
+                    "example": "brute"
+                },
+                "quantization": {
+                    "type": "string",
+                    "example": "none"
+                },
+                "vector_count": {
+                    "type": "integer",
+                    "example": 0
+                }
+            }
+        },
         "index.SearchResult": {
             "type": "object",
             "properties": {
-                "ID": {
+                "id": {
                     "type": "string",
                     "example": "vec-001"
                 },
-                "Meta": {
+                "meta": {
                     "type": "object"
                 },
-                "Score": {
+                "score": {
                     "type": "number",
                     "example": 0.97
                 }

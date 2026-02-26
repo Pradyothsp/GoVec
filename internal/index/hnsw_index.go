@@ -27,6 +27,12 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	InvertedIndex map[uint32][]core.Posting
 	IDMapper      *core.IDMapper
 
+	// Engine config metadata — set by factory after construction
+	quantization   string
+	indexType      string
+	distanceMetric string
+	dimensions     int // 0 until first insert; set lazily under mu.Lock()
+
 	mu           sync.RWMutex
 	wal          *WAL
 	encodeFunc   func([]float32) T
@@ -114,6 +120,11 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 			idx.metaIndex.Remove(internalID, existingNode.Metadata)
 		}
 		idx.metaIndex.Add(internalID, meta)
+	}
+
+	// Track dimensions from the first vector seen
+	if idx.dimensions == 0 && len(vec) > 0 {
+		idx.dimensions = len(vec)
 	}
 
 	encoded := idx.encodeFunc(vec)
@@ -727,6 +738,20 @@ func (idx *HNSWIndex[T]) Len() int {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.graph.Len()
+}
+
+// Info returns engine configuration and runtime statistics.
+// NOTE: reads len(idx.metadata) directly to avoid re-acquiring mu (not re-entrant).
+func (idx *HNSWIndex[T]) Info() EngineInfo {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return EngineInfo{
+		Quantization:   idx.quantization,
+		IndexType:      idx.indexType,
+		DistanceMetric: idx.distanceMetric,
+		Dimensions:     idx.dimensions,
+		VectorCount:    len(idx.metadata),
+	}
 }
 
 // computeSparseScores computes sparse similarity scores for all documents.

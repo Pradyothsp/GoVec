@@ -65,12 +65,20 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 		}
 		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, mathBlock.Int8Func, mmapStore)
 		idx.metaIndex = metaIndex
+		idx.quantization = string(cfg.Quantization)
+		idx.indexType = "brute"
+		idx.distanceMetric = string(cfg.DistanceMetric)
+		idx.dimensions = cfg.Dimensions
 		return idx, nil
 
 	case config.QuantizationNone:
 		identityFunc := func(v []float32) []float32 { return v }
 		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, mathBlock.FloatFunc, mmapStore)
 		idx.metaIndex = metaIndex
+		idx.quantization = string(cfg.Quantization)
+		idx.indexType = "brute"
+		idx.distanceMetric = string(cfg.DistanceMetric)
+		idx.dimensions = cfg.Dimensions
 		return idx, nil
 
 	default:
@@ -96,14 +104,24 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		if mathBlock.Int8Func == nil {
 			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
 		}
-		return NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
-			core.QuantizeVector, mathBlock.Int8Func, hnsw.CosineDistanceInt8, m, efSearch, metaIndex, mmapStore), nil
+		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
+			core.QuantizeVector, mathBlock.Int8Func, hnsw.CosineDistanceInt8, m, efSearch, metaIndex, mmapStore)
+		idx.quantization = string(cfg.Quantization)
+		idx.indexType = "hnsw"
+		idx.distanceMetric = string(cfg.DistanceMetric)
+		idx.dimensions = cfg.Dimensions
+		return idx, nil
 	}
 
 	if cfg.Quantization == config.QuantizationNone {
 		identityFunc := func(v []float32) []float32 { return v }
-		return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
-			identityFunc, mathBlock.FloatFunc, hnsw.CosineDistanceFloat32, m, efSearch, metaIndex, mmapStore), nil
+		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
+			identityFunc, mathBlock.FloatFunc, hnsw.CosineDistanceFloat32, m, efSearch, metaIndex, mmapStore)
+		idx.quantization = string(cfg.Quantization)
+		idx.indexType = "hnsw"
+		idx.distanceMetric = string(cfg.DistanceMetric)
+		idx.dimensions = cfg.Dimensions
+		return idx, nil
 	}
 
 	return nil, fmt.Errorf("unknown quantization: '%s'", cfg.Quantization)

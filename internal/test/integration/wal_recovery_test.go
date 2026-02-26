@@ -43,7 +43,7 @@ func (s *WALRecoveryTestSuite) SetupTest() {
 
 	idMapper := core.NewIDMapper()
 	s.index = index.NewVectorIndex[[]float32](wal, nil, idMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	s.router = api.SetupRouter(s.index, "")
+	s.router = api.SetupRouter(s.index, "", "")
 }
 
 func TestWALRecoveryTestSuite(t *testing.T) {

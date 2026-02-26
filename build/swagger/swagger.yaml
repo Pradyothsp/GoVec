@@ -6,6 +6,31 @@ definitions:
         example: ok
         type: string
     type: object
+  handlers.BatchInsertRequest:
+    properties:
+      vectors:
+        items:
+          $ref: '#/definitions/handlers.CreateVectorRequest'
+        type: array
+    required:
+    - vectors
+    type: object
+  handlers.BatchInsertResponse:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/handlers.BatchInsertResult'
+        type: array
+      inserted_count:
+        type: integer
+    type: object
+  handlers.BatchInsertResult:
+    properties:
+      error:
+        type: string
+      id:
+        type: string
+    type: object
   handlers.CreateVectorRequest:
     properties:
       id:
@@ -54,14 +79,38 @@ definitions:
     required:
     - vector
     type: object
+  handlers.StatsResponse:
+    properties:
+      vector_count:
+        example: 42
+        type: integer
+    type: object
+  index.EngineInfo:
+    properties:
+      dimensions:
+        example: 0
+        type: integer
+      distance_metric:
+        example: cosine
+        type: string
+      index_type:
+        example: brute
+        type: string
+      quantization:
+        example: none
+        type: string
+      vector_count:
+        example: 0
+        type: integer
+    type: object
   index.SearchResult:
     properties:
-      ID:
+      id:
         example: vec-001
         type: string
-      Meta:
+      meta:
         type: object
-      Score:
+      score:
         example: 0.97
         type: number
     type: object
@@ -91,6 +140,79 @@ info:
   title: GoVec API
   version: "1.0"
 paths:
+  /api/v1/admin/flush:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Flush index to disk
+      tags:
+      - system
+  /api/v1/info:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/index.EngineInfo'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get engine configuration info
+      tags:
+      - system
+  /api/v1/stats:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.StatsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get index statistics
+      tags:
+      - system
   /api/v1/vectors:
     post:
       consumes:
@@ -170,6 +292,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete a vector by ID
+      tags:
+      - vectors
+  /api/v1/vectors/batch:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Batch vector payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.BatchInsertRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.BatchInsertResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Batch insert vectors
       tags:
       - vectors
   /api/v1/vectors/search:

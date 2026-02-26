@@ -48,6 +48,77 @@ func NewVectorHandler(engine index.Engine) *VectorHandler {
 	return &VectorHandler{Engine: engine}
 }
 
+// BatchInsertRequest is the JSON payload for inserting multiple vectors in one request.
+type BatchInsertRequest struct {
+	Vectors []CreateVectorRequest `json:"vectors" binding:"required"`
+}
+
+// BatchInsertResult captures the outcome for a single vector in a batch.
+type BatchInsertResult struct {
+	ID    string `json:"id"`
+	Error string `json:"error,omitempty"`
+}
+
+// BatchInsertResponse summarises the result of a batch insert.
+type BatchInsertResponse struct {
+	InsertedCount int                 `json:"inserted_count"`
+	Errors        []BatchInsertResult `json:"errors,omitempty"`
+}
+
+// BatchInsert handles POST /api/v1/vectors/batch
+//
+// @Summary      Batch insert vectors
+// @Tags         vectors
+// @Accept       json
+// @Produce      json
+// @Param        body  body      BatchInsertRequest   true  "Batch vector payload"
+// @Success      200   {object}  response.Response{data=handlers.BatchInsertResponse}
+// @Failure      400   {object}  response.ErrorResponse
+// @Failure      401   {object}  response.ErrorResponse
+// @Security     BearerAuth
+// @Router       /api/v1/vectors/batch [post]
+func (h *VectorHandler) BatchInsert(c *gin.Context) {
+	var req BatchInsertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if len(req.Vectors) == 0 {
+		response.Fail(c, http.StatusBadRequest, "vectors array must not be empty")
+		return
+	}
+
+	var errs []BatchInsertResult
+	inserted := 0
+
+	for _, v := range req.Vectors {
+		if v.SparseVector != nil && !v.SparseVector.IsValid() {
+			errs = append(errs, BatchInsertResult{
+				ID:    v.ID,
+				Error: "invalid sparse_vector: indices and values must have the same length",
+			})
+			continue
+		}
+
+		var sparse core.SparseVector
+		if v.SparseVector != nil {
+			sparse = *v.SparseVector
+		}
+
+		if err := h.Engine.Insert(v.ID, v.Vector, sparse, v.Metadata); err != nil {
+			errs = append(errs, BatchInsertResult{ID: v.ID, Error: err.Error()})
+			continue
+		}
+		inserted++
+	}
+
+	response.OK(c, http.StatusOK, BatchInsertResponse{
+		InsertedCount: inserted,
+		Errors:        errs,
+	})
+}
+
 // Insert handles POST /api/v1/vectors
 //
 // @Summary      Insert or update a vector

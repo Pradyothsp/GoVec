@@ -19,6 +19,12 @@ type VectorIndex[T any] struct {
 	IDMapper      *core.IDMapper      // Translates string ↔ uint32 IDs
 	metaIndex     *core.MetadataIndex // nil when metadata index is disabled
 
+	// Engine config metadata — set by factory after construction
+	quantization   string
+	indexType      string
+	distanceMetric string
+	dimensions     int // 0 until first insert; set lazily under mu.Lock()
+
 	mu           sync.RWMutex
 	wal          *WAL
 	encodeFunc   func([]float32) T           // Converts input vectors to storage format
@@ -106,7 +112,12 @@ func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.
 		encoded = mmapVec
 	}
 
-	// 5. Update store
+	// 5. Track dimensions from the first vector seen
+	if idx.dimensions == 0 && len(vec) > 0 {
+		idx.dimensions = len(vec)
+	}
+
+	// 6. Update store
 	idx.Store[internalID] = &core.VectorNode[T]{
 		InternalID: internalID,
 		ExternalID: id,
@@ -322,6 +333,20 @@ func (idx *VectorIndex[T]) Len() int {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return len(idx.Store)
+}
+
+// Info returns engine configuration and runtime statistics.
+// NOTE: reads len(idx.Store) directly to avoid re-acquiring mu (not re-entrant).
+func (idx *VectorIndex[T]) Info() EngineInfo {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return EngineInfo{
+		Quantization:   idx.quantization,
+		IndexType:      idx.indexType,
+		DistanceMetric: idx.distanceMetric,
+		Dimensions:     idx.dimensions,
+		VectorCount:    len(idx.Store),
+	}
 }
 
 // addToInvertedIndex adds postings for a document's sparse vector to the inverted index.

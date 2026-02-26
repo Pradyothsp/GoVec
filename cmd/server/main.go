@@ -48,7 +48,7 @@ func main() {
 	// Engine created successfully, set up cleanup
 	defer wal.Close() //nolint:errcheck // best-effort cleanup on shutdown
 
-	router := api.SetupRouter(engine, cfg.Server.APIKey)
+	router := api.SetupRouter(engine, cfg.Server.APIKey, cfg.Storage.DataPath)
 
 	// RECOVERY SEQUENCE
 	// Step 1: Load the base snapshot from DataPath (GOB format)

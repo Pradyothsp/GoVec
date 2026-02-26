@@ -27,7 +27,7 @@ type APITestSuite struct {
 func (s *APITestSuite) SetupTest() {
 	gin.SetMode(gin.TestMode)
 	s.index = testutil.NewTestIndex(s.T())
-	s.router = api.SetupRouter(s.index, "")
+	s.router = api.SetupRouter(s.index, "", s.T().TempDir()+"/test.bin")
 }
 
 func (s *APITestSuite) TearDownTest() {
@@ -417,28 +417,28 @@ func (s *APITestSuite) TestInsertAndSearchFlow() {
 	s.Assert().Len(results, 3, "Should return exactly k=3 results")
 
 	// Verify first result is doc1 (identical vector, score = 1.0)
-	s.Assert().Equal("doc1", results[0]["ID"], "First result should be doc1")
-	s.Assert().InDelta(1.0, results[0]["Score"], 0.001, "doc1 should have similarity score of 1.0")
+	s.Assert().Equal("doc1", results[0]["id"], "First result should be doc1")
+	s.Assert().InDelta(1.0, results[0]["score"], 0.001, "doc1 should have similarity score of 1.0")
 
-	meta0, ok := results[0]["Meta"].(map[string]interface{})
+	meta0, ok := results[0]["meta"].(map[string]interface{})
 	s.Require().True(ok, "Metadata should be a map")
 	s.Assert().Equal("First Document", meta0["title"], "Should return correct metadata for doc1")
 	s.Assert().Equal("tech", meta0["category"], "Should return correct category for doc1")
 
 	// Verify second result is doc2 (similar vector, score > 0.8)
-	s.Assert().Equal("doc2", results[1]["ID"], "Second result should be doc2")
-	score1, ok := results[1]["Score"].(float64)
+	s.Assert().Equal("doc2", results[1]["id"], "Second result should be doc2")
+	score1, ok := results[1]["score"].(float64)
 	s.Require().True(ok, "Score should be a number")
 	s.Assert().Greater(score1, 0.8, "doc2 should have high similarity")
 
-	meta1, ok := results[1]["Meta"].(map[string]interface{})
+	meta1, ok := results[1]["meta"].(map[string]interface{})
 	s.Require().True(ok, "Metadata should be a map")
 	s.Assert().Equal("Second Document", meta1["title"], "Should return correct metadata for doc2")
 
 	// Verify results are sorted by score (descending)
 	for i := 0; i < len(results)-1; i++ {
-		scoreI, ok1 := results[i]["Score"].(float64)
-		scoreNext, ok2 := results[i+1]["Score"].(float64)
+		scoreI, ok1 := results[i]["score"].(float64)
+		scoreNext, ok2 := results[i+1]["score"].(float64)
 		s.Require().True(ok1 && ok2, "All scores should be numbers")
 		s.Assert().GreaterOrEqual(scoreI, scoreNext, "Results should be sorted by score descending")
 	}
@@ -637,7 +637,7 @@ func (s *APITestSuite) TestFilteredSearch_ByCategory() {
 	s.Assert().Len(results, 2)
 	resultIDs := make([]string, len(results))
 	for i, r := range results {
-		resultIDs[i] = r["ID"].(string)
+		resultIDs[i] = r["id"].(string)
 	}
 	s.Assert().Contains(resultIDs, "doc1")
 	s.Assert().Contains(resultIDs, "doc2")
@@ -723,7 +723,7 @@ func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
 		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
 		s.Require().True(env.Success)
 		s.Assert().Len(env.Data, 1)
-		s.Assert().Equal("doc1", env.Data[0]["ID"])
+		s.Assert().Equal("doc1", env.Data[0]["id"])
 	})
 
 	// Filter cat=tech → doc1 and doc2
@@ -747,7 +747,7 @@ func (s *APITestSuite) TestFilteredSearch_MultipleFilterKeys() {
 		s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
 		s.Require().True(env.Success)
 		s.Assert().Len(env.Data, 2)
-		resultIDs := []string{env.Data[0]["ID"].(string), env.Data[1]["ID"].(string)}
+		resultIDs := []string{env.Data[0]["id"].(string), env.Data[1]["id"].(string)}
 		s.Assert().Contains(resultIDs, "doc1")
 		s.Assert().Contains(resultIDs, "doc2")
 	})
@@ -802,8 +802,8 @@ func (s *APITestSuite) TestFilteredSearch_FilterWithKLimit() {
 	s.Assert().Len(results, 2)
 
 	// Verify sorted by score descending
-	score0, ok0 := results[0]["Score"].(float64)
-	score1, ok1 := results[1]["Score"].(float64)
+	score0, ok0 := results[0]["score"].(float64)
+	score1, ok1 := results[1]["score"].(float64)
 	s.Require().True(ok0 && ok1)
 	s.Assert().GreaterOrEqual(score0, score1)
 }
@@ -923,7 +923,7 @@ func (s *APITestSuite) TestInsertDeleteSearchFlow() {
 
 	resultIDs := make([]string, len(results))
 	for i, r := range results {
-		resultIDs[i] = r["ID"].(string)
+		resultIDs[i] = r["id"].(string)
 	}
 	s.Assert().NotContains(resultIDs, "delete_me")
 	s.Assert().Contains(resultIDs, "keep1")
@@ -971,6 +971,167 @@ func (s *APITestSuite) TestConcurrentDeletes() {
 		s.Assert().Equal(http.StatusOK, status, "Delete %d should return 200", i)
 	}
 	s.Assert().Empty(s.index.Store)
+}
+
+func (s *APITestSuite) TestStatsEndpoint() {
+	// Empty index → count 0
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+	s.Assert().JSONEq(`{"success":true,"data":{"vector_count":0}}`, w.Body.String())
+
+	// Insert a vector
+	body, _ := json.Marshal(map[string]interface{}{
+		"id":     "stat_v1",
+		"vector": []float32{1.0, 2.0, 3.0},
+	})
+	insertReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+	insertReq.Header.Set("Content-Type", "application/json")
+	insertW := httptest.NewRecorder()
+	s.router.ServeHTTP(insertW, insertReq)
+	s.Require().Equal(http.StatusCreated, insertW.Code)
+
+	// Count should now be 1
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+	s.Assert().JSONEq(`{"success":true,"data":{"vector_count":1}}`, w.Body.String())
+}
+
+func (s *APITestSuite) TestInfoEndpoint() {
+	// Empty index → dimensions 0
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var env struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Assert().True(env.Success)
+	s.Assert().Equal(float64(0), env.Data["dimensions"])
+	s.Assert().Equal(float64(0), env.Data["vector_count"])
+
+	// Insert a 3-dim vector
+	body, _ := json.Marshal(map[string]interface{}{
+		"id":     "info_v1",
+		"vector": []float32{1.0, 2.0, 3.0},
+	})
+	insertReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+	insertReq.Header.Set("Content-Type", "application/json")
+	insertW := httptest.NewRecorder()
+	s.router.ServeHTTP(insertW, insertReq)
+	s.Require().Equal(http.StatusCreated, insertW.Code)
+
+	// Dimensions should now be 3
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Assert().True(env.Success)
+	s.Assert().Equal(float64(3), env.Data["dimensions"])
+	s.Assert().Equal(float64(1), env.Data["vector_count"])
+}
+
+func (s *APITestSuite) TestBatchInsert_HappyPath() {
+	body, _ := json.Marshal(map[string]interface{}{
+		"vectors": []map[string]interface{}{
+			{"id": "b1", "vector": []float32{1.0, 2.0, 3.0}},
+			{"id": "b2", "vector": []float32{4.0, 5.0, 6.0}},
+			{"id": "b3", "vector": []float32{7.0, 8.0, 9.0}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			InsertedCount int `json:"inserted_count"`
+		} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Assert().True(env.Success)
+	s.Assert().Equal(3, env.Data.InsertedCount)
+	s.Assert().Len(s.index.Store, 3)
+}
+
+func (s *APITestSuite) TestBatchInsert_PartialFailure() {
+	body, _ := json.Marshal(map[string]interface{}{
+		"vectors": []map[string]interface{}{
+			{"id": "ok1", "vector": []float32{1.0, 2.0}},
+			// invalid sparse vector: indices and values length mismatch
+			{"id": "bad1", "vector": []float32{1.0, 2.0}, "sparse_vector": map[string]interface{}{
+				"indices": []int{0, 1},
+				"values":  []float32{0.5}, // length mismatch
+			}},
+			{"id": "ok2", "vector": []float32{3.0, 4.0}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			InsertedCount int                      `json:"inserted_count"`
+			Errors        []map[string]interface{} `json:"errors"`
+		} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.Assert().True(env.Success)
+	s.Assert().Equal(2, env.Data.InsertedCount)
+	s.Require().Len(env.Data.Errors, 1)
+	s.Assert().Equal("bad1", env.Data.Errors[0]["id"])
+}
+
+func (s *APITestSuite) TestBatchInsert_EmptyVectors() {
+	body, _ := json.Marshal(map[string]interface{}{
+		"vectors": []map[string]interface{}{},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusBadRequest, w.Code)
+}
+
+func (s *APITestSuite) TestFlushEndpoint() {
+	// Insert something first so the snapshot is non-trivial
+	body, _ := json.Marshal(map[string]interface{}{
+		"id":     "flush_v1",
+		"vector": []float32{1.0, 2.0, 3.0},
+	})
+	insertReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
+	insertReq.Header.Set("Content-Type", "application/json")
+	insertW := httptest.NewRecorder()
+	s.router.ServeHTTP(insertW, insertReq)
+	s.Require().Equal(http.StatusCreated, insertW.Code)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/flush", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	s.Assert().Equal(http.StatusOK, w.Code)
+	s.Assert().JSONEq(`{"success":true,"data":{"status":"flushed"}}`, w.Body.String())
 }
 
 func TestAPITestSuite(t *testing.T) {
