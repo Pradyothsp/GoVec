@@ -486,5 +486,5 @@ func newTestIndexWithWAL(t testing.TB, wal *WAL) *VectorIndex[[]float32] {
 	t.Helper()
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity)
+	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
 }

@@ -68,7 +68,7 @@ func TestRecoverySequence(t *testing.T) {
 	setupWal, err := index.NewWAL(filepath.Join(tempDir, "setup.wal"))
 	require.NoError(t, err)
 	setupIDMapper := core.NewIDMapper()
-	setupIdx := index.NewVectorIndex[[]float32](setupWal, nil, setupIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	setupIdx := index.NewVectorIndex[[]float32](setupWal, nil, setupIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	for i := 1; i <= 3; i++ {
 		err = setupIdx.Insert(fmt.Sprintf("snap%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
@@ -101,7 +101,7 @@ func TestRecoverySequence(t *testing.T) {
 	defer recoveryWal.Close()
 
 	recoveryIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, nil, recoveryIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity)
+	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, nil, recoveryIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// CORRECT sequence: LoadFromFile(DataPath) then ReplayWAL(WalPath)
 	err = recoveredIdx.LoadFromFile(snapPath) // Load snapshot

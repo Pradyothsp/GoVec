@@ -37,7 +37,7 @@ func runBenchmarkWithIndex(b *testing.B, quantization, indexType string,
 		DistanceMetric: "cosine",
 		IndexType:      config.IndexType(indexType),
 	}
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		b.Fatalf("runBenchmarkWithIndex: NewEngine failed: %v", err)
 	}
@@ -113,7 +113,7 @@ func newHNSWEngineForBench(b *testing.B, quantization, indexType string) (index.
 		DistanceMetric: "cosine",
 		IndexType:      config.IndexType(indexType),
 	}
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		b.Fatalf("newHNSWEngineForBench: NewEngine failed: %v", err)
 	}

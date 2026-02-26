@@ -60,6 +60,12 @@ linters:
           - revive
         text: "avoid meaningless package names"
 
+      # internal/hnsw/heap intentionally mirrors stdlib heap semantics; the name collision is acceptable
+      - linters:
+          - revive
+        path: "internal/hnsw/heap"
+        text: "avoid package names that conflict"
+
     # Example code does not need production-level error handling
     # Auto-generated swagger docs should not be linted
     paths:

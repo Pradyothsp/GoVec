@@ -38,6 +38,7 @@ type EngineConfig struct {
 	IndexType           IndexType      `yaml:"index_type"`
 	Quantization        Quantization   `yaml:"quantization"`
 	DistanceMetric      DistanceMetric `yaml:"distance_metric"`
+	Dimensions          int            `yaml:"dimensions"` // Required when storage.enable_mmap is true
 	EnableHybridSearch  bool           `yaml:"enable_hybrid_search"`
 	EnableMetadataIndex bool           `yaml:"enable_metadata_index"`
 	HnswM               int            `yaml:"hnsw_m"`
@@ -69,6 +70,8 @@ type StorageConfig struct {
 	WalPath          string        `yaml:"wal_path"`
 	AutoSaveEnabled  bool          `yaml:"auto_save_enabled"`
 	AutoSaveInterval time.Duration `yaml:"auto_save_interval"`
+	EnableMmap       bool          `yaml:"enable_mmap"`     // Feature flag: store vectors in mmap-backed files
+	MmapStorePath    string        `yaml:"mmap_store_path"` // Directory for .vec chunk files
 }
 
 // DefaultConfig returns configuration with sensible defaults
@@ -85,11 +88,14 @@ func DefaultConfig() *Config {
 			WalPath:          "./govec.wal",
 			AutoSaveEnabled:  true,
 			AutoSaveInterval: 60 * time.Second,
+			EnableMmap:       false,
+			MmapStorePath:    "./govec_mmap/",
 		},
 		Engine: EngineConfig{
 			IndexType:           IndexTypeBrute,
 			Quantization:        QuantizationNone,
 			DistanceMetric:      DistanceMetricCosine,
+			Dimensions:          0, // 0 = no upfront enforcement; must be >0 when EnableMmap: true
 			EnableHybridSearch:  false,
 			EnableMetadataIndex: false,
 			HnswM:               16,

@@ -11,11 +11,14 @@ storage:
   wal_path: "./govec.wal"
   auto_save_enabled: true
   auto_save_interval: 60s
+  enable_mmap: false           # Set to true to store vectors in OS-managed mmap files (requires dimensions > 0)
+  mmap_store_path: "./govec_mmap/" # Directory for .vec chunk files (used when enable_mmap: true)
 
 engine:
   index_type: "brute"         # Options: "brute" (linear scan, default), "hnsw" (ANN, faster for >10k vectors)
   quantization: "none"        # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
   distance_metric: "cosine"   # Options: "cosine"
+  dimensions: 0               # Required when enable_mmap: true (e.g. 1536 for OpenAI embeddings)
   enable_hybrid_search: true   # Enables the Inverted Index for Sparse Vectors
   enable_metadata_index: false # Enables in-memory inverted index for fast filtered search (brute & HNSW)
   # HNSW parameters (only used when index_type: "hnsw")

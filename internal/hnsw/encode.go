@@ -154,7 +154,11 @@ func multiBinaryRead(r io.Reader, data ...any) (int, error) {
 	return read, nil
 }
 
-const encodingVersion = 1 // encodingVersion tracks the current binary encoding format for the graph.
+const (
+	encodingVersion         = 1 // binary format for Export/Import (includes node vectors)
+	encodingVersionTopology = 2 // binary format for ExportTopology/ImportTopology (no vectors)
+)
+
 // Increment this version if the serialization format changes to prevent
 // loading of incompatible older graph files.
 
@@ -354,6 +358,171 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 		h.layers[i] = &layer[K, V]{nodes: nodes}
 	}
 
+	return nil
+}
+
+// ExportTopology writes the graph structure (parameters + edges) to w without
+// embedding node vectors.  This is used with the mmap storage backend where
+// vectors live in mmap-backed files rather than in the GOB snapshot.
+//
+// Format (version 2):
+//
+//	version | M | Ml | EfSearch | distFuncName | nLayers |
+//	  for each layer: nNodes | for each node: key | nNeighbors | neighbor keys...
+func (h *Graph[K, V]) ExportTopology(w io.Writer) error {
+	var distFuncName string
+	var ok bool
+
+	switch fn := any(h.Distance).(type) {
+	case DistanceFunc[[]float32]:
+		distFuncName, ok = distanceFuncToNameFloat32(fn)
+	case DistanceFunc[[]int8]:
+		distFuncName, ok = distanceFuncToNameInt8(fn)
+	default:
+		return fmt.Errorf("unsupported vector type in distance function for ExportTopology: %T", h.Distance)
+	}
+	if !ok {
+		return fmt.Errorf("distance function must be registered for persistence")
+	}
+
+	_, err := multiBinaryWrite(w, encodingVersionTopology, h.M, h.Ml, h.EfSearch, distFuncName)
+	if err != nil {
+		return fmt.Errorf("encode topology parameters: %w", err)
+	}
+
+	_, err = binaryWrite(w, len(h.layers))
+	if err != nil {
+		return fmt.Errorf("encode topology layer count: %w", err)
+	}
+
+	for _, layer := range h.layers {
+		_, err = binaryWrite(w, len(layer.nodes))
+		if err != nil {
+			return fmt.Errorf("encode topology node count: %w", err)
+		}
+		for _, node := range layer.nodes {
+			_, err = multiBinaryWrite(w, node.Key, len(node.neighbors))
+			if err != nil {
+				return fmt.Errorf("encode topology node key %v: %w", node.Key, err)
+			}
+			for neighbor := range node.neighbors {
+				_, err = binaryWrite(w, neighbor)
+				if err != nil {
+					return fmt.Errorf("encode topology neighbor %v of node %v: %w", neighbor, node.Key, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ImportTopology reads a topology-only graph export (version 2) from r, calling
+// lookupVec for each node key to retrieve its mmap-backed vector.
+// lookupVec must return (vector, true) for every key that appears in the export;
+// a missing key causes a descriptive error.
+func (h *Graph[K, V]) ImportTopology(r io.Reader, lookupVec func(K) (V, bool)) error {
+	var (
+		version      int
+		distFuncName string
+	)
+	_, err := multiBinaryRead(r, &version, &h.M, &h.Ml, &h.EfSearch, &distFuncName)
+	if err != nil {
+		return fmt.Errorf("decode topology parameters: %w", err)
+	}
+	if version != encodingVersionTopology {
+		return fmt.Errorf("incompatible topology version: expected %d, got %d", encodingVersionTopology, version)
+	}
+
+	// Restore distance function.
+	switch any(h.Distance).(type) {
+	case DistanceFunc[[]float32]:
+		distFunc, found := distanceFuncsFloat32[distFuncName]
+		if !found {
+			return fmt.Errorf("unknown distance function %q for float32 during topology import", distFuncName)
+		}
+		if converted, ok := any(distFunc).(DistanceFunc[V]); ok {
+			h.Distance = converted
+		} else {
+			return fmt.Errorf("type assertion failed for float32 distance function %q", distFuncName)
+		}
+	case DistanceFunc[[]int8]:
+		distFunc, found := distanceFuncsInt8[distFuncName]
+		if !found {
+			return fmt.Errorf("unknown distance function %q for int8 during topology import", distFuncName)
+		}
+		if converted, ok := any(distFunc).(DistanceFunc[V]); ok {
+			h.Distance = converted
+		} else {
+			return fmt.Errorf("type assertion failed for int8 distance function %q", distFuncName)
+		}
+	default:
+		return fmt.Errorf("unsupported vector type for distance function %q during topology import", distFuncName)
+	}
+
+	if h.Rng == nil {
+		h.Rng = defaultRand()
+	}
+
+	var nLayers int
+	_, err = binaryRead(r, &nLayers)
+	if err != nil {
+		return fmt.Errorf("decode topology layer count: %w", err)
+	}
+
+	h.layers = make([]*layer[K, V], nLayers)
+	for i := 0; i < nLayers; i++ {
+		var nNodes int
+		_, err = binaryRead(r, &nNodes)
+		if err != nil {
+			return fmt.Errorf("decode topology node count in layer %d: %w", i, err)
+		}
+
+		nodes := make(map[K]*layerNode[K, V], nNodes)
+		for j := 0; j < nNodes; j++ {
+			var key K
+			var nNeighbors int
+			_, err = multiBinaryRead(r, &key, &nNeighbors)
+			if err != nil {
+				return fmt.Errorf("decode topology node %d in layer %d: %w", j, i, err)
+			}
+
+			vec, ok := lookupVec(key)
+			if !ok {
+				return fmt.Errorf("topology import: no vector found for key %v", key)
+			}
+
+			neighbors := make([]K, nNeighbors)
+			for k := 0; k < nNeighbors; k++ {
+				var neighbor K
+				_, err = binaryRead(r, &neighbor)
+				if err != nil {
+					return fmt.Errorf("decode topology neighbor %d of node %v in layer %d: %w", k, key, i, err)
+				}
+				neighbors[k] = neighbor
+			}
+
+			node := &layerNode[K, V]{
+				Node:      Node[K, V]{Key: key, Value: vec},
+				neighbors: make(map[K]*layerNode[K, V]),
+			}
+			nodes[key] = node
+			for _, nk := range neighbors {
+				node.neighbors[nk] = nil
+			}
+		}
+
+		// Resolve neighbor pointers.
+		for _, node := range nodes {
+			for k := range node.neighbors {
+				if nbNode, found := nodes[k]; found {
+					node.neighbors[k] = nbNode
+				} else {
+					return fmt.Errorf("topology import: failed to resolve neighbor %v for node %v in layer %d", k, node.Key, i)
+				}
+			}
+		}
+		h.layers[i] = &layer[K, V]{nodes: nodes}
+	}
 	return nil
 }
 

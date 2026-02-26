@@ -25,7 +25,7 @@ func TestScalarQuantization_EndToEnd(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -97,12 +97,12 @@ func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engineNone, err := index.NewEngine(cfg1, wal1)
+	engineNone, err := index.NewEngine(cfg1, config.StorageConfig{}, wal1)
 	if err != nil {
 		t.Fatalf("NewEngine (none) failed: %v", err)
 	}
 
-	engineScalar, err := index.NewEngine(cfg2, wal2)
+	engineScalar, err := index.NewEngine(cfg2, config.StorageConfig{}, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (scalar) failed: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestScalarQuantization_Persistence(t *testing.T) {
 	}
 	defer wal2.Close()
 
-	engine2, err := index.NewEngine(cfg, wal2)
+	engine2, err := index.NewEngine(cfg, config.StorageConfig{}, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (2) failed: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestScalarQuantization_WALReplay(t *testing.T) {
 	}
 	defer wal2.Close()
 
-	engine2, err := index.NewEngine(cfg, wal2)
+	engine2, err := index.NewEngine(cfg, config.StorageConfig{}, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (2) failed: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestScalarQuantization_MemoryUsage(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine1, err := index.NewEngine(cfg1, wal)
+	engine1, err := index.NewEngine(cfg1, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine (none) failed: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine2, err := index.NewEngine(cfg2, wal2)
+	engine2, err := index.NewEngine(cfg2, config.StorageConfig{}, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (scalar) failed: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	}
 	defer wal3.Close()
 
-	engine3, err := index.NewEngine(cfg2, wal3)
+	engine3, err := index.NewEngine(cfg2, config.StorageConfig{}, wal3)
 	if err != nil {
 		t.Fatalf("NewEngine (scalar fresh) failed: %v", err)
 	}

@@ -2,11 +2,13 @@ package index
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"sync"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/storage"
 )
 
 // VectorIndex is a thread-safe in-memory store for vector embeddings.
@@ -21,17 +23,20 @@ type VectorIndex[T any] struct {
 	wal          *WAL
 	encodeFunc   func([]float32) T           // Converts input vectors to storage format
 	distanceFunc func(T, T) (float32, error) // Computes distance between stored vectors
+	vectorStore  *storage.MmapStore          // nil when mmap is disabled
 }
 
 // NewVectorIndex creates an empty VectorIndex ready for use.
-func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error)) *VectorIndex[T] {
+// Pass a non-nil vectorStore to enable mmap-backed vector storage.
+func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error), vectorStore *storage.MmapStore) *VectorIndex[T] {
 	return &VectorIndex[T]{
-		Store:         make(map[uint32]*core.VectorNode[T]), // Changed to uint32 keys
+		Store:         make(map[uint32]*core.VectorNode[T]),
 		InvertedIndex: invertedIndex,
 		IDMapper:      idMapper,
 		wal:           wal,
 		encodeFunc:    encodeFunc,
 		distanceFunc:  distanceFunc,
+		vectorStore:   vectorStore,
 	}
 }
 
@@ -90,11 +95,22 @@ func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.
 		idx.metaIndex.Add(internalID, meta)
 	}
 
-	// 4. Update store
+	// 4. Encode vector; if mmap is enabled, write to the mmap store and store the
+	//    mmap-backed slice — no heap copy is retained after this point.
+	encoded := idx.encodeFunc(vec)
+	if idx.vectorStore != nil {
+		mmapVec, err := putToMmapStore(idx.vectorStore, internalID, encoded)
+		if err != nil {
+			return fmt.Errorf("mmap store put: %w", err)
+		}
+		encoded = mmapVec
+	}
+
+	// 5. Update store
 	idx.Store[internalID] = &core.VectorNode[T]{
 		InternalID: internalID,
 		ExternalID: id,
-		Vector:     idx.encodeFunc(vec),
+		Vector:     encoded,
 		Sparse:     sparse,
 		Metadata:   meta,
 	}
@@ -283,15 +299,21 @@ func (idx *VectorIndex[T]) deleteInternal(id string) error {
 func (idx *VectorIndex[T]) Clear() {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-	idx.Store = make(map[uint32]*core.VectorNode[T]) // Changed to uint32 keys
+	idx.Store = make(map[uint32]*core.VectorNode[T])
 
-	// Clear inverted index if hybrid search is enabled
 	if idx.InvertedIndex != nil {
 		idx.InvertedIndex = make(map[uint32][]core.Posting)
 	}
 
 	if idx.metaIndex != nil {
 		idx.metaIndex.Clear()
+	}
+
+	if idx.vectorStore != nil {
+		if err := idx.vectorStore.Reset(); err != nil {
+			// Log but don't propagate — in-memory state is already reset.
+			_ = err
+		}
 	}
 }
 

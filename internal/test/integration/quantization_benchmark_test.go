@@ -63,7 +63,7 @@ func runBenchmark(b *testing.B, quantization string, numVectors, vectorDim, numS
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		b.Fatalf("NewEngine failed: %v", err)
 	}

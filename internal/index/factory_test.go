@@ -23,7 +23,7 @@ func TestNewEngine_NoneQuantization(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := NewEngine(cfg, wal)
+	engine, err := NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestNewEngine_ScalarQuantization(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := NewEngine(cfg, wal)
+	engine, err := NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestNewEngine_InvalidQuantization(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	_, err = NewEngine(cfg, wal)
+	_, err = NewEngine(cfg, config.StorageConfig{}, wal)
 	if err == nil {
 		t.Fatal("expected error for invalid quantization, got nil")
 	}
@@ -134,7 +134,7 @@ func TestNewEngine_UnsupportedMetric(t *testing.T) {
 		DistanceMetric: "euclidean", // Not supported yet
 	}
 
-	_, err = NewEngine(cfg, wal)
+	_, err = NewEngine(cfg, config.StorageConfig{}, wal)
 	if err == nil {
 		t.Fatal("expected error for unsupported metric, got nil")
 	}
@@ -168,12 +168,12 @@ func TestNewEngine_CompareQuantizationResults(t *testing.T) {
 		DistanceMetric: "cosine",
 	}
 
-	engineFloat, err := NewEngine(cfg1, wal1)
+	engineFloat, err := NewEngine(cfg1, config.StorageConfig{}, wal1)
 	if err != nil {
 		t.Fatalf("NewEngine (float) failed: %v", err)
 	}
 
-	engineInt8, err := NewEngine(cfg2, wal2)
+	engineInt8, err := NewEngine(cfg2, config.StorageConfig{}, wal2)
 	if err != nil {
 		t.Fatalf("NewEngine (int8) failed: %v", err)
 	}

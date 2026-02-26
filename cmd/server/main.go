@@ -34,7 +34,7 @@ func main() {
 	log.Println("Starting server...")
 
 	// Create engine via factory
-	engine, err := index.NewEngine(cfg.Engine, wal)
+	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
 	if err != nil {
 		_ = wal.Close() //nolint:errcheck // best-effort cleanup before fatal exit
 		log.Fatalf("Failed to create engine: %v", err)

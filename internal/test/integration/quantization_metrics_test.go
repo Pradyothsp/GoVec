@@ -86,7 +86,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 		DistanceMetric: "cosine",
 	}
 
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		b.Fatalf("NewEngine failed: %v", err)
 	}
@@ -190,11 +190,11 @@ func BenchmarkQuantizationMetrics_Accuracy(b *testing.B) {
 
 	wal1, _ := index.NewWAL(tmpDir + "/none.wal")
 	defer wal1.Close()
-	engineNone, _ := index.NewEngine(config.EngineConfig{Quantization: "none", DistanceMetric: "cosine"}, wal1)
+	engineNone, _ := index.NewEngine(config.EngineConfig{Quantization: "none", DistanceMetric: "cosine"}, config.StorageConfig{}, wal1)
 
 	wal2, _ := index.NewWAL(tmpDir + "/scalar.wal")
 	defer wal2.Close()
-	engineScalar, _ := index.NewEngine(config.EngineConfig{Quantization: "scalar", DistanceMetric: "cosine"}, wal2)
+	engineScalar, _ := index.NewEngine(config.EngineConfig{Quantization: "scalar", DistanceMetric: "cosine"}, config.StorageConfig{}, wal2)
 
 	// Insert same vectors
 	vectors := generateDiverseVectors(numVectors, vectorDim)
@@ -321,7 +321,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 	defer wal.Close()
 
 	cfg := config.EngineConfig{Quantization: config.Quantization(quantization), DistanceMetric: "cosine"}
-	engine, _ := index.NewEngine(cfg, wal)
+	engine, _ := index.NewEngine(cfg, config.StorageConfig{}, wal)
 
 	// Pre-populate with initial vectors
 	vectors := generateDiverseVectors(numVectors, vectorDim)

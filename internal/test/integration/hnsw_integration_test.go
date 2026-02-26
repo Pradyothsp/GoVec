@@ -32,7 +32,7 @@ func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.Engin
 		IndexType:           config.IndexTypeHNSW,
 		EnableMetadataIndex: true,
 	}
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	if err != nil {
 		t.Fatalf("newHNSWEngine: failed to create engine: %v", err)
 	}
@@ -501,7 +501,7 @@ func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
 		IndexType:          config.IndexTypeHNSW,
 		EnableHybridSearch: true,
 	}
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	s.Require().NoError(err)
 
 	// doc1: strong dense AND strong sparse on token 10 → must rank first in hybrid search
@@ -521,7 +521,7 @@ func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
 	s.Require().NoError(err)
 	defer recoveryWal.Close() //nolint:errcheck // test cleanup
 
-	recoveryEngine, err := index.NewEngine(cfg, recoveryWal)
+	recoveryEngine, err := index.NewEngine(cfg, config.StorageConfig{}, recoveryWal)
 	s.Require().NoError(err)
 
 	s.Require().NoError(recoveryEngine.LoadFromFile(snapPath))
@@ -552,7 +552,7 @@ func (s *hnswSuiteBase) TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex() 
 		IndexType:          config.IndexTypeHNSW,
 		EnableHybridSearch: true,
 	}
-	engine, err := index.NewEngine(cfg, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	s.Require().NoError(err)
 
 	// Insert with sparse vectors — these are written to WAL
@@ -571,7 +571,7 @@ func (s *hnswSuiteBase) TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex() 
 	s.Require().NoError(err)
 	defer recoveryWal.Close() //nolint:errcheck // test cleanup
 
-	recoveryEngine, err := index.NewEngine(cfg, recoveryWal)
+	recoveryEngine, err := index.NewEngine(cfg, config.StorageConfig{}, recoveryWal)
 	s.Require().NoError(err)
 
 	s.Require().NoError(recoveryEngine.ReplayWAL(walPath))

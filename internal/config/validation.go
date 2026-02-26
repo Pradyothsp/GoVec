@@ -54,6 +54,8 @@ func ValidateStorageConfig(cfg StorageConfig) error {
 }
 
 // ValidateEngineConfig validates engine configuration
+//
+//nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
 func ValidateEngineConfig(cfg EngineConfig) error {
 	indexType := cfg.IndexType
 	if indexType == "" {
