@@ -33,40 +33,14 @@ import (
 // @name                       Authorization
 // @description                Type 'Bearer ' followed by your API key.
 func main() {
-	// Use color console output when attached to a terminal, JSON otherwise.
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
-	if fi, err := os.Stdout.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
-	} else {
-		log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
-	}
+	setupLogging()
 
 	// Load configuration
 	cfg := loadConfiguration()
-
-	// Apply configured log level (parsed by zerolog; defaults to "info")
-	level, err := zerolog.ParseLevel(cfg.Server.LogLevel)
-	if err != nil {
-		level = zerolog.InfoLevel
-	}
-	zerolog.SetGlobalLevel(level)
-	log.Info().Str("level", level.String()).Msg("log level set")
+	setLogLevel(cfg.Server.LogLevel)
 
 	// pprof debug server — config-driven, localhost-bound only
-	var debugSrv *http.Server
-	if cfg.Server.PprofEnabled {
-		debugSrv = &http.Server{
-			Addr:              cfg.Server.PprofAddr,
-			ReadHeaderTimeout: 5 * time.Second, // prevent Slowloris on debug port
-			Handler:           http.DefaultServeMux,
-		}
-		go func() {
-			log.Info().Str("addr", cfg.Server.PprofAddr).Msg("pprof debug server listening")
-			if err := debugSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed { //nolint:gosec // localhost-bound
-				log.Error().Err(err).Msg("pprof server error")
-			}
-		}()
-	}
+	debugSrv := startPprofServer(cfg)
 
 	// Initialize WAL
 	wal, err := index.NewWAL(cfg.Storage.WalPath)
@@ -79,33 +53,113 @@ func main() {
 	// Create engine via factory
 	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
 	if err != nil {
-		_ = wal.Close() //nolint:errcheck // best-effort cleanup before fatal exit
+		if closeErr := wal.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close WAL after engine creation failure")
+		}
 		log.Fatal().Err(err).Msg("failed to create engine")
 	}
 
-	// Engine created successfully, set up cleanup
-	defer wal.Close() //nolint:errcheck // best-effort cleanup on shutdown
+	// Engine and WAL initialized, set up cleanup
+	defer func(wal *index.WAL) {
+		err := wal.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to close WAL")
+		}
+	}(wal)
 
 	router := api.SetupRouter(engine, cfg.Server.APIKey, cfg.Storage.DataPath)
-
-	// Conditionally start gRPC server
-	var grpcSrv *grpc.Server
-	if cfg.GRPC.Enabled {
-		grpcSrv = grpcserver.SetupGRPCServer(engine, cfg.Server.APIKey, cfg.Storage.DataPath, cfg.GRPC.MaxRecvMsgSizeMB)
-		grpcAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.GRPC.Port)
-		lis, err := net.Listen("tcp", grpcAddr)
-		if err != nil {
-			log.Fatal().Err(err).Str("addr", grpcAddr).Msg("failed to listen for gRPC") //nolint:gocritic // exitAfterDefer: intentional fatal, consistent with rest of main
+	grpcSrv, err := startGRPCServer(cfg, engine)
+	if err != nil {
+		if closeErr := wal.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close WAL after gRPC startup failure")
 		}
-		go func() {
-			log.Info().Str("addr", grpcAddr).Msg("gRPC server listening")
-			if err := grpcSrv.Serve(lis); err != nil {
-				log.Error().Err(err).Msg("gRPC server error")
-			}
-		}()
+		log.Fatal().Err(err).Msg("failed to start gRPC server") //nolint:gocritic // exitAfterDefer: WAL is explicitly closed above before fatal exit
 	}
 
 	// RECOVERY SEQUENCE
+	runRecovery(cfg, engine)
+
+	// Start Background Snapshotting (The "Auto-Save")
+	startAutoSave(cfg, engine)
+
+	// Create and start an HTTP server
+	srv := startHTTPServer(cfg, router)
+
+	// Wait for the termination signal
+	waitForInterrupt()
+
+	// Graceful shutdown
+	shutdownServer(cfg, engine, srv, debugSrv, grpcSrv)
+}
+
+// setupLogging configures the global logger based on the environment.
+func setupLogging() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
+	if fi, err := os.Stdout.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	} else {
+		log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	}
+}
+
+// setLogLevel sets the global log level.
+func setLogLevel(levelStr string) {
+	level, err := zerolog.ParseLevel(levelStr)
+	if err != nil {
+		level = zerolog.InfoLevel
+	}
+	zerolog.SetGlobalLevel(level)
+	log.Info().Str("level", level.String()).Msg("log level set")
+}
+
+// startPprofServer starts the pprof debug server if enabled in configuration.
+func startPprofServer(cfg *config.Config) *http.Server {
+	if !cfg.Server.PprofEnabled {
+		return nil
+	}
+
+	srv := &http.Server{
+		Addr:              cfg.Server.PprofAddr,
+		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           http.DefaultServeMux,
+	}
+
+	go func() {
+		log.Info().Str("addr", cfg.Server.PprofAddr).Msg("pprof debug server listening")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error().Err(err).Msg("pprof server error")
+		}
+	}()
+
+	return srv
+}
+
+// startGRPCServer starts the gRPC server if enabled in configuration.
+func startGRPCServer(cfg *config.Config, engine index.Engine) (*grpc.Server, error) {
+	if !cfg.GRPC.Enabled {
+		return nil, nil
+	}
+
+	srv := grpcserver.SetupGRPCServer(engine, cfg.Server.APIKey, cfg.Storage.DataPath, cfg.GRPC.MaxRecvMsgSizeMB)
+	grpcAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.GRPC.Port)
+
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen for gRPC on %s: %w", grpcAddr, err)
+	}
+
+	go func() {
+		log.Info().Str("addr", grpcAddr).Msg("gRPC server listening")
+		if err := srv.Serve(lis); err != nil {
+			log.Error().Err(err).Msg("gRPC server error")
+		}
+	}()
+
+	return srv, nil
+}
+
+// runRecovery handles the snapshot loading and WAL replay sequence.
+func runRecovery(cfg *config.Config, engine index.Engine) {
 	// Step 1: Load the base snapshot from DataPath (GOB format)
 	log.Info().Str("path", cfg.Storage.DataPath).Msg("loading snapshot from disk")
 	if err := engine.LoadFromFile(context.Background(), cfg.Storage.DataPath); err != nil {
@@ -125,49 +179,59 @@ func main() {
 	} else {
 		log.Info().Int("vectors", engine.Len()).Msg("WAL replay complete")
 	}
+}
 
-	// Start Background Snapshotting (The "Auto-Save")
-	if cfg.Storage.AutoSaveEnabled {
-		go func() {
-			ticker := time.NewTicker(cfg.Storage.AutoSaveInterval)
-			defer ticker.Stop()
-			for range ticker.C {
-				log.Info().Msg("auto-saving snapshot")
-				if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
-					log.Error().Err(err).Msg("failed to save snapshot")
-				} else {
-					log.Info().Msg("snapshot saved")
-				}
-			}
-		}()
-		log.Info().Dur("interval", cfg.Storage.AutoSaveInterval).Msg("auto-save enabled")
-	} else {
+// startAutoSave starts the background snapshotting ticker.
+func startAutoSave(cfg *config.Config, engine index.Engine) {
+	if !cfg.Storage.AutoSaveEnabled {
 		log.Info().Msg("auto-save disabled")
+		return
 	}
 
-	// Create HTTP server
+	go func() {
+		ticker := time.NewTicker(cfg.Storage.AutoSaveInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Info().Msg("auto-saving snapshot")
+			if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
+				log.Error().Err(err).Msg("failed to save snapshot")
+			} else {
+				log.Info().Msg("snapshot saved")
+			}
+		}
+	}()
+
+	log.Info().Dur("interval", cfg.Storage.AutoSaveInterval).Msg("auto-save enabled")
+}
+
+// startHTTPServer configures and starts the REST API server.
+func startHTTPServer(cfg *config.Config, router http.Handler) *http.Server {
 	srv := &http.Server{
 		Addr:              cfg.Server.Address(),
 		Handler:           router,
-		ReadHeaderTimeout: cfg.Server.ShutdownTimeout,
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
 	}
 
-	// Run server in goroutine
 	go func() {
 		log.Info().Str("addr", cfg.Server.Address()).Msg("GoVec server running")
-
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("failed to start server")
 		}
 	}()
 
-	// Setup signal handling
+	return srv
+}
+
+// waitForInterrupt blocks until a SIGINT or SIGTERM is received.
+func waitForInterrupt() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-
 	log.Info().Msg("shutdown signal received")
+}
 
+// shutdownServer handles the graceful shutdown of all server components.
+func shutdownServer(cfg *config.Config, engine index.Engine, srv, debugSrv *http.Server, grpcSrv *grpc.Server) {
 	// Save data before shutdown
 	log.Info().Msg("saving data to disk")
 	if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
@@ -181,7 +245,6 @@ func main() {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("server forced to shutdown")
-		return
 	}
 
 	if debugSrv != nil {
