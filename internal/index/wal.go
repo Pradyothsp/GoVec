@@ -47,6 +47,7 @@ func NewWAL(filepath string) (*WAL, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Info().Str("path", filepath).Msg("WAL opened")
 	return &WAL{file: f}, nil
 }
 
@@ -80,6 +81,9 @@ func (w *WAL) Clear() error {
 
 	// Reset file pointer to start (defensive - some platforms may not do this)
 	_, err := w.file.Seek(0, 0)
+	if err == nil {
+		log.Info().Msg("WAL cleared")
+	}
 	return err
 }
 

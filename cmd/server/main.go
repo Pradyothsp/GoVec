@@ -33,9 +33,13 @@ import (
 // @name                       Authorization
 // @description                Type 'Bearer ' followed by your API key.
 func main() {
-	// Structured JSON logging for production
+	// Use color console output when attached to a terminal, JSON otherwise.
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
-	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	if fi, err := os.Stdout.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	} else {
+		log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	}
 
 	// Load configuration
 	cfg := loadConfiguration()

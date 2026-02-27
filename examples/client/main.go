@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 // This simulates what OpenAI or HuggingFace would return for these texts
@@ -31,8 +35,11 @@ type SearchPayload struct {
 }
 
 func main() {
+	// Configure zerolog for pretty console output in examples
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	baseURL := "http://localhost:8000/api/v1"
-	fmt.Println("🚀 Starting Help Desk Demo...")
+	log.Info().Msg("🚀 Starting Help Desk Demo...")
 
 	// 1. Ingest Knowledge Base (The "Training" Phase)
 	kb := []struct {
@@ -45,7 +52,7 @@ func main() {
 	}
 
 	for i, item := range kb {
-		fmt.Printf("📥 Indexing: %s...\n", item.Text)
+		log.Info().Str("text", item.Text).Msg("📥 Indexing")
 
 		payload := VectorPayload{
 			ID:       fmt.Sprintf("doc_%d", i),
@@ -58,8 +65,8 @@ func main() {
 
 	// 2. The User Asks a Question
 	queryText := "I forgot my access code"
-	fmt.Printf("\n❓ User asks: '%s'\n", queryText)
-	fmt.Println("🔍 Searching GoVec for semantic matches...")
+	log.Info().Str("query", queryText).Msg("❓ User asks")
+	log.Info().Msg("🔍 Searching GoVec for semantic matches...")
 
 	queryPayload := SearchPayload{
 		Vector: mockEmbeddings["user_query"],
@@ -78,7 +85,7 @@ func sendRequest(method, url string, data interface{}) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error:", err)
+		log.Error().Err(err).Msg("Request failed")
 		return
 	}
 	defer resp.Body.Close()
@@ -87,6 +94,6 @@ func sendRequest(method, url string, data interface{}) {
 
 	// Pretty print the JSON response
 	var prettyJSON bytes.Buffer
-	json.Indent(&prettyJSON, body, "", "  ")
-	fmt.Println("👉 Response:", prettyJSON.String())
+	_ = json.Indent(&prettyJSON, body, "", "  ")
+	log.Info().RawJSON("response", prettyJSON.Bytes()).Msg("👉 Response")
 }

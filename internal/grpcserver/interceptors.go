@@ -23,7 +23,18 @@ func UnaryLoggingInterceptor(
 	start := time.Now()
 	resp, err := handler(ctx, req)
 	code := status.Code(err)
-	log.Info().
+
+	event := log.Info()
+	switch {
+	case code == codes.OK:
+		event = log.Info()
+	case code == codes.NotFound || code == codes.InvalidArgument || code == codes.AlreadyExists || code == codes.Unauthenticated:
+		event = log.Warn()
+	case err != nil:
+		event = log.Error()
+	}
+
+	event.
 		Str("method", info.FullMethod).
 		Dur("duration", time.Since(start)).
 		Str("code", code.String()).
@@ -60,7 +71,18 @@ func StreamLoggingInterceptor(
 	start := time.Now()
 	err := handler(srv, ss)
 	code := status.Code(err)
-	log.Info().
+
+	event := log.Info()
+	switch {
+	case code == codes.OK:
+		event = log.Info()
+	case code == codes.NotFound || code == codes.InvalidArgument || code == codes.AlreadyExists || code == codes.Unauthenticated:
+		event = log.Warn()
+	case err != nil:
+		event = log.Error()
+	}
+
+	event.
 		Str("method", info.FullMethod).
 		Dur("duration", time.Since(start)).
 		Str("code", code.String()).

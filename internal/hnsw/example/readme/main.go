@@ -1,12 +1,17 @@
 package main
 
 import (
-	"fmt"
+	"os"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/hnsw"
 )
 
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	g := hnsw.NewGraph[int, []float32]()
 	g.Distance = hnsw.CosineDistanceFloat32
 	g.Add(
@@ -19,5 +24,5 @@ func main() {
 		[]float32{0.5, 0.5, 0.5},
 		1,
 	)
-	fmt.Printf("best friend: %v\n", neighbors[0].Value)
+	log.Info().Int("id", neighbors[0].Key).Msg("best friend")
 }

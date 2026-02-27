@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
@@ -153,6 +154,7 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 
 	err := h.Engine.Insert(req.ID, req.Vector, sparse, req.Metadata)
 	if err != nil {
+		log.Error().Err(err).Str("id", req.ID).Msg("failed to insert vector")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -199,6 +201,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 
 	results, err := h.Engine.Search(req.Vector, sparse, req.K, req.Filters)
 	if err != nil {
+		log.Error().Err(err).Int("k", req.K).Msg("failed to search vectors")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -232,6 +235,7 @@ func (h *VectorHandler) Delete(c *gin.Context) {
 
 	success, err := h.Engine.Delete(id)
 	if err != nil {
+		log.Error().Err(err).Str("id", id).Msg("failed to delete vector")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

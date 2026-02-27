@@ -3,6 +3,8 @@ package index
 import (
 	"fmt"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
@@ -16,6 +18,14 @@ import (
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
 func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, wal *WAL) (Engine, error) {
+	log.Info().
+		Str("index_type", string(engineCfg.IndexType)).
+		Str("quantization", string(engineCfg.Quantization)).
+		Str("distance_metric", string(engineCfg.DistanceMetric)).
+		Bool("mmap_enabled", storageCfg.EnableMmap).
+		Bool("hybrid_search", engineCfg.EnableHybridSearch).
+		Msg("initializing vector engine")
+
 	if storageCfg.EnableMmap && engineCfg.Dimensions <= 0 {
 		return nil, fmt.Errorf("engine.dimensions must be set (> 0) when storage.enable_mmap is true")
 	}

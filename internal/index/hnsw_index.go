@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -322,6 +323,7 @@ func (idx *HNSWIndex[T]) deleteInternal(id string) error {
 // When mmap is enabled it writes version 6 (topology-only graph; no inline vectors).
 // Otherwise it writes the standard version 4 format.
 func (idx *HNSWIndex[T]) SaveToFile(path string) error {
+	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -335,10 +337,21 @@ func (idx *HNSWIndex[T]) SaveToFile(path string) error {
 		return fmt.Errorf("unknown vector type")
 	}
 
+	var err error
 	if idx.vectorStore != nil {
-		return idx.saveToFileMmap(path, quantType)
+		err = idx.saveToFileMmap(path, quantType)
+	} else {
+		err = idx.saveToFileHeap(path, quantType)
 	}
-	return idx.saveToFileHeap(path, quantType)
+
+	if err == nil {
+		log.Info().
+			Str("path", path).
+			Int("vectors", idx.graph.Len()).
+			Dur("duration", time.Since(start)).
+			Msg("HNSW snapshot saved to disk")
+	}
+	return err
 }
 
 // saveToFileHeap writes the standard v4 snapshot (inline vectors embedded in GOB).
@@ -496,6 +509,7 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 // Supports version 4 (heap-backed vectors) and version 6 (mmap-backed vectors).
 // A missing file is not an error — the server starts with an empty index.
 func (idx *HNSWIndex[T]) LoadFromFile(path string) (err error) {
+	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -544,41 +558,50 @@ func (idx *HNSWIndex[T]) LoadFromFile(path string) (err error) {
 	}
 
 	if header.Version == 6 {
-		return idx.loadFromFileMmap(decoder, &header)
-	}
+		err = idx.loadFromFileMmap(decoder, &header)
+	} else {
+		// Standard v4: metadata map contains inline vectors.
+		if err := decoder.Decode(&idx.metadata); err != nil {
+			return fmt.Errorf("failed to decode metadata: %w", err)
+		}
 
-	// Standard v4: metadata map contains inline vectors.
-	if err := decoder.Decode(&idx.metadata); err != nil {
-		return fmt.Errorf("failed to decode metadata: %w", err)
-	}
-
-	if header.HybridSearchEnabled {
-		if idx.InvertedIndex != nil {
-			var loadedIndex map[uint32][]core.Posting
-			if err := decoder.Decode(&loadedIndex); err != nil {
-				return fmt.Errorf("failed to decode inverted index: %w", err)
-			}
-			idx.InvertedIndex = loadedIndex
-		} else {
-			var discarded map[uint32][]core.Posting
-			if err := decoder.Decode(&discarded); err != nil {
-				return fmt.Errorf("failed to skip inverted index: %w", err)
+		if header.HybridSearchEnabled {
+			if idx.InvertedIndex != nil {
+				var loadedIndex map[uint32][]core.Posting
+				if err := decoder.Decode(&loadedIndex); err != nil {
+					return fmt.Errorf("failed to decode inverted index: %w", err)
+				}
+				idx.InvertedIndex = loadedIndex
+			} else {
+				var discarded map[uint32][]core.Posting
+				if err := decoder.Decode(&discarded); err != nil {
+					return fmt.Errorf("failed to skip inverted index: %w", err)
+				}
 			}
 		}
-	}
 
-	var graphBytes []byte
-	if err := decoder.Decode(&graphBytes); err != nil {
-		return fmt.Errorf("failed to decode HNSW graph bytes: %w", err)
-	}
-	if err := idx.graph.Import(bufio.NewReader(bytes.NewReader(graphBytes))); err != nil {
-		return fmt.Errorf("failed to import HNSW graph: %w", err)
+		var graphBytes []byte
+		if err := decoder.Decode(&graphBytes); err != nil {
+			return fmt.Errorf("failed to decode HNSW graph bytes: %w", err)
+		}
+		if err := idx.graph.Import(bufio.NewReader(bytes.NewReader(graphBytes))); err != nil {
+			return fmt.Errorf("failed to import HNSW graph: %w", err)
+		}
 	}
 
 	if idx.metaIndex != nil {
 		idx.rebuildMetaIndex()
 	}
-	return nil
+
+	if err == nil {
+		log.Info().
+			Str("path", path).
+			Int("vectors", idx.graph.Len()).
+			Dur("duration", time.Since(start)).
+			Msg("HNSW snapshot loaded from disk")
+	}
+
+	return err
 }
 
 // loadFromFileMmap reconstructs the index from a v6 mmap-backed snapshot.

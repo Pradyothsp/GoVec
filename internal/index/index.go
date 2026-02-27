@@ -323,8 +323,7 @@ func (idx *VectorIndex[T]) Clear() {
 
 	if idx.vectorStore != nil {
 		if err := idx.vectorStore.Reset(); err != nil {
-			// Log but don't propagate — in-memory state is already reset.
-			_ = err
+			log.Error().Err(err).Msg("failed to reset mmap vector store")
 		}
 	}
 }
