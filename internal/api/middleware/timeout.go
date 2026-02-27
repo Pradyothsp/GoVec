@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 
 	"github.com/Pradyothsp/govec/internal/api/response"
 )
@@ -22,7 +22,7 @@ func Timeout(d time.Duration) gin.HandlerFunc {
 		c.Next()
 
 		if ctx.Err() == context.DeadlineExceeded {
-			log.Warn().
+			zerolog.Ctx(ctx).Warn().
 				Str("method", c.Request.Method).
 				Str("path", c.Request.URL.Path).
 				Dur("timeout", d).
