@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -31,13 +32,13 @@ func TestHybridSearch_DenseOnly(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
 	// Insert documents with only dense vectors (no sparse)
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]any{"type": "doc1"})
-	_ = idx.Insert("doc2", []float32{0.9, 0.1}, core.SparseVector{}, map[string]any{"type": "doc2"})
-	_ = idx.Insert("doc3", []float32{0.0, 1.0}, core.SparseVector{}, map[string]any{"type": "doc3"})
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{}, map[string]any{"type": "doc1"})
+	_ = idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1}, core.SparseVector{}, map[string]any{"type": "doc2"})
+	_ = idx.Insert(context.Background(), "doc3", []float32{0.0, 1.0}, core.SparseVector{}, map[string]any{"type": "doc3"})
 
 	// Search with dense query, no sparse query
 	query := []float32{1.0, 0.0}
-	results, err := idx.Search(query, core.SparseVector{}, 3, nil)
+	results, err := idx.Search(context.Background(), query, core.SparseVector{}, 3, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 3)
@@ -52,12 +53,12 @@ func TestHybridSearch_SparseBoostsRanking(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
 	// Insert documents with both dense and sparse vectors
-	_ = idx.Insert("doc1", []float32{0.5, 0.5}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{0.5, 0.5}, core.SparseVector{
 		Indices: []uint32{10, 20},
 		Values:  []float32{0.1, 0.2},
 	}, nil)
 
-	_ = idx.Insert("doc2", []float32{0.4, 0.6}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc2", []float32{0.4, 0.6}, core.SparseVector{
 		Indices: []uint32{10, 30},
 		Values:  []float32{5.0, 1.0}, // Strong match on token 10
 	}, nil)
@@ -69,7 +70,7 @@ func TestHybridSearch_SparseBoostsRanking(t *testing.T) {
 		Values:  []float32{10.0, 2.0}, // Query for token 10
 	}
 
-	results, err := idx.Search(query, sparseQuery, 2, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 2, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 2)
@@ -84,14 +85,14 @@ func TestHybridSearch_MixedDocuments(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
 	// Insert documents: some with sparse, some without
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{100},
 		Values:  []float32{5.0},
 	}, nil)
 
-	_ = idx.Insert("doc2", []float32{0.9, 0.1}, core.SparseVector{}, nil) // No sparse
+	_ = idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1}, core.SparseVector{}, nil) // No sparse
 
-	_ = idx.Insert("doc3", []float32{0.8, 0.2}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc3", []float32{0.8, 0.2}, core.SparseVector{
 		Indices: []uint32{200},
 		Values:  []float32{3.0},
 	}, nil)
@@ -103,7 +104,7 @@ func TestHybridSearch_MixedDocuments(t *testing.T) {
 		Values:  []float32{2.0},
 	}
 
-	results, err := idx.Search(query, sparseQuery, 3, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 3, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 3)
@@ -115,19 +116,19 @@ func TestHybridSearch_MixedDocuments(t *testing.T) {
 func TestHybridSearch_EmptySparseQuery(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10},
 		Values:  []float32{5.0},
 	}, nil)
 
-	_ = idx.Insert("doc2", []float32{0.0, 1.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc2", []float32{0.0, 1.0}, core.SparseVector{
 		Indices: []uint32{20},
 		Values:  []float32{3.0},
 	}, nil)
 
 	// Search with empty sparse query (should fall back to dense-only)
 	query := []float32{1.0, 0.0}
-	results, err := idx.Search(query, core.SparseVector{}, 2, nil)
+	results, err := idx.Search(context.Background(), query, core.SparseVector{}, 2, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 2)
@@ -139,12 +140,12 @@ func TestHybridSearch_EmptySparseQuery(t *testing.T) {
 func TestHybridSearch_NoOverlappingTokens(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10, 20},
 		Values:  []float32{1.0, 2.0},
 	}, nil)
 
-	_ = idx.Insert("doc2", []float32{0.9, 0.1}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1}, core.SparseVector{
 		Indices: []uint32{30, 40},
 		Values:  []float32{1.0, 2.0},
 	}, nil)
@@ -156,7 +157,7 @@ func TestHybridSearch_NoOverlappingTokens(t *testing.T) {
 		Values:  []float32{5.0, 3.0},
 	}
 
-	results, err := idx.Search(query, sparseQuery, 2, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 2, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 2)
@@ -168,12 +169,12 @@ func TestHybridSearch_NoOverlappingTokens(t *testing.T) {
 func TestHybridSearch_WithFilters(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10},
 		Values:  []float32{5.0},
 	}, map[string]any{"category": "books"})
 
-	_ = idx.Insert("doc2", []float32{0.9, 0.1}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1}, core.SparseVector{
 		Indices: []uint32{10},
 		Values:  []float32{8.0}, // Stronger sparse match
 	}, map[string]any{"category": "music"})
@@ -186,7 +187,7 @@ func TestHybridSearch_WithFilters(t *testing.T) {
 	}
 	filters := map[string]interface{}{"category": "books"}
 
-	results, err := idx.Search(query, sparseQuery, 5, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 5, nil)
 
 	require.NoError(t, err)
 
@@ -195,7 +196,7 @@ func TestHybridSearch_WithFilters(t *testing.T) {
 	assert.Len(t, results, 2)
 
 	// With filter, only doc1 should be returned
-	resultsFiltered, err := idx.Search(query, sparseQuery, 5, filters)
+	resultsFiltered, err := idx.Search(context.Background(), query, sparseQuery, 5, filters)
 	require.NoError(t, err)
 	require.Len(t, resultsFiltered, 1)
 	assert.Equal(t, "doc1", resultsFiltered[0].ID)
@@ -205,13 +206,13 @@ func TestHybridSearch_MultipleTokenOverlap(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
 	// Document with multiple matching tokens
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10, 20, 30},
 		Values:  []float32{1.0, 2.0, 3.0},
 	}, nil)
 
 	// Document with single matching token but high weight
-	_ = idx.Insert("doc2", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc2", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10},
 		Values:  []float32{10.0},
 	}, nil)
@@ -223,7 +224,7 @@ func TestHybridSearch_MultipleTokenOverlap(t *testing.T) {
 		Values:  []float32{1.0, 1.0, 1.0},
 	}
 
-	results, err := idx.Search(query, sparseQuery, 2, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 2, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 2)
@@ -239,7 +240,7 @@ func TestHybridSearch_ScoreCombination(t *testing.T) {
 	idx := newTestIndexWithHybrid(t)
 
 	// Insert document with known dense and sparse vectors
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10},
 		Values:  []float32{1.0},
 	}, nil)
@@ -251,7 +252,7 @@ func TestHybridSearch_ScoreCombination(t *testing.T) {
 		Values:  []float32{1.0},
 	}
 
-	results, err := idx.Search(query, sparseQuery, 1, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 1, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -266,7 +267,7 @@ func TestHybridSearch_NoInvertedIndex(t *testing.T) {
 	// Create index WITHOUT inverted index (hybrid search disabled)
 	idx := newTestIndex(t) // Uses nil invertedIndex
 
-	_ = idx.Insert("doc1", []float32{1.0, 0.0}, core.SparseVector{
+	_ = idx.Insert(context.Background(), "doc1", []float32{1.0, 0.0}, core.SparseVector{
 		Indices: []uint32{10},
 		Values:  []float32{5.0},
 	}, nil)
@@ -278,7 +279,7 @@ func TestHybridSearch_NoInvertedIndex(t *testing.T) {
 		Values:  []float32{2.0},
 	}
 
-	results, err := idx.Search(query, sparseQuery, 1, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 1, nil)
 
 	require.NoError(t, err)
 	require.Len(t, results, 1)

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -87,7 +88,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashAfterInserts() {
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Load from missing snapshot
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
 
 	// Replay WAL
@@ -166,7 +167,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashDuringMixedOperations() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)
@@ -199,7 +200,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_EmptyWAL() {
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
 
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -230,7 +231,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashBetweenAutoSaves() {
 	}
 
 	// Save snapshot
-	err := s.index.SaveToFile(s.snapPath)
+	err := s.index.SaveToFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 
 	// Insert 20 more vectors
@@ -258,7 +259,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashBetweenAutoSaves() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)
@@ -292,7 +293,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_SnapshotAfterDeletes() {
 	}
 
 	// Save snapshot
-	err := s.index.SaveToFile(s.snapPath)
+	err := s.index.SaveToFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 
 	// INSERT vec11-12
@@ -326,7 +327,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_SnapshotAfterDeletes() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)
@@ -357,7 +358,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MultipleSnapshots() {
 		s.router.ServeHTTP(w, req)
 		s.Assert().Equal(http.StatusCreated, w.Code)
 	}
-	err := s.index.SaveToFile(s.snapPath)
+	err := s.index.SaveToFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 
 	// Cycle 2: Insert 10, save
@@ -374,7 +375,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MultipleSnapshots() {
 		s.router.ServeHTTP(w, req)
 		s.Assert().Equal(http.StatusCreated, w.Code)
 	}
-	err = s.index.SaveToFile(s.snapPath)
+	err = s.index.SaveToFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 
 	// Cycle 3: Insert 5, crash (no save)
@@ -402,7 +403,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MultipleSnapshots() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)
@@ -452,7 +453,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_ConcurrentInsertsBeforeCrash() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)
@@ -507,7 +508,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_InterleavedInsertsDeletes() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)
@@ -553,7 +554,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CorruptedWALGracefulHandling() {
 	// Recovery
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err, "Replay should not crash on corrupted WAL")
@@ -579,7 +580,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MissingSnapshotButValidWAL() {
 	}
 
 	// Save snapshot
-	err := s.index.SaveToFile(s.snapPath)
+	err := s.index.SaveToFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 
 	// Insert 5 more
@@ -611,7 +612,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MissingSnapshotButValidWAL() {
 
 	recoveredIDMapper := core.NewIDMapper()
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
-	err = recoveredIdx.LoadFromFile(s.snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
 	err = recoveredIdx.ReplayWAL(s.walPath)
 	s.Require().NoError(err)

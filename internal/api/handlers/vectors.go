@@ -107,7 +107,7 @@ func (h *VectorHandler) BatchInsert(c *gin.Context) {
 			sparse = *v.SparseVector
 		}
 
-		if err := h.Engine.Insert(v.ID, v.Vector, sparse, v.Metadata); err != nil {
+		if err := h.Engine.Insert(c.Request.Context(), v.ID, v.Vector, sparse, v.Metadata); err != nil {
 			errs = append(errs, BatchInsertResult{ID: v.ID, Error: err.Error()})
 			continue
 		}
@@ -152,7 +152,7 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 		sparse = *req.SparseVector
 	}
 
-	err := h.Engine.Insert(req.ID, req.Vector, sparse, req.Metadata)
+	err := h.Engine.Insert(c.Request.Context(), req.ID, req.Vector, sparse, req.Metadata)
 	if err != nil {
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Str("id", req.ID).Msg("failed to insert vector")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
@@ -199,7 +199,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		sparse = *req.SparseVector
 	}
 
-	results, err := h.Engine.Search(req.Vector, sparse, req.K, req.Filters)
+	results, err := h.Engine.Search(c.Request.Context(), req.Vector, sparse, req.K, req.Filters)
 	if err != nil {
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Int("k", req.K).Msg("failed to search vectors")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
@@ -233,7 +233,7 @@ func (h *VectorHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	success, err := h.Engine.Delete(id)
+	success, err := h.Engine.Delete(c.Request.Context(), id)
 	if err != nil {
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Str("id", id).Msg("failed to delete vector")
 		response.Fail(c, http.StatusInternalServerError, err.Error())

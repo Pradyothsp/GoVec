@@ -3,6 +3,7 @@ package testutil
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -39,17 +40,17 @@ func NewTestVectorIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	t.Helper()
 	idx := NewTestIndex(t)
 
-	_ = idx.Insert("test1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{ //nolint:errcheck // test helper
+	_ = idx.Insert(context.Background(), "test1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{ //nolint:errcheck // test helper
 		"label": "first",
 		"type":  "test",
 	})
 
-	_ = idx.Insert("test2", []float32{4.0, 5.0, 6.0}, core.SparseVector{}, map[string]any{ //nolint:errcheck // test helper
+	_ = idx.Insert(context.Background(), "test2", []float32{4.0, 5.0, 6.0}, core.SparseVector{}, map[string]any{ //nolint:errcheck // test helper
 		"label": "second",
 		"type":  "test",
 	})
 
-	_ = idx.Insert("test3", []float32{7.0, 8.0, 9.0}, core.SparseVector{}, nil) //nolint:errcheck // test helper
+	_ = idx.Insert(context.Background(), "test3", []float32{7.0, 8.0, 9.0}, core.SparseVector{}, nil) //nolint:errcheck // test helper
 
 	return idx
 }
@@ -184,7 +185,7 @@ func PopulateIndexWithVectors(idx *index.VectorIndex[[]float32], count int) {
 			"type":  "test_vector",
 			"batch": "populated",
 		}
-		_ = idx.Insert(id, vec, core.SparseVector{}, meta) //nolint:errcheck // test helper
+		_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, meta) //nolint:errcheck // test helper
 	}
 }
 
@@ -234,7 +235,7 @@ func NewWALWithPath(t testing.TB, path string) *index.WAL {
 func WriteWALEntry(t testing.TB, path string, entry *index.WALEntry) {
 	t.Helper()
 	wal := NewWALWithPath(t, path)
-	err := wal.WriteEntry(entry)
+	err := wal.WriteEntry(context.Background(), entry)
 	require.NoError(t, err, "Failed to write WAL entry")
 }
 

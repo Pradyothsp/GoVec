@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,21 +54,21 @@ func TestHNSWIndex_InsertAndLen(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 	assert.Equal(t, 0, idx.Len())
 
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 	assert.Equal(t, 1, idx.Len())
 
-	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
 	assert.Equal(t, 2, idx.Len())
 }
 
 func TestHNSWIndex_Insert_Overwrite(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"version": 1}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"version": 1}))
 	assert.Equal(t, 1, idx.Len())
 
 	// Overwrite same ID — count must not increase
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"version": 2}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"version": 2}))
 	assert.Equal(t, 1, idx.Len())
 
 	// Metadata should reflect the latest insert
@@ -79,30 +80,30 @@ func TestHNSWIndex_Insert_Overwrite(t *testing.T) {
 func TestHNSWIndex_Search_EmptyIndex(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, nil)
+	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 5, nil)
 	require.NoError(t, err)
 	assert.Nil(t, results)
 }
 
 func TestHNSWIndex_Search_EmptyQuery(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 
-	_, err := idx.Search([]float32{}, core.SparseVector{}, 5, nil)
+	_, err := idx.Search(context.Background(), []float32{}, core.SparseVector{}, 5, nil)
 	assert.Error(t, err)
 }
 
 func TestHNSWIndex_Delete_ExistingVector(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
 	assert.Equal(t, 2, idx.Len())
 
 	internalID, err := idx.IDMapper.ToUint32ID("v1")
 	require.NoError(t, err)
 
-	deleted, err := idx.Delete("v1")
+	deleted, err := idx.Delete(context.Background(), "v1")
 	require.NoError(t, err)
 	assert.True(t, deleted)
 	assert.Equal(t, 1, idx.Len())
@@ -115,7 +116,7 @@ func TestHNSWIndex_Delete_ExistingVector(t *testing.T) {
 func TestHNSWIndex_Delete_NonExistentVector(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	deleted, err := idx.Delete("does-not-exist")
+	deleted, err := idx.Delete(context.Background(), "does-not-exist")
 	require.NoError(t, err)
 	assert.False(t, deleted)
 }
@@ -131,11 +132,11 @@ func TestHNSWIndex_SearchOrdering_ByCosineSimilarity(t *testing.T) {
 	//   doc1: [1,0,0] — identical to query (cosine = 1.0, score = 1.0)
 	//   doc2: [0.9,0.1,0] — very close (score ≈ 0.99)
 	//   doc3: [0,1,0] — orthogonal (cosine = 0.0, score = 0.0)
-	require.NoError(t, idx.Insert("doc3", []float32{0, 1, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("doc2", []float32{0.9, 0.1, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc3", []float32{0, 1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{}, nil))
 
-	results, err := idx.Search([]float32{1, 0, 0}, core.SparseVector{}, 3, nil)
+	results, err := idx.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 3, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 
@@ -159,10 +160,10 @@ func TestHNSWIndex_Search_RespectLimit(t *testing.T) {
 	for i, vec := range [][]float32{
 		{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {0.7, 0.7, 0}, {0.5, 0.5, 0.5},
 	} {
-		require.NoError(t, idx.Insert(fixtures.GenerateMetadata(1)[0]["id"].(string)+string(rune('A'+i)), vec, core.SparseVector{}, nil))
+		require.NoError(t, idx.Insert(context.Background(), fixtures.GenerateMetadata(1)[0]["id"].(string)+string(rune('A'+i)), vec, core.SparseVector{}, nil))
 	}
 
-	results, err := idx.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, nil)
+	results, err := idx.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 2, nil)
 	require.NoError(t, err)
 	assert.Len(t, results, 2, "result count must equal k")
 }
@@ -174,14 +175,14 @@ func TestHNSWIndex_Search_RespectLimit(t *testing.T) {
 func TestHNSWIndex_Search_WithFilter(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
-	require.NoError(t, idx.Insert("doc2", []float32{0.9, 0.1, 0}, core.SparseVector{}, map[string]any{"category": "B"}))
-	require.NoError(t, idx.Insert("doc3", []float32{0.8, 0.2, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
-	require.NoError(t, idx.Insert("doc4", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{"category": "B"}))
-	require.NoError(t, idx.Insert("doc5", []float32{0, 0, 1}, core.SparseVector{}, map[string]any{"category": "A"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1, 0}, core.SparseVector{}, map[string]any{"category": "B"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc3", []float32{0.8, 0.2, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc4", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{"category": "B"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc5", []float32{0, 0, 1}, core.SparseVector{}, map[string]any{"category": "A"}))
 
 	// Over-fetching kicks in (k*5 candidates fetched internally, then filtered)
-	results, err := idx.Search([]float32{1, 0, 0}, core.SparseVector{}, 10, map[string]interface{}{"category": "A"})
+	results, err := idx.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 10, map[string]interface{}{"category": "A"})
 	require.NoError(t, err)
 
 	for _, r := range results {
@@ -193,10 +194,10 @@ func TestHNSWIndex_Search_WithFilter(t *testing.T) {
 func TestHNSWIndex_Search_NoMetadataMatch(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
-	require.NoError(t, idx.Insert("doc2", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{"category": "A"}))
 
-	results, err := idx.Search([]float32{1, 0, 0}, core.SparseVector{}, 5, map[string]interface{}{"category": "Z"})
+	results, err := idx.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 5, map[string]interface{}{"category": "Z"})
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -209,21 +210,21 @@ func TestHNSWIndex_HybridSearch_SparseBoostsRanking(t *testing.T) {
 	idx := newTestHNSWIndexWithHybrid(t)
 
 	// doc1: great dense match, weak sparse match
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{0.1},
 	}, nil))
 
 	// doc2: slightly weaker dense match, very strong sparse match
-	require.NoError(t, idx.Insert("doc2", []float32{0.9, 0.1, 0}, core.SparseVector{
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0.9, 0.1, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{10.0},
 	}, nil))
 
-	require.NoError(t, idx.Insert("doc3", []float32{0, 1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc3", []float32{0, 1, 0}, core.SparseVector{}, nil))
 
 	query := []float32{1, 0, 0}
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
 
-	results, err := idx.Search(query, sparseQuery, 2, nil)
+	results, err := idx.Search(context.Background(), query, sparseQuery, 2, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
@@ -234,13 +235,13 @@ func TestHNSWIndex_HybridSearch_SparseBoostsRanking(t *testing.T) {
 func TestHNSWIndex_HybridSearch_EmptySparseQueryFallsBackToDense(t *testing.T) {
 	idx := newTestHNSWIndexWithHybrid(t)
 
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{5.0},
 	}, nil))
-	require.NoError(t, idx.Insert("doc2", []float32{0, 1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0, 1, 0}, core.SparseVector{}, nil))
 
 	// Empty sparse query → dense-only path
-	results, err := idx.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, nil)
+	results, err := idx.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 2, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
@@ -254,12 +255,12 @@ func TestHNSWIndex_HybridSearch_EmptySparseQueryFallsBackToDense(t *testing.T) {
 func TestHNSWIndex_PersistenceRoundTrip(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("v1", []float32{1, 0, 0}, core.SparseVector{}, fixtures.MetaSimple))
-	require.NoError(t, idx.Insert("v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("v3", []float32{0, 0, 1}, core.SparseVector{}, fixtures.MetaNested))
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1, 0, 0}, core.SparseVector{}, fixtures.MetaSimple))
+	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v3", []float32{0, 0, 1}, core.SparseVector{}, fixtures.MetaNested))
 
 	path := filepath.Join(t.TempDir(), "hnsw.bin")
-	require.NoError(t, idx.SaveToFile(path))
+	require.NoError(t, idx.SaveToFile(context.Background(), path))
 
 	// Verify no temp file leaked
 	_, err := os.Stat(path + ".tmp")
@@ -267,14 +268,14 @@ func TestHNSWIndex_PersistenceRoundTrip(t *testing.T) {
 
 	// Load into a fresh index
 	idx2 := newTestHNSWIndex(t)
-	require.NoError(t, idx2.LoadFromFile(path))
+	require.NoError(t, idx2.LoadFromFile(context.Background(), path))
 
 	assert.Equal(t, 3, idx2.Len())
 	assert.Equal(t, idx.IDMapper.Count(), idx2.IDMapper.Count())
 	assert.Equal(t, idx.IDMapper.NextID(), idx2.IDMapper.NextID())
 
 	// Search still returns the right top result
-	results, err := idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 1, nil)
+	results, err := idx2.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 1, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "v1", results[0].ID)
@@ -282,7 +283,7 @@ func TestHNSWIndex_PersistenceRoundTrip(t *testing.T) {
 
 func TestHNSWIndex_LoadFromFile_MissingFile(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	err := idx.LoadFromFile("/nonexistent/hnsw.bin")
+	err := idx.LoadFromFile(context.Background(), "/nonexistent/hnsw.bin")
 	assert.NoError(t, err, "missing file must be handled gracefully")
 	assert.Equal(t, 0, idx.Len())
 }
@@ -292,43 +293,43 @@ func TestHNSWIndex_LoadFromFile_CorruptedFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("not valid gob data"), 0o600))
 
 	idx := newTestHNSWIndex(t)
-	err := idx.LoadFromFile(path)
+	err := idx.LoadFromFile(context.Background(), path)
 	assert.Error(t, err)
 }
 
 func TestHNSWIndex_LoadFromFile_BruteForceSnapshot(t *testing.T) {
 	// Save a brute-force (v3) snapshot
 	bruteIdx := newTestIndex(t)
-	require.NoError(t, bruteIdx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, bruteIdx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 
 	path := filepath.Join(t.TempDir(), "brute.bin")
-	require.NoError(t, bruteIdx.SaveToFile(path))
+	require.NoError(t, bruteIdx.SaveToFile(context.Background(), path))
 
 	// Attempting to load it as an HNSW snapshot must fail with a clear message
 	hnswIdx := newTestHNSWIndex(t)
-	err := hnswIdx.LoadFromFile(path)
+	err := hnswIdx.LoadFromFile(context.Background(), path)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "brute", "error must hint that the snapshot is brute-force")
 }
 
 func TestHNSWIndex_SaveToFile_InvalidPath(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 
-	err := idx.SaveToFile("/nonexistent/dir/hnsw.bin")
+	err := idx.SaveToFile(context.Background(), "/nonexistent/dir/hnsw.bin")
 	assert.Error(t, err)
 }
 
 // Verify that a VectorIndex refuses to load an HNSW snapshot
 func TestVectorIndex_LoadFromFile_RejectsHNSWSnapshot(t *testing.T) {
 	hnswIdx := newTestHNSWIndex(t)
-	require.NoError(t, hnswIdx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, hnswIdx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 
 	path := filepath.Join(t.TempDir(), "hnsw.bin")
-	require.NoError(t, hnswIdx.SaveToFile(path))
+	require.NoError(t, hnswIdx.SaveToFile(context.Background(), path))
 
 	bruteIdx := newTestIndex(t)
-	err := bruteIdx.LoadFromFile(path)
+	err := bruteIdx.LoadFromFile(context.Background(), path)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "hnsw", "error must hint that the snapshot is HNSW")
 }
@@ -348,9 +349,9 @@ func TestHNSWIndex_WALReplay_Recovery(t *testing.T) {
 	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil, nil)
 
 	// Insert writes go to WAL first
-	require.NoError(t, idx.Insert("v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("v3", []float32{0, 0, 1}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v3", []float32{0, 0, 1}, core.SparseVector{}, nil))
 
 	// Simulate crash: create a fresh index and replay the WAL
 	wal2, err := NewWAL(filepath.Join(t.TempDir(), "dummy.wal"))
@@ -374,9 +375,9 @@ func TestHNSWIndex_WALReplay_DeleteIsReplayed(t *testing.T) {
 	identityFunc := func(v []float32) []float32 { return v }
 	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil, nil)
 
-	require.NoError(t, idx.Insert("v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
-	deleted, err := idx.Delete("v1")
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
+	deleted, err := idx.Delete(context.Background(), "v1")
 	require.NoError(t, err)
 	require.True(t, deleted)
 
@@ -405,8 +406,8 @@ func TestHNSWIndex_WALReplay_MissingFile(t *testing.T) {
 func TestHNSWIndex_Clear(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
 	assert.Equal(t, 2, idx.Len())
 
 	idx.Clear()
@@ -417,14 +418,14 @@ func TestHNSWIndex_Clear(t *testing.T) {
 func TestHNSWIndex_Clear_AllowsReinsertion(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 	idx.Clear()
 
 	// Should be able to insert again after Clear
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 	assert.Equal(t, 1, idx.Len())
 
-	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 1, nil)
+	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 1, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "v1", results[0].ID)
@@ -438,10 +439,10 @@ func TestHNSWIndex_Clear_AllowsReinsertion(t *testing.T) {
 // still return the nearest neighbors unchanged — backward compatibility.
 func TestHNSWIndex_FilteredSearch_NilFilter_Regression(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
-	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"tier": "premium"}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
+	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"tier": "premium"}))
 
-	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 2, nil)
+	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 2, nil)
 	require.NoError(t, err)
 	assert.Len(t, results, 2, "nil filter must return all nearest neighbors")
 }
@@ -458,12 +459,12 @@ func TestHNSWIndex_FilteredSearch_SelectiveFilter(t *testing.T) {
 		if i == 10 || i == 20 {
 			tier = "rare"
 		}
-		require.NoError(t, idx.Insert(
+		require.NoError(t, idx.Insert(context.Background(),
 			fmt.Sprintf("v%d", i), vec, core.SparseVector{}, map[string]any{"tier": tier},
 		))
 	}
 
-	results, err := idx.Search(vecs[10], core.SparseVector{}, 2, map[string]any{"tier": "rare"})
+	results, err := idx.Search(context.Background(), vecs[10], core.SparseVector{}, 2, map[string]any{"tier": "rare"})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	for _, r := range results {
@@ -475,9 +476,9 @@ func TestHNSWIndex_FilteredSearch_SelectiveFilter(t *testing.T) {
 // when the filter matches zero documents.
 func TestHNSWIndex_FilteredSearch_NoMatch_ReturnsNil(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
 
-	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "nonexistent"})
+	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "nonexistent"})
 	require.NoError(t, err)
 	assert.Nil(t, results, "filter matching nothing must short-circuit and return nil")
 }
@@ -486,16 +487,16 @@ func TestHNSWIndex_FilteredSearch_NoMatch_ReturnsNil(t *testing.T) {
 // a vector updates the MetadataIndex so old filters no longer match.
 func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnOverwrite(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "free"}))
 
 	// Overwrite with new metadata
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "premium"}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "premium"}))
 
-	old, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "free"})
+	old, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "free"})
 	require.NoError(t, err)
 	assert.Nil(t, old, "old tier must no longer match after overwrite")
 
-	updated, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "premium"})
+	updated, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "premium"})
 	require.NoError(t, err)
 	require.Len(t, updated, 1)
 	assert.Equal(t, "v1", updated[0].ID)
@@ -505,14 +506,14 @@ func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnOverwrite(t *testing.T) {
 // a vector removes it from the MetadataIndex.
 func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnDelete(t *testing.T) {
 	idx := newTestHNSWIndex(t)
-	require.NoError(t, idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "premium"}))
-	require.NoError(t, idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"tier": "free"}))
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"tier": "premium"}))
+	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"tier": "free"}))
 
-	deleted, err := idx.Delete("v1")
+	deleted, err := idx.Delete(context.Background(), "v1")
 	require.NoError(t, err)
 	require.True(t, deleted)
 
-	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "premium"})
+	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 5, map[string]any{"tier": "premium"})
 	require.NoError(t, err)
 	assert.Nil(t, results, "deleted vector must not appear in filtered results")
 }
@@ -528,29 +529,29 @@ func TestHNSWIndex_InvertedIndex_SaveLoad_HybridSearchRestored(t *testing.T) {
 	idx := newTestHNSWIndexWithHybrid(t)
 
 	// doc1: strong dense match AND strong sparse hit on term 10.
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{10.0},
 	}, nil))
 	// doc2: nearly identical dense, but no sparse hit — should lose to doc1 after hybrid scoring.
-	require.NoError(t, idx.Insert("doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
 	// doc3: orthogonal to query, strong sparse on an unrelated term.
-	require.NoError(t, idx.Insert("doc3", []float32{0, 1, 0}, core.SparseVector{
+	require.NoError(t, idx.Insert(context.Background(), "doc3", []float32{0, 1, 0}, core.SparseVector{
 		Indices: []uint32{99}, Values: []float32{9.0},
 	}, nil))
 
 	path := filepath.Join(t.TempDir(), "hnsw_hybrid.bin")
-	require.NoError(t, idx.SaveToFile(path))
+	require.NoError(t, idx.SaveToFile(context.Background(), path))
 
 	// Load into a fresh hybrid-enabled index.
 	idx2 := newTestHNSWIndexWithHybrid(t)
-	require.NoError(t, idx2.LoadFromFile(path))
+	require.NoError(t, idx2.LoadFromFile(context.Background(), path))
 	require.Equal(t, 3, idx2.Len())
 
 	// Sparse query targets term 10 — doc1 must rank first because its InvertedIndex
 	// entry boosted the hybrid score; if InvertedIndex were lost, doc1 and doc2
 	// would be tied on dense score alone.
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
-	results, err := idx2.Search([]float32{1, 0, 0}, sparseQuery, 2, nil)
+	results, err := idx2.Search(context.Background(), []float32{1, 0, 0}, sparseQuery, 2, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	assert.Equal(t, "doc1", results[0].ID, "InvertedIndex must be restored: sparse boost must elevate doc1")
@@ -570,10 +571,10 @@ func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
 	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, core.CosineSimilarity, hnsw.CosineDistanceFloat32, 16, 20, nil, nil)
 
 	// Insert with sparse data — WAL entries carry the full SparseVector.
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{10.0},
 	}, nil))
-	require.NoError(t, idx.Insert("doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
 
 	// Simulate crash: close WAL without saving a snapshot.
 	require.NoError(t, wal.Close())
@@ -593,7 +594,7 @@ func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
 	// Sparse query on term 10 must rank doc1 first — proving the InvertedIndex
 	// was rebuilt from the SparseVector fields in the replayed WAL entries.
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
-	results, err := recovered.Search([]float32{1, 0, 0}, sparseQuery, 2, nil)
+	results, err := recovered.Search(context.Background(), []float32{1, 0, 0}, sparseQuery, 2, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	assert.Equal(t, "doc1", results[0].ID, "InvertedIndex must be rebuilt from WAL sparse vectors")
@@ -607,46 +608,46 @@ func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
 func TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
-	require.NoError(t, idx.Insert("doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{
+	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{}, map[string]any{
 		"label":  "alpha",
 		"count":  42,
 		"score":  3.14,
 		"active": true,
 	}))
-	require.NoError(t, idx.Insert("doc2", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{
+	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0, 1, 0}, core.SparseVector{}, map[string]any{
 		"label":  "beta",
 		"count":  99,
 		"active": false,
 	}))
 
 	path := filepath.Join(t.TempDir(), "hnsw_meta.bin")
-	require.NoError(t, idx.SaveToFile(path))
+	require.NoError(t, idx.SaveToFile(context.Background(), path))
 
 	idx2 := newTestHNSWIndex(t)
-	require.NoError(t, idx2.LoadFromFile(path))
+	require.NoError(t, idx2.LoadFromFile(context.Background(), path))
 	require.Equal(t, 2, idx2.Len())
 
 	// String filter must survive GOB round-trip verbatim.
-	results, err := idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"label": "alpha"})
+	results, err := idx2.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"label": "alpha"})
 	require.NoError(t, err)
 	require.Len(t, results, 1, "string filter must work after GOB round-trip")
 	assert.Equal(t, "doc1", results[0].ID)
 
 	// Numeric filter: normalise() converts int/float64 to the same key, so 42 matches
 	// regardless of whether GOB preserves the exact int type or widens to int64/float64.
-	results, err = idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"count": 42})
+	results, err = idx2.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"count": 42})
 	require.NoError(t, err)
 	require.Len(t, results, 1, "numeric filter must work after GOB round-trip")
 	assert.Equal(t, "doc1", results[0].ID)
 
 	// Bool filter must survive GOB round-trip.
-	results, err = idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"active": true})
+	results, err = idx2.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"active": true})
 	require.NoError(t, err)
 	require.Len(t, results, 1, "bool filter must work after GOB round-trip")
 	assert.Equal(t, "doc1", results[0].ID)
 
 	// Float filter.
-	results, err = idx2.Search([]float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"score": 3.14})
+	results, err = idx2.Search(context.Background(), []float32{1, 0, 0}, core.SparseVector{}, 2, map[string]any{"score": 3.14})
 	require.NoError(t, err)
 	require.Len(t, results, 1, "float filter must work after GOB round-trip")
 	assert.Equal(t, "doc1", results[0].ID)

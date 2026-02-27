@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -134,7 +135,7 @@ func TestInsert_Variations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := newTestIndex(t)
 
-			err := idx.Insert(tt.id, tt.vector, tt.sparse, tt.metadata)
+			err := idx.Insert(context.Background(), tt.id, tt.vector, tt.sparse, tt.metadata)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -153,7 +154,7 @@ func TestInsert_Overwrite(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// Initial insert
-	err := idx.Insert("vec1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)
+	err := idx.Insert(context.Background(), "vec1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)
 	require.NoError(t, err)
 
 	internalID, _ := idx.IDMapper.ToUint32ID("vec1")
@@ -163,7 +164,7 @@ func TestInsert_Overwrite(t *testing.T) {
 	// Overwrite with new vector and metadata
 	newVec := fixtures.Vec3dAlternate
 	newMeta := fixtures.MetaNested
-	err = idx.Insert("vec1", newVec, core.SparseVector{}, newMeta)
+	err = idx.Insert(context.Background(), "vec1", newVec, core.SparseVector{}, newMeta)
 	require.NoError(t, err)
 
 	assert.Len(t, idx.Store, 1, "Should still have 1 vector (overwritten)")
@@ -183,7 +184,7 @@ func TestInsert_Concurrency(t *testing.T) {
 			defer wg.Done()
 			id := fmt.Sprintf("vec%d", n)
 			vec := []float32{float32(n), float32(n * 2)}
-			_ = idx.Insert(id, vec, core.SparseVector{}, map[string]any{"n": n}) //nolint:errcheck // test concurrency
+			_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, map[string]any{"n": n}) //nolint:errcheck // test concurrency
 		}(i)
 	}
 
@@ -217,7 +218,7 @@ func TestSearch_Variations(t *testing.T) {
 		{
 			name: "single_vector",
 			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("vec1", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "vec1", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
 			},
 			query:       fixtures.Vec3dSimple,
 			sparseQuery: core.SparseVector{},
@@ -228,9 +229,9 @@ func TestSearch_Variations(t *testing.T) {
 		{
 			name: "multiple_vectors",
 			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-				_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-				_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
 			},
 			query:       fixtures.Vec3dSimple,
 			sparseQuery: core.SparseVector{},
@@ -241,9 +242,9 @@ func TestSearch_Variations(t *testing.T) {
 		{
 			name: "with_limit_2",
 			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-				_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-				_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
 			},
 			query:       fixtures.Vec3dSimple,
 			sparseQuery: core.SparseVector{},
@@ -254,9 +255,9 @@ func TestSearch_Variations(t *testing.T) {
 		{
 			name: "with_limit_0",
 			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-				_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-				_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
 			},
 			query:       fixtures.Vec3dSimple,
 			sparseQuery: core.SparseVector{},
@@ -271,7 +272,7 @@ func TestSearch_Variations(t *testing.T) {
 			idx := newTestIndex(t)
 			tt.setup(idx)
 
-			results, err := idx.Search(tt.query, tt.sparseQuery, tt.limit, tt.filters)
+			results, err := idx.Search(context.Background(), tt.query, tt.sparseQuery, tt.limit, tt.filters)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -287,17 +288,17 @@ func TestSearch_WithFilters(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// Insert vectors with filterable metadata
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"category": "A", "value": 10})    //nolint:errcheck // test setup
-	_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"category": "B", "value": 20}) //nolint:errcheck // test setup
-	_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, map[string]any{"category": "A", "value": 30})     //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"category": "A", "value": 10})    //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"category": "B", "value": 20}) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, map[string]any{"category": "A", "value": 30})     //nolint:errcheck // test setup
 
 	// Filter by category
-	results, err := idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 10, map[string]interface{}{"category": "A"})
+	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 10, map[string]interface{}{"category": "A"})
 	require.NoError(t, err)
 	assert.Len(t, results, 2, "Should find 2 vectors with category A")
 
 	// Filter by value
-	results, err = idx.Search(fixtures.Vec3dSimple, core.SparseVector{}, 10, map[string]interface{}{"value": 20})
+	results, err = idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 10, map[string]interface{}{"value": 20})
 	require.NoError(t, err)
 	assert.Len(t, results, 1, "Should find 1 vector with value 20")
 }
@@ -309,7 +310,7 @@ func TestSearch_Concurrency(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		id := fmt.Sprintf("vec%d", i)
 		vec := []float32{float32(i), float32(i * 2)}
-		_ = idx.Insert(id, vec, core.SparseVector{}, nil) //nolint:errcheck // test setup
+		_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test setup
 	}
 
 	query := []float32{5.0, 10.0}
@@ -321,7 +322,7 @@ func TestSearch_Concurrency(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = idx.Search(query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
+			_, _ = idx.Search(context.Background(), query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
 		}()
 	}
 
@@ -336,7 +337,7 @@ func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		id := fmt.Sprintf("initial%d", i)
 		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-		_ = idx.Insert(id, vec, core.SparseVector{}, nil) //nolint:errcheck // test setup
+		_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test setup
 	}
 
 	var wg sync.WaitGroup
@@ -348,7 +349,7 @@ func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
 		for i := 0; i < 20; i++ {
 			id := fmt.Sprintf("new%d", i)
 			vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-			_ = idx.Insert(id, vec, core.SparseVector{}, nil) //nolint:errcheck // test concurrency
+			_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test concurrency
 		}
 	}()
 
@@ -357,7 +358,7 @@ func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
 		defer wg.Done()
 		query := []float32{5.0, 10.0, 15.0}
 		for i := 0; i < 20; i++ {
-			_, _ = idx.Search(query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
+			_, _ = idx.Search(context.Background(), query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
 		}
 	}()
 
@@ -369,8 +370,8 @@ func TestDelete(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// Insert vectors
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-	_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
 	assert.Len(t, idx.Store, 2)
 
 	// Get the internal ID before deletion
@@ -378,7 +379,7 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Delete one vector
-	deleted, err := idx.Delete("v1")
+	deleted, err := idx.Delete(context.Background(), "v1")
 	require.NoError(t, err)
 	assert.True(t, deleted, "Delete should return true for successful deletion")
 	assert.Len(t, idx.Store, 1)
@@ -396,8 +397,8 @@ func TestClear(t *testing.T) {
 	idx := newTestIndex(t)
 
 	// Insert vectors
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-	_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
 	assert.Len(t, idx.Store, 2)
 
 	// Clear
@@ -409,12 +410,12 @@ func TestLen(t *testing.T) {
 	idx := newTestIndex(t)
 	assert.Equal(t, 0, idx.Len())
 
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
 	assert.Equal(t, 1, idx.Len())
 
-	_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
 	assert.Equal(t, 2, idx.Len())
 
-	_, _ = idx.Delete("v1") //nolint:errcheck // test setup
+	_, _ = idx.Delete(context.Background(), "v1") //nolint:errcheck // test setup
 	assert.Equal(t, 1, idx.Len())
 }

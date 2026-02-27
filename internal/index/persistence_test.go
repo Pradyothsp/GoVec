@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,9 +53,9 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				return newTestIndex(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
-				_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil)              //nolint:errcheck // test setup
-				_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)   //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil)              //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)   //nolint:errcheck // test setup
 			},
 			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				assert.Len(t, idx.Store, 3)
@@ -81,8 +82,8 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				return newTestIndex(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("large1", fixtures.Vec1536d, core.SparseVector{}, map[string]any{"size": 1536}) //nolint:errcheck // test setup
-				_ = idx.Insert("large2", fixtures.Vec4096d, core.SparseVector{}, map[string]any{"size": 4096}) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "large1", fixtures.Vec1536d, core.SparseVector{}, map[string]any{"size": 1536}) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "large2", fixtures.Vec4096d, core.SparseVector{}, map[string]any{"size": 4096}) //nolint:errcheck // test setup
 			},
 			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				assert.Len(t, idx.Store, 2)
@@ -104,10 +105,10 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				return newTestIndex(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("empty_vec", fixtures.VecEmpty, core.SparseVector{}, nil)                            //nolint:errcheck // test setup
-				_ = idx.Insert("special-chars_!@#", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
-				_ = idx.Insert("unicode-测试", fixtures.Vec3dAlternate, core.SparseVector{}, nil)                     //nolint:errcheck // test setup
-				_ = idx.Insert("spaces in id", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)        //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "empty_vec", fixtures.VecEmpty, core.SparseVector{}, nil)                            //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "special-chars_!@#", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "unicode-测试", fixtures.Vec3dAlternate, core.SparseVector{}, nil)                     //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "spaces in id", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)        //nolint:errcheck // test setup
 			},
 			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				assert.Len(t, idx.Store, 4)
@@ -127,9 +128,9 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				return newTestIndex(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("meta1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)    //nolint:errcheck // test setup
-				_ = idx.Insert("meta2", fixtures.Vec3dAlternate, core.SparseVector{}, fixtures.MetaNested) //nolint:errcheck // test setup
-				_ = idx.Insert("meta3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaComplex)    //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "meta1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)    //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "meta2", fixtures.Vec3dAlternate, core.SparseVector{}, fixtures.MetaNested) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "meta3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaComplex)    //nolint:errcheck // test setup
 			},
 			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				assert.Len(t, idx.Store, 3)
@@ -149,15 +150,15 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				return newTestIndexWithHybrid(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				_ = idx.Insert("doc1", fixtures.Vec3dSimple, fixtures.SparseBM25, map[string]any{ //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "doc1", fixtures.Vec3dSimple, fixtures.SparseBM25, map[string]any{ //nolint:errcheck // test setup
 					"title": "First Document",
 					"type":  "article",
 				})
-				_ = idx.Insert("doc2", fixtures.Vec3dAlternate, fixtures.SparseTfIdf, map[string]any{ //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "doc2", fixtures.Vec3dAlternate, fixtures.SparseTfIdf, map[string]any{ //nolint:errcheck // test setup
 					"title": "Second Document",
 					"type":  "article",
 				})
-				_ = idx.Insert("doc3", fixtures.Vec3dThird, fixtures.SparseLarge, map[string]any{ //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "doc3", fixtures.Vec3dThird, fixtures.SparseLarge, map[string]any{ //nolint:errcheck // test setup
 					"title": "Third Document",
 					"type":  "blog",
 				})
@@ -180,7 +181,7 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 
 			// Save to file
 			tmpFile := filepath.Join(t.TempDir(), "test.bin")
-			err := idx.SaveToFile(tmpFile)
+			err := idx.SaveToFile(context.Background(), tmpFile)
 			require.NoError(t, err, "SaveToFile should succeed")
 
 			// Verify file exists
@@ -189,7 +190,7 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 
 			// Load into new index
 			newIdx := tt.setup(t) // Use same setup (with/without hybrid)
-			err = newIdx.LoadFromFile(tmpFile)
+			err = newIdx.LoadFromFile(context.Background(), tmpFile)
 			require.NoError(t, err, "LoadFromFile should succeed")
 
 			// Validate
@@ -207,7 +208,7 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 func TestLoadFromFile_MissingFile(t *testing.T) {
 	idx := newTestIndex(t)
 
-	err := idx.LoadFromFile("/nonexistent/path/file.bin")
+	err := idx.LoadFromFile(context.Background(), "/nonexistent/path/file.bin")
 
 	// Should return nil error (graceful handling for missing files)
 	assert.NoError(t, err, "Missing file should be handled gracefully")
@@ -224,7 +225,7 @@ func TestLoadFromFile_CorruptedFile(t *testing.T) {
 	require.NoError(t, err)
 
 	idx := newTestIndex(t)
-	err = idx.LoadFromFile(tmpFile)
+	err = idx.LoadFromFile(context.Background(), tmpFile)
 
 	assert.Error(t, err, "Should return error for corrupted file")
 	assert.Contains(t, err.Error(), "failed to decode snapshot", "Error should mention decoding failure")
@@ -233,11 +234,11 @@ func TestLoadFromFile_CorruptedFile(t *testing.T) {
 // TestSaveToFile_InvalidPath verifies error handling for invalid paths
 func TestSaveToFile_InvalidPath(t *testing.T) {
 	idx := newTestIndex(t)
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
 
 	// Try to save to invalid directory
 	invalidPath := "/nonexistent/invalid/path/test.bin"
-	err := idx.SaveToFile(invalidPath)
+	err := idx.SaveToFile(context.Background(), invalidPath)
 
 	assert.Error(t, err, "Should return error for invalid path")
 }
@@ -245,12 +246,12 @@ func TestSaveToFile_InvalidPath(t *testing.T) {
 // TestAtomicWrite_Verification verifies temp file cleanup after successful write
 func TestAtomicWrite_Verification(t *testing.T) {
 	idx := newTestIndex(t)
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
-	_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil)              //nolint:errcheck // test setup
-	_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)   //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil)              //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)   //nolint:errcheck // test setup
 
 	tmpFile := filepath.Join(t.TempDir(), "atomic_test.bin")
-	err := idx.SaveToFile(tmpFile)
+	err := idx.SaveToFile(context.Background(), tmpFile)
 	require.NoError(t, err)
 
 	// Verify main file exists
@@ -276,7 +277,7 @@ func TestConcurrentOperations(t *testing.T) {
 				for i := 0; i < 10; i++ {
 					id := fmt.Sprintf("concurrent_%d", i)
 					vec := []float32{float32(i), float32(i * 2)}
-					_ = idx.Insert(id, vec, core.SparseVector{}, nil) //nolint:errcheck // test concurrency
+					_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test concurrency
 				}
 			},
 		},
@@ -286,7 +287,7 @@ func TestConcurrentOperations(t *testing.T) {
 				defer wg.Done()
 				query := []float32{1.0, 2.0, 3.0}
 				for i := 0; i < 10; i++ {
-					_, _ = idx.Search(query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
+					_, _ = idx.Search(context.Background(), query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
 				}
 			},
 		},
@@ -295,9 +296,9 @@ func TestConcurrentOperations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := newTestIndex(t)
-			_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
-			_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil)              //nolint:errcheck // test setup
-			_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)   //nolint:errcheck // test setup
+			_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
+			_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil)              //nolint:errcheck // test setup
+			_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)   //nolint:errcheck // test setup
 
 			tmpFile := filepath.Join(t.TempDir(), "concurrent.bin")
 
@@ -311,19 +312,19 @@ func TestConcurrentOperations(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for i := 0; i < 5; i++ {
-					_ = idx.SaveToFile(tmpFile) //nolint:errcheck // test concurrency
+					_ = idx.SaveToFile(context.Background(), tmpFile) //nolint:errcheck // test concurrency
 				}
 			}()
 
 			wg.Wait()
 
 			// Verify final save works
-			err := idx.SaveToFile(tmpFile)
+			err := idx.SaveToFile(context.Background(), tmpFile)
 			require.NoError(t, err)
 
 			// Verify load works
 			newIdx := newTestIndex(t)
-			err = newIdx.LoadFromFile(tmpFile)
+			err = newIdx.LoadFromFile(context.Background(), tmpFile)
 			require.NoError(t, err)
 			assert.NotEmpty(t, newIdx.Store, "Should have loaded some data")
 		})
@@ -351,16 +352,16 @@ func TestRoundTrip_ComplexMetadata(t *testing.T) {
 		"nil_value": nil,
 	}
 
-	err := idx.Insert("complex", fixtures.Vec3dSimple, core.SparseVector{}, complexMeta)
+	err := idx.Insert(context.Background(), "complex", fixtures.Vec3dSimple, core.SparseVector{}, complexMeta)
 	require.NoError(t, err)
 
 	// Save and load
 	tmpFile := filepath.Join(t.TempDir(), "complex_meta.bin")
-	err = idx.SaveToFile(tmpFile)
+	err = idx.SaveToFile(context.Background(), tmpFile)
 	require.NoError(t, err)
 
 	newIdx := newTestIndex(t)
-	err = newIdx.LoadFromFile(tmpFile)
+	err = newIdx.LoadFromFile(context.Background(), tmpFile)
 	require.NoError(t, err)
 
 	// Verify complex metadata is preserved
@@ -385,11 +386,11 @@ func TestVersionMismatch(t *testing.T) {
 			setup: func(t *testing.T, path string) {
 				// Create a V1 snapshot (no IDMapper, no InvertedIndex)
 				idx := newTestIndex(t)
-				_ = idx.Insert("v1_test", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "v1_test", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
 
 				// Manually create V1 format (would need to mock old format)
 				// For now, just save normally - in reality would need old serialization
-				_ = idx.SaveToFile(path) //nolint:errcheck // test setup
+				_ = idx.SaveToFile(context.Background(), path) //nolint:errcheck // test setup
 			},
 			expectError: false, // Should load successfully
 		},
@@ -401,7 +402,7 @@ func TestVersionMismatch(t *testing.T) {
 			tt.setup(t, tmpFile)
 
 			idx := newTestIndex(t)
-			err := idx.LoadFromFile(tmpFile)
+			err := idx.LoadFromFile(context.Background(), tmpFile)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -422,7 +423,7 @@ func TestIDMapper_Persistence(t *testing.T) {
 	// Insert vectors with string IDs
 	testIDs := []string{"id-1", "id-2", "id-3", "special!@#", "unicode-测试"}
 	for _, id := range testIDs {
-		err := idx.Insert(id, fixtures.Vec3dSimple, core.SparseVector{}, nil)
+		err := idx.Insert(context.Background(), id, fixtures.Vec3dSimple, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -432,11 +433,11 @@ func TestIDMapper_Persistence(t *testing.T) {
 
 	// Save and load
 	tmpFile := filepath.Join(t.TempDir(), "idmapper_test.bin")
-	err := idx.SaveToFile(tmpFile)
+	err := idx.SaveToFile(context.Background(), tmpFile)
 	require.NoError(t, err)
 
 	newIdx := newTestIndex(t)
-	err = newIdx.LoadFromFile(tmpFile)
+	err = newIdx.LoadFromFile(context.Background(), tmpFile)
 	require.NoError(t, err)
 
 	// Verify count and nextID are preserved

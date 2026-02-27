@@ -26,7 +26,7 @@ func NewGoVecServer(engine index.Engine, dataPath string) *GoVecServer {
 }
 
 // Insert handles a single vector insert.
-func (s *GoVecServer) Insert(_ context.Context, req *pb.InsertRequest) (*pb.InsertResponse, error) {
+func (s *GoVecServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.InsertResponse, error) {
 	if req.Id == "" {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
@@ -38,7 +38,7 @@ func (s *GoVecServer) Insert(_ context.Context, req *pb.InsertRequest) (*pb.Inse
 		return nil, err
 	}
 	meta := convert.ProtoToMeta(req.Metadata)
-	if err := s.engine.Insert(req.Id, req.Vector, sparse, meta); err != nil {
+	if err := s.engine.Insert(ctx, req.Id, req.Vector, sparse, meta); err != nil {
 		return nil, status.Errorf(codes.Internal, "insert failed: %v", err)
 	}
 	return &pb.InsertResponse{Status: "ok"}, nil
@@ -46,6 +46,7 @@ func (s *GoVecServer) Insert(_ context.Context, req *pb.InsertRequest) (*pb.Inse
 
 // BatchInsert handles a client-streaming batch of insert requests.
 func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) error {
+	ctx := stream.Context()
 	var insertedCount int32
 	var batchErrors []*pb.BatchError
 
@@ -64,7 +65,7 @@ func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) erro
 			continue
 		}
 		meta := convert.ProtoToMeta(req.Metadata)
-		if err := s.engine.Insert(req.Id, req.Vector, sparse, meta); err != nil {
+		if err := s.engine.Insert(ctx, req.Id, req.Vector, sparse, meta); err != nil {
 			batchErrors = append(batchErrors, &pb.BatchError{Id: req.Id, Error: err.Error()})
 			continue
 		}
@@ -78,7 +79,7 @@ func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) erro
 }
 
 // Search finds the k nearest neighbors to the query vector.
-func (s *GoVecServer) Search(_ context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
+func (s *GoVecServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
 	if len(req.QueryVector) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "query_vector is required")
 	}
@@ -90,7 +91,7 @@ func (s *GoVecServer) Search(_ context.Context, req *pb.SearchRequest) (*pb.Sear
 		return nil, err
 	}
 	filters := convert.ProtoToMeta(req.Filters)
-	results, err := s.engine.Search(req.QueryVector, sparse, int(req.K), filters)
+	results, err := s.engine.Search(ctx, req.QueryVector, sparse, int(req.K), filters)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "search failed: %v", err)
 	}
@@ -98,8 +99,8 @@ func (s *GoVecServer) Search(_ context.Context, req *pb.SearchRequest) (*pb.Sear
 }
 
 // Delete removes a vector by ID.
-func (s *GoVecServer) Delete(_ context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
-	found, err := s.engine.Delete(req.Id)
+func (s *GoVecServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
+	found, err := s.engine.Delete(ctx, req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "delete failed: %v", err)
 	}
@@ -127,8 +128,8 @@ func (s *GoVecServer) Info(_ context.Context, _ *pb.InfoRequest) (*pb.InfoRespon
 }
 
 // Flush persists the current index snapshot to disk.
-func (s *GoVecServer) Flush(_ context.Context, _ *pb.FlushRequest) (*pb.FlushResponse, error) {
-	if err := s.engine.SaveToFile(s.dataPath); err != nil {
+func (s *GoVecServer) Flush(ctx context.Context, _ *pb.FlushRequest) (*pb.FlushResponse, error) {
+	if err := s.engine.SaveToFile(ctx, s.dataPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "flush failed: %v", err)
 	}
 	return &pb.FlushResponse{Status: "ok"}, nil

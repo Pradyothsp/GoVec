@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"runtime"
@@ -104,7 +105,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 
 	for i, vec := range vectors {
 		start := time.Now()
-		if err := engine.Insert(fmt.Sprintf("vec%d", i), vec, core.SparseVector{}, nil); err != nil {
+		if err := engine.Insert(context.Background(), fmt.Sprintf("vec%d", i), vec, core.SparseVector{}, nil); err != nil {
 			b.Fatalf("Insert failed: %v", err)
 		}
 		insertLatencies[i] = time.Since(start)
@@ -119,7 +120,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 
 	for i, query := range queries {
 		start := time.Now()
-		if _, err := engine.Search(query, core.SparseVector{}, topK, nil); err != nil {
+		if _, err := engine.Search(context.Background(), query, core.SparseVector{}, topK, nil); err != nil {
 			b.Fatalf("Search failed: %v", err)
 		}
 		searchLatencies[i] = time.Since(start)
@@ -149,7 +150,7 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 	// For search metrics, we'd need to measure separately
 	runtime.ReadMemStats(&memStatsBefore)
 	for _, query := range queries[:10] { // Sample 10 searches
-		engine.Search(query, core.SparseVector{}, topK, nil)
+		engine.Search(context.Background(), query, core.SparseVector{}, topK, nil)
 	}
 	runtime.ReadMemStats(&memStatsAfter)
 	allocsPerSearch := (memStatsAfter.Mallocs - memStatsBefore.Mallocs) / 10
@@ -200,8 +201,8 @@ func BenchmarkQuantizationMetrics_Accuracy(b *testing.B) {
 	vectors := generateDiverseVectors(numVectors, vectorDim)
 	for i, vec := range vectors {
 		id := fmt.Sprintf("vec%d", i)
-		engineNone.Insert(id, vec, core.SparseVector{}, nil)
-		engineScalar.Insert(id, vec, core.SparseVector{
+		engineNone.Insert(context.Background(), id, vec, core.SparseVector{}, nil)
+		engineScalar.Insert(context.Background(), id, vec, core.SparseVector{
 
 			// Run queries and compare
 		}, nil)
@@ -219,8 +220,8 @@ func BenchmarkQuantizationMetrics_Accuracy(b *testing.B) {
 	)
 
 	for _, query := range queries {
-		resultsNone, _ := engineNone.Search(query, core.SparseVector{}, topK, nil)
-		resultsScalar, _ := engineScalar.Search(query, core.SparseVector{
+		resultsNone, _ := engineNone.Search(context.Background(), query, core.SparseVector{}, topK, nil)
+		resultsScalar, _ := engineScalar.Search(context.Background(), query, core.SparseVector{
 
 			// Calculate recall@K
 		}, topK, nil)
@@ -326,7 +327,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 	// Pre-populate with initial vectors
 	vectors := generateDiverseVectors(numVectors, vectorDim)
 	for i, vec := range vectors {
-		engine.Insert(fmt.Sprintf("initial%d", i), vec, core.SparseVector{
+		engine.Insert(context.Background(), fmt.Sprintf("initial%d", i), vec, core.SparseVector{
 
 			// Concurrent inserts
 		}, nil)
@@ -342,7 +343,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 			for i := 0; i < insertsPerWorker; i++ {
 				vec := generateDiverseVectors(1, vectorDim)[0]
 				id := fmt.Sprintf("worker%d_vec%d", workerID, i)
-				engine.Insert(id, vec, core.SparseVector{}, nil)
+				engine.Insert(context.Background(), id, vec, core.SparseVector{}, nil)
 			}
 		}(w)
 	}
@@ -360,7 +361,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 			defer wg.Done()
 			for i := 0; i < searchesPerWorker; i++ {
 				query := generateDiverseVectors(1, vectorDim)[0]
-				engine.Search(query, core.SparseVector{}, 10, nil)
+				engine.Search(context.Background(), query, core.SparseVector{}, 10, nil)
 			}
 		}()
 	}

@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -34,12 +35,12 @@ func TestNewEngine_NoneQuantization(t *testing.T) {
 
 	// Verify we can insert and search
 	vec := []float32{0.5, 0.5, 0.5}
-	err = engine.Insert("test1", vec, core.SparseVector{}, nil)
+	err = engine.Insert(context.Background(), "test1", vec, core.SparseVector{}, nil)
 	if err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
-	results, err := engine.Search(vec, core.SparseVector{}, 1, nil)
+	results, err := engine.Search(context.Background(), vec, core.SparseVector{}, 1, nil)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -79,12 +80,12 @@ func TestNewEngine_ScalarQuantization(t *testing.T) {
 
 	// Verify we can insert and search
 	vec := []float32{0.5, 0.5, 0.5}
-	err = engine.Insert("test1", vec, core.SparseVector{}, nil)
+	err = engine.Insert(context.Background(), "test1", vec, core.SparseVector{}, nil)
 	if err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
-	results, err := engine.Search(vec, core.SparseVector{}, 1, nil)
+	results, err := engine.Search(context.Background(), vec, core.SparseVector{}, 1, nil)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -189,10 +190,10 @@ func TestNewEngine_CompareQuantizationResults(t *testing.T) {
 	}
 
 	for _, tv := range testVectors {
-		if err := engineFloat.Insert(tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
+		if err := engineFloat.Insert(context.Background(), tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
 			t.Fatalf("Insert to engineFloat failed: %v", err)
 		}
-		if err := engineInt8.Insert(tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
+		if err := engineInt8.Insert(context.Background(), tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
 			t.Fatalf("Insert to engineInt8 failed: %v", err)
 		}
 	}
@@ -200,12 +201,12 @@ func TestNewEngine_CompareQuantizationResults(t *testing.T) {
 	// Search with same query
 	query := []float32{0.55, 0.25, 0.75}
 
-	resultsFloat, err := engineFloat.Search(query, core.SparseVector{}, 3, nil)
+	resultsFloat, err := engineFloat.Search(context.Background(), query, core.SparseVector{}, 3, nil)
 	if err != nil {
 		t.Fatalf("Search (float) failed: %v", err)
 	}
 
-	resultsInt8, err := engineInt8.Search(query, core.SparseVector{}, 3, nil)
+	resultsInt8, err := engineInt8.Search(context.Background(), query, core.SparseVector{}, 3, nil)
 	if err != nil {
 		t.Fatalf("Search (int8) failed: %v", err)
 	}

@@ -1,6 +1,10 @@
 package index
 
-import "github.com/Pradyothsp/govec/internal/core"
+import (
+	"context"
+
+	"github.com/Pradyothsp/govec/internal/core"
+)
 
 // EngineInfo holds static and dynamic configuration details about the engine.
 type EngineInfo struct {
@@ -15,19 +19,19 @@ type EngineInfo struct {
 // regardless of the underlying quantization method.
 type Engine interface {
 	// Insert adds or updates a vector with the given ID, optional sparse vector, and metadata
-	Insert(id string, vec []float32, sparse core.SparseVector, meta map[string]interface{}) error
+	Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]interface{}) error
 
 	// Search finds the k nearest neighbors to the query vector (with optional sparse query for hybrid search)
-	Search(query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error)
+	Search(ctx context.Context, query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error)
 
 	// Delete removes a vector by ID
-	Delete(id string) (bool, error)
+	Delete(ctx context.Context, id string) (bool, error)
 
 	// SaveToFile persists the index to disk
-	SaveToFile(path string) error
+	SaveToFile(ctx context.Context, path string) error
 
 	// LoadFromFile loads the index from disk
-	LoadFromFile(path string) error
+	LoadFromFile(ctx context.Context, path string) error
 
 	// ReplayWAL replays the write-ahead log to recover uncommitted changes
 	ReplayWAL(path string) error

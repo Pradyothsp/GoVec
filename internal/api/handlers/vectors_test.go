@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -244,7 +245,7 @@ func TestQuery_SuccessResponse(t *testing.T) {
 
 	// Pre-populate index
 	_, vec, meta := testutil.CreateTestVector("vec1", 3)
-	_ = index.Insert("vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
+	_ = index.Insert(context.Background(), "vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
 
 	router := gin.New()
 	router.POST("/query", handler.Search)
@@ -276,7 +277,7 @@ func TestDelete_SuccessResponse(t *testing.T) {
 
 	// Pre-populate index
 	_, vec, meta := testutil.CreateTestVector("vec1", 3)
-	_ = index.Insert("vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
+	_ = index.Insert(context.Background(), "vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
 
 	router := gin.New()
 	router.DELETE("/vectors/:id", handler.Delete) // Path parameter

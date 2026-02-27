@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -113,21 +114,21 @@ func TestHNSWScalarIntegration(t *testing.T) {
 func (s *hnswSuiteBase) TestHNSW_InsertSearchDelete_BasicFlow() {
 	vectors := generateTestVectors(5, 8)
 	for i, v := range vectors {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
 	s.Equal(5, s.engine.Len())
 
-	results, err := s.engine.Search(vectors[0], core.SparseVector{}, 1, nil)
+	results, err := s.engine.Search(context.Background(), vectors[0], core.SparseVector{}, 1, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 1)
 	s.Equal("v0", results[0].ID)
 
-	deleted, err := s.engine.Delete("v0")
+	deleted, err := s.engine.Delete(context.Background(), "v0")
 	s.Require().NoError(err)
 	s.True(deleted)
 	s.Equal(4, s.engine.Len())
 
-	results2, err := s.engine.Search(vectors[0], core.SparseVector{}, 5, nil)
+	results2, err := s.engine.Search(context.Background(), vectors[0], core.SparseVector{}, 5, nil)
 	s.Require().NoError(err)
 	for _, r := range results2 {
 		s.NotEqual("v0", r.ID, "deleted vector must not appear in search results")
@@ -138,15 +139,15 @@ func (s *hnswSuiteBase) TestHNSW_Insert_Overwrite_ViaEngine() {
 	v1 := []float32{1, 0, 0, 0, 0, 0, 0, 0}
 	v2 := []float32{0, 1, 0, 0, 0, 0, 0, 0}
 
-	s.Require().NoError(s.engine.Insert("doc1", v1, core.SparseVector{}, map[string]any{"version": "v1"}))
+	s.Require().NoError(s.engine.Insert(context.Background(), "doc1", v1, core.SparseVector{}, map[string]any{"version": "v1"}))
 	s.Equal(1, s.engine.Len())
 
 	// Overwrite same ID — count must stay at 1
-	s.Require().NoError(s.engine.Insert("doc1", v2, core.SparseVector{}, map[string]any{"version": "v2"}))
+	s.Require().NoError(s.engine.Insert(context.Background(), "doc1", v2, core.SparseVector{}, map[string]any{"version": "v2"}))
 	s.Equal(1, s.engine.Len(), "overwrite must not increase Len")
 
 	// Metadata must reflect the latest insert
-	results, err := s.engine.Search(v2, core.SparseVector{}, 1, nil)
+	results, err := s.engine.Search(context.Background(), v2, core.SparseVector{}, 1, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 1)
 	s.Equal("doc1", results[0].ID)
@@ -154,14 +155,14 @@ func (s *hnswSuiteBase) TestHNSW_Insert_Overwrite_ViaEngine() {
 }
 
 func (s *hnswSuiteBase) TestHNSW_Delete_NonExistentID() {
-	deleted, err := s.engine.Delete("ghost-id")
+	deleted, err := s.engine.Delete(context.Background(), "ghost-id")
 	s.Require().NoError(err, "deleting a non-existent ID must not error")
 	s.False(deleted, "must return false for missing ID")
 	s.Equal(0, s.engine.Len(), "Len must remain unchanged")
 }
 
 func (s *hnswSuiteBase) TestHNSW_Search_EmptyIndex_ReturnsNil() {
-	results, err := s.engine.Search([]float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, 5, nil)
+	results, err := s.engine.Search(context.Background(), []float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, 5, nil)
 	s.Require().NoError(err)
 	s.Nil(results, "empty index must return nil")
 }
@@ -179,11 +180,11 @@ func (s *hnswSuiteBase) TestHNSW_MetadataFilter_SelectiveCategory() {
 		if rareIndices[i] {
 			cat = "rare"
 		}
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{},
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{},
 			map[string]any{"category": cat}))
 	}
 
-	results, err := s.engine.Search(vectors[5], core.SparseVector{}, 10, map[string]any{"category": "rare"})
+	results, err := s.engine.Search(context.Background(), vectors[5], core.SparseVector{}, 10, map[string]any{"category": "rare"})
 	s.Require().NoError(err)
 	for _, r := range results {
 		s.Equal("rare", r.Meta["category"], "filter must exclude common-category docs")
@@ -194,11 +195,11 @@ func (s *hnswSuiteBase) TestHNSW_MetadataFilter_SelectiveCategory() {
 func (s *hnswSuiteBase) TestHNSW_MetadataFilter_NoMatchReturnsEmpty() {
 	vectors := generateTestVectors(5, 8)
 	for i, v := range vectors {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{},
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{},
 			map[string]any{"category": "common"}))
 	}
 
-	results, err := s.engine.Search(vectors[0], core.SparseVector{}, 5, map[string]any{"category": "nonexistent"})
+	results, err := s.engine.Search(context.Background(), vectors[0], core.SparseVector{}, 5, map[string]any{"category": "nonexistent"})
 	s.Require().NoError(err)
 	s.Nil(results, "filter matching nothing must return nil (short-circuit)")
 }
@@ -219,12 +220,12 @@ func (s *hnswSuiteBase) TestHNSW_MetadataFilter_MultipleFields() {
 		{"v5", []float32{0.8, 0.2, 0, 0, 0, 0, 0, 0}, "A", "high"},
 	}
 	for _, d := range docs {
-		s.Require().NoError(s.engine.Insert(d.id, d.vec, core.SparseVector{},
+		s.Require().NoError(s.engine.Insert(context.Background(), d.id, d.vec, core.SparseVector{},
 			map[string]any{"type": d.docType, "priority": d.priority}))
 	}
 
 	// Filter on both fields: type=A AND priority=high → v0, v1, v5
-	results, err := s.engine.Search(
+	results, err := s.engine.Search(context.Background(),
 		[]float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, 10,
 		map[string]any{"type": "A", "priority": "high"},
 	)
@@ -244,15 +245,15 @@ func (s *hnswSuiteBase) TestHNSW_Persistence_SaveAndLoad() {
 	query := []float32{1, 0, 0, 0, 0, 0, 0, 0}
 	vectors := generateTestVectors(10, 8)
 	for i, v := range vectors {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
 
-	before, err := s.engine.Search(query, core.SparseVector{}, 1, nil)
+	before, err := s.engine.Search(context.Background(), query, core.SparseVector{}, 1, nil)
 	s.Require().NoError(err)
 	s.Require().Len(before, 1)
 	expectedTopID := before[0].ID
 
-	s.Require().NoError(s.engine.SaveToFile(s.snapPath))
+	s.Require().NoError(s.engine.SaveToFile(context.Background(), s.snapPath))
 
 	// Atomic rename must have cleaned up the .tmp file
 	_, statErr := os.Stat(s.snapPath + ".tmp")
@@ -263,10 +264,10 @@ func (s *hnswSuiteBase) TestHNSW_Persistence_SaveAndLoad() {
 	freshEngine, freshWal := newHNSWEngine(s.T(), freshDir, s.quant)
 	defer freshWal.Close() //nolint:errcheck // test cleanup
 
-	s.Require().NoError(freshEngine.LoadFromFile(s.snapPath))
+	s.Require().NoError(freshEngine.LoadFromFile(context.Background(), s.snapPath))
 	s.Equal(10, freshEngine.Len())
 
-	after, err := freshEngine.Search(query, core.SparseVector{}, 1, nil)
+	after, err := freshEngine.Search(context.Background(), query, core.SparseVector{}, 1, nil)
 	s.Require().NoError(err)
 	s.Require().Len(after, 1)
 	s.Equal(expectedTopID, after[0].ID, "top result must be the same after reload")
@@ -279,22 +280,22 @@ func (s *hnswSuiteBase) TestHNSW_Persistence_MetadataRestoredAfterLoad() {
 		if i%2 != 0 {
 			parity = "odd"
 		}
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{},
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{},
 			map[string]any{"parity": parity}))
 	}
 
-	s.Require().NoError(s.engine.SaveToFile(s.snapPath))
+	s.Require().NoError(s.engine.SaveToFile(context.Background(), s.snapPath))
 
 	// Load into fresh engine — rebuildMetaIndex() is exercised during LoadFromFile
 	freshDir := s.T().TempDir()
 	freshEngine, freshWal := newHNSWEngine(s.T(), freshDir, s.quant)
 	defer freshWal.Close() //nolint:errcheck // test cleanup
 
-	s.Require().NoError(freshEngine.LoadFromFile(s.snapPath))
+	s.Require().NoError(freshEngine.LoadFromFile(context.Background(), s.snapPath))
 	s.Equal(10, freshEngine.Len())
 
 	// Filtered search must work, proving metaIndex was rebuilt from the loaded metadata
-	results, err := freshEngine.Search(vectors[0], core.SparseVector{}, 10, map[string]any{"parity": "even"})
+	results, err := freshEngine.Search(context.Background(), vectors[0], core.SparseVector{}, 10, map[string]any{"parity": "even"})
 	s.Require().NoError(err)
 	for _, r := range results {
 		s.Equal("even", r.Meta["parity"], "metadata filter must work after reload (metaIndex rebuilt)")
@@ -302,8 +303,8 @@ func (s *hnswSuiteBase) TestHNSW_Persistence_MetadataRestoredAfterLoad() {
 }
 
 func (s *hnswSuiteBase) TestHNSW_Persistence_QuantizationMismatchError() {
-	s.Require().NoError(s.engine.Insert("v1", []float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, nil))
-	s.Require().NoError(s.engine.SaveToFile(s.snapPath))
+	s.Require().NoError(s.engine.Insert(context.Background(), "v1", []float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, nil))
+	s.Require().NoError(s.engine.SaveToFile(context.Background(), s.snapPath))
 
 	oppositeQuant := config.QuantizationScalar
 	if s.quant == config.QuantizationScalar {
@@ -314,7 +315,7 @@ func (s *hnswSuiteBase) TestHNSW_Persistence_QuantizationMismatchError() {
 	oppositeEngine, oppositeWal := newHNSWEngine(s.T(), oppDir, oppositeQuant)
 	defer oppositeWal.Close() //nolint:errcheck // test cleanup
 
-	err := oppositeEngine.LoadFromFile(s.snapPath)
+	err := oppositeEngine.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().Error(err, "loading with mismatched quantization must return an error")
 	s.Contains(err.Error(), "quantization", "error must mention quantization mismatch")
 }
@@ -326,7 +327,7 @@ func (s *hnswSuiteBase) TestHNSW_Persistence_QuantizationMismatchError() {
 func (s *hnswSuiteBase) TestHNSW_WALRecovery_CrashAfterInserts() {
 	vectors := generateTestVectors(10, 8)
 	for i, v := range vectors {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
 
 	// Simulate crash: close WAL without saving snapshot
@@ -339,7 +340,7 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_CrashAfterInserts() {
 	defer recoveryWal.Close() //nolint:errcheck // test cleanup
 
 	// No snapshot was written — LoadFromFile on missing path is a no-op
-	s.Require().NoError(recoveryEngine.LoadFromFile(s.snapPath))
+	s.Require().NoError(recoveryEngine.LoadFromFile(context.Background(), s.snapPath))
 	s.Equal(0, recoveryEngine.Len(), "index is empty before WAL replay")
 
 	s.Require().NoError(recoveryEngine.ReplayWAL(s.walPath))
@@ -350,14 +351,14 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_SnapshotPlusWAL() {
 	// Insert 20 vectors, then checkpoint (SaveToFile clears the WAL)
 	base := generateTestVectors(20, 8)
 	for i, v := range base {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("base%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("base%d", i), v, core.SparseVector{}, nil))
 	}
-	s.Require().NoError(s.engine.SaveToFile(s.snapPath)) // clears WAL internally
+	s.Require().NoError(s.engine.SaveToFile(context.Background(), s.snapPath)) // clears WAL internally
 
 	// Insert 5 more — these go only to WAL (post-checkpoint)
 	extra := generateTestVectors(5, 8)
 	for i, v := range extra {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("extra%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("extra%d", i), v, core.SparseVector{}, nil))
 	}
 
 	// Simulate crash
@@ -369,7 +370,7 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_SnapshotPlusWAL() {
 	recoveryEngine, recoveryWal := newHNSWEngine(s.T(), recoveryDir, s.quant)
 	defer recoveryWal.Close() //nolint:errcheck // test cleanup
 
-	s.Require().NoError(recoveryEngine.LoadFromFile(s.snapPath))
+	s.Require().NoError(recoveryEngine.LoadFromFile(context.Background(), s.snapPath))
 	s.Equal(20, recoveryEngine.Len(), "20 vectors loaded from snapshot")
 
 	s.Require().NoError(recoveryEngine.ReplayWAL(s.walPath))
@@ -381,11 +382,11 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_DeleteIsPreserved() {
 	v2 := []float32{0, 1, 0, 0, 0, 0, 0, 0}
 	v3 := []float32{0, 0, 1, 0, 0, 0, 0, 0}
 
-	s.Require().NoError(s.engine.Insert("v1", v1, core.SparseVector{}, nil))
-	s.Require().NoError(s.engine.Insert("v2", v2, core.SparseVector{}, nil))
-	s.Require().NoError(s.engine.Insert("v3", v3, core.SparseVector{}, nil))
+	s.Require().NoError(s.engine.Insert(context.Background(), "v1", v1, core.SparseVector{}, nil))
+	s.Require().NoError(s.engine.Insert(context.Background(), "v2", v2, core.SparseVector{}, nil))
+	s.Require().NoError(s.engine.Insert(context.Background(), "v3", v3, core.SparseVector{}, nil))
 
-	deleted, err := s.engine.Delete("v2")
+	deleted, err := s.engine.Delete(context.Background(), "v2")
 	s.Require().NoError(err)
 	s.True(deleted)
 
@@ -400,7 +401,7 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_DeleteIsPreserved() {
 	s.Require().NoError(recoveryEngine.ReplayWAL(s.walPath))
 	s.Equal(2, recoveryEngine.Len(), "v2 was deleted in WAL; only v1 and v3 must survive")
 
-	results, err := recoveryEngine.Search(v2, core.SparseVector{}, 5, nil)
+	results, err := recoveryEngine.Search(context.Background(), v2, core.SparseVector{}, 5, nil)
 	s.Require().NoError(err)
 	for _, r := range results {
 		s.NotEqual("v2", r.ID, "deleted vector must not appear after WAL replay")
@@ -410,7 +411,7 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_DeleteIsPreserved() {
 func (s *hnswSuiteBase) TestHNSW_WALRecovery_CorruptWALSkipsEntry() {
 	vectors := generateTestVectors(5, 8)
 	for i, v := range vectors {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
 
 	// Close WAL to flush writes, then append a corrupt JSON line
@@ -447,18 +448,18 @@ func (s *HNSWScalarIntegrationSuite) TestHNSW_Scalar_SearchAccuracy_VsFloat32() 
 
 	for i, v := range vectors {
 		id := fmt.Sprintf("v%d", i)
-		s.Require().NoError(s.engine.Insert(id, v, core.SparseVector{}, nil))
-		s.Require().NoError(float32Engine.Insert(id, v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), id, v, core.SparseVector{}, nil))
+		s.Require().NoError(float32Engine.Insert(context.Background(), id, v, core.SparseVector{}, nil))
 	}
 
 	query := vectors[0]
 	topK := 3
 
-	scalarResults, err := s.engine.Search(query, core.SparseVector{}, topK, nil)
+	scalarResults, err := s.engine.Search(context.Background(), query, core.SparseVector{}, topK, nil)
 	s.Require().NoError(err)
 	s.Require().Len(scalarResults, topK)
 
-	float32Results, err := float32Engine.Search(query, core.SparseVector{}, topK, nil)
+	float32Results, err := float32Engine.Search(context.Background(), query, core.SparseVector{}, topK, nil)
 	s.Require().NoError(err)
 	s.Require().Len(float32Results, topK)
 
@@ -505,15 +506,15 @@ func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
 	s.Require().NoError(err)
 
 	// doc1: strong dense AND strong sparse on token 10 → must rank first in hybrid search
-	s.Require().NoError(engine.Insert("doc1", []float32{1, 0, 0, 0}, core.SparseVector{
+	s.Require().NoError(engine.Insert(context.Background(), "doc1", []float32{1, 0, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{5.0},
 	}, nil))
 	// doc2: slightly weaker dense, no sparse
-	s.Require().NoError(engine.Insert("doc2", []float32{0.9, 0.1, 0, 0}, core.SparseVector{}, nil))
+	s.Require().NoError(engine.Insert(context.Background(), "doc2", []float32{0.9, 0.1, 0, 0}, core.SparseVector{}, nil))
 	// doc3: orthogonal, no sparse
-	s.Require().NoError(engine.Insert("doc3", []float32{0, 1, 0, 0}, core.SparseVector{}, nil))
+	s.Require().NoError(engine.Insert(context.Background(), "doc3", []float32{0, 1, 0, 0}, core.SparseVector{}, nil))
 
-	s.Require().NoError(engine.SaveToFile(snapPath))
+	s.Require().NoError(engine.SaveToFile(context.Background(), snapPath))
 	s.Require().NoError(wal.Close())
 
 	// Load into fresh engine that also has hybrid search enabled
@@ -524,12 +525,12 @@ func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
 	recoveryEngine, err := index.NewEngine(cfg, config.StorageConfig{}, recoveryWal)
 	s.Require().NoError(err)
 
-	s.Require().NoError(recoveryEngine.LoadFromFile(snapPath))
+	s.Require().NoError(recoveryEngine.LoadFromFile(context.Background(), snapPath))
 	s.Equal(3, recoveryEngine.Len())
 
 	// Hybrid search: sparse query on token 10 should boost doc1 to the top
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{3.0}}
-	results, err := recoveryEngine.Search([]float32{1, 0, 0, 0}, sparseQuery, 3, nil)
+	results, err := recoveryEngine.Search(context.Background(), []float32{1, 0, 0, 0}, sparseQuery, 3, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 3)
 	s.Equal("doc1", results[0].ID,
@@ -556,11 +557,11 @@ func (s *hnswSuiteBase) TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex() 
 	s.Require().NoError(err)
 
 	// Insert with sparse vectors — these are written to WAL
-	s.Require().NoError(engine.Insert("doc1", []float32{1, 0, 0, 0}, core.SparseVector{
+	s.Require().NoError(engine.Insert(context.Background(), "doc1", []float32{1, 0, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{5.0},
 	}, nil))
-	s.Require().NoError(engine.Insert("doc2", []float32{0.9, 0.1, 0, 0}, core.SparseVector{}, nil))
-	s.Require().NoError(engine.Insert("doc3", []float32{0, 1, 0, 0}, core.SparseVector{}, nil))
+	s.Require().NoError(engine.Insert(context.Background(), "doc2", []float32{0.9, 0.1, 0, 0}, core.SparseVector{}, nil))
+	s.Require().NoError(engine.Insert(context.Background(), "doc3", []float32{0, 1, 0, 0}, core.SparseVector{}, nil))
 
 	// Simulate crash: close WAL without SaveToFile
 	s.Require().NoError(wal.Close())
@@ -579,7 +580,7 @@ func (s *hnswSuiteBase) TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex() 
 
 	// Hybrid search must work — InvertedIndex rebuilt by insertInternal during replay
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{3.0}}
-	results, err := recoveryEngine.Search([]float32{1, 0, 0, 0}, sparseQuery, 3, nil)
+	results, err := recoveryEngine.Search(context.Background(), []float32{1, 0, 0, 0}, sparseQuery, 3, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 3)
 	s.Equal("doc1", results[0].ID,
@@ -597,19 +598,19 @@ func (s *hnswSuiteBase) TestHNSW_Metadata_GOBRoundTrip_PreservesTypes() {
 		"count":  int(7),
 		"nested": map[string]any{"key": "value"},
 	}
-	s.Require().NoError(s.engine.Insert("doc1",
+	s.Require().NoError(s.engine.Insert(context.Background(), "doc1",
 		[]float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, meta))
 
-	s.Require().NoError(s.engine.SaveToFile(s.snapPath))
+	s.Require().NoError(s.engine.SaveToFile(context.Background(), s.snapPath))
 
 	freshDir := s.T().TempDir()
 	freshEngine, freshWal := newHNSWEngine(s.T(), freshDir, s.quant)
 	defer freshWal.Close() //nolint:errcheck // test cleanup
 
-	s.Require().NoError(freshEngine.LoadFromFile(s.snapPath))
+	s.Require().NoError(freshEngine.LoadFromFile(context.Background(), s.snapPath))
 	s.Equal(1, freshEngine.Len())
 
-	results, err := freshEngine.Search([]float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, 1, nil)
+	results, err := freshEngine.Search(context.Background(), []float32{1, 0, 0, 0, 0, 0, 0, 0}, core.SparseVector{}, 1, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 1)
 	loaded := results[0].Meta
@@ -638,9 +639,9 @@ func (s *HNSWScalarIntegrationSuite) TestHNSW_Scalar_PersistenceRoundTrip() {
 
 	// Save scalar snapshot
 	for i, v := range vectors {
-		s.Require().NoError(s.engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
-	s.Require().NoError(s.engine.SaveToFile(s.snapPath))
+	s.Require().NoError(s.engine.SaveToFile(context.Background(), s.snapPath))
 
 	// Build equivalent float32 snapshot
 	float32Dir := s.T().TempDir()
@@ -648,10 +649,10 @@ func (s *HNSWScalarIntegrationSuite) TestHNSW_Scalar_PersistenceRoundTrip() {
 	defer float32Wal.Close() //nolint:errcheck // test cleanup
 
 	for i, v := range vectors {
-		s.Require().NoError(float32Engine.Insert(fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
+		s.Require().NoError(float32Engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
 	float32SnapPath := float32Dir + "/float32.bin"
-	s.Require().NoError(float32Engine.SaveToFile(float32SnapPath))
+	s.Require().NoError(float32Engine.SaveToFile(context.Background(), float32SnapPath))
 
 	scalarInfo, err := os.Stat(s.snapPath)
 	s.Require().NoError(err)

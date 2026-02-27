@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -72,13 +73,13 @@ func (s *PersistenceIntegrationTestSuite) TestServerRestart_PreservesData() {
 	s.Assert().Len(s.index.Store, numVectors, "All vectors should be in memory")
 
 	// Phase 2: Save to disk (manual save simulating shutdown)
-	err := s.index.SaveToFile(storagePath)
+	err := s.index.SaveToFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should save to disk")
 	testutil.AssertFileExists(s.T(), storagePath)
 
 	// Phase 3: Simulate server restart - create new index and router
 	newIndex := testutil.NewTestIndex(s.T())
-	err = newIndex.LoadFromFile(storagePath)
+	err = newIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should load from disk")
 
 	newRouter := api.SetupRouter(newIndex, "", "")
@@ -139,7 +140,7 @@ func (s *PersistenceIntegrationTestSuite) TestGracefulShutdown_SavesData() {
 	}
 
 	// Simulate graceful shutdown (manual save)
-	err := s.index.SaveToFile(storagePath)
+	err := s.index.SaveToFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Graceful shutdown save should succeed")
 
 	// Verify file exists
@@ -147,7 +148,7 @@ func (s *PersistenceIntegrationTestSuite) TestGracefulShutdown_SavesData() {
 
 	// Restart and verify data
 	newIndex := testutil.NewTestIndex(s.T())
-	err = newIndex.LoadFromFile(storagePath)
+	err = newIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err)
 	s.Assert().Len(newIndex.Store, 5, "All vectors should be saved on graceful shutdown")
 }
@@ -161,18 +162,18 @@ func (s *PersistenceIntegrationTestSuite) TestRecoveryFromCrash_OnlyAutoSaveData
 
 	// Phase 1: Insert 10 vectors and auto-save
 	for i := 0; i < 10; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
+		s.index.Insert(context.Background(), fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
 
 			// Simulate auto-save
 		}, nil)
 	}
 
-	err := s.index.SaveToFile(storagePath)
+	err := s.index.SaveToFile(context.Background(), storagePath)
 	s.Require().NoError(err)
 
 	// Phase 2: Insert 5 more vectors (these won't be saved - simulating crash)
 	for i := 10; i < 15; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
+		s.index.Insert(context.Background(), fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
 	}
 
 	s.Assert().Len(s.index.Store, 15, "Should have 15 vectors in memory before crash")
@@ -182,7 +183,7 @@ func (s *PersistenceIntegrationTestSuite) TestRecoveryFromCrash_OnlyAutoSaveData
 
 	// Phase 4: Restart - load from last auto-save
 	recoveredIndex := testutil.NewTestIndex(s.T())
-	err = recoveredIndex.LoadFromFile(storagePath)
+	err = recoveredIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err)
 
 	// Phase 5: Verify only 10 vectors exist (last 5 lost due to crash)
@@ -218,7 +219,7 @@ func (s *PersistenceIntegrationTestSuite) TestConcurrentHTTPRequests_DuringSave(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := s.index.SaveToFile(storagePath)
+		err := s.index.SaveToFile(context.Background(), storagePath)
 		s.Assert().NoError(err, "Save should succeed during concurrent requests")
 	}()
 
@@ -264,7 +265,7 @@ func (s *PersistenceIntegrationTestSuite) TestCorruptedFile_StartsWithEmptyIndex
 
 	// Try to load
 	index := testutil.NewTestIndex(s.T())
-	err := index.LoadFromFile(storagePath)
+	err := index.LoadFromFile(context.Background(), storagePath)
 
 	s.Assert().Error(err, "Should fail to load corrupted file")
 	s.Assert().Empty(index.Store, "Index should remain empty after failed load")
@@ -296,7 +297,7 @@ func (s *PersistenceIntegrationTestSuite) TestPartialSave_AtomicWriteProtection(
 
 	// Phase 1: Save valid data
 	testutil.PopulateIndexWithVectors(s.index, 50)
-	err := s.index.SaveToFile(storagePath)
+	err := s.index.SaveToFile(context.Background(), storagePath)
 	s.Require().NoError(err)
 
 	// Verify main file exists and .tmp is cleaned up
@@ -305,7 +306,7 @@ func (s *PersistenceIntegrationTestSuite) TestPartialSave_AtomicWriteProtection(
 
 	// Phase 2: Load to verify atomic write succeeded
 	loadedIndex := testutil.NewTestIndex(s.T())
-	err = loadedIndex.LoadFromFile(storagePath)
+	err = loadedIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err)
 	s.Assert().Len(loadedIndex.Store, 50, "All vectors should be loaded")
 
@@ -337,18 +338,18 @@ func (s *PersistenceIntegrationTestSuite) TestLargeDataset_Persistence() {
 			"index":      i,
 			"dimensions": 128,
 		}
-		s.index.Insert(id, vec, core.SparseVector{
+		s.index.Insert(context.Background(), id, vec, core.SparseVector{
 
 			// Save
 		}, meta)
 	}
 
-	err := s.index.SaveToFile(storagePath)
+	err := s.index.SaveToFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should save large dataset")
 
 	// Load
 	loadedIndex := testutil.NewTestIndex(s.T())
-	err = loadedIndex.LoadFromFile(storagePath)
+	err = loadedIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should load large dataset")
 
 	s.Assert().Len(loadedIndex.Store, numVectors, "All 1000 vectors should be loaded")
@@ -371,12 +372,12 @@ func (s *PersistenceIntegrationTestSuite) TestEmptyIndex_Persistence() {
 
 	// Save empty index
 	emptyIndex := testutil.NewTestIndex(s.T())
-	err := emptyIndex.SaveToFile(storagePath)
+	err := emptyIndex.SaveToFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should save empty index")
 
 	// Load empty index
 	loadedIndex := testutil.NewTestIndex(s.T())
-	err = loadedIndex.LoadFromFile(storagePath)
+	err = loadedIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should load empty index")
 
 	s.Assert().Empty(loadedIndex.Store, "Loaded index should be empty")
@@ -391,7 +392,7 @@ func (s *PersistenceIntegrationTestSuite) TestAutoSave_Simulation() {
 
 	// Insert initial vectors
 	for i := 0; i < 5; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
+		s.index.Insert(context.Background(), fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
 
 			// Simulate auto-save ticker
 		}, nil)
@@ -409,7 +410,7 @@ func (s *PersistenceIntegrationTestSuite) TestAutoSave_Simulation() {
 		for {
 			select {
 			case <-ticker.C:
-				err := s.index.SaveToFile(storagePath)
+				err := s.index.SaveToFile(context.Background(), storagePath)
 				s.Assert().NoError(err, "Auto-save should succeed")
 				saveCount++
 				if saveCount >= 3 {
@@ -425,7 +426,7 @@ func (s *PersistenceIntegrationTestSuite) TestAutoSave_Simulation() {
 	// Insert more vectors while auto-save is running
 	time.Sleep(50 * time.Millisecond)
 	for i := 5; i < 10; i++ {
-		s.index.Insert(fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
+		s.index.Insert(context.Background(), fmt.Sprintf("vec%d", i), []float32{float32(i)}, core.SparseVector{
 
 			// Wait for auto-save to complete
 		}, nil)
@@ -435,7 +436,7 @@ func (s *PersistenceIntegrationTestSuite) TestAutoSave_Simulation() {
 
 	// Verify file was created and has latest data
 	loadedIndex := testutil.NewTestIndex(s.T())
-	err := loadedIndex.LoadFromFile(storagePath)
+	err := loadedIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err)
 	s.Assert().Len(loadedIndex.Store, 10, "Auto-save should have saved all vectors")
 }

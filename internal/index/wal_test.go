@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -117,7 +118,7 @@ func TestWriteEntry_Variations(t *testing.T) {
 			require.NoError(t, err)
 			defer wal.Close() //nolint:errcheck // test cleanup
 
-			err = wal.WriteEntry(&tt.entry)
+			err = wal.WriteEntry(context.Background(), &tt.entry)
 			require.NoError(t, err)
 
 			// Force flush
@@ -144,7 +145,7 @@ func TestWriteEntry_MultipleEntries(t *testing.T) {
 	}
 
 	for _, entry := range entries {
-		err := wal.WriteEntry(&entry)
+		err := wal.WriteEntry(context.Background(), &entry)
 		require.NoError(t, err)
 	}
 
@@ -165,7 +166,7 @@ func TestWAL_Clear(t *testing.T) {
 
 	// Write entry
 	entry := WALEntry{Action: WALActionInsert, ID: "test", Vector: fixtures.Vec3dSimple}
-	err = wal.WriteEntry(&entry)
+	err = wal.WriteEntry(context.Background(), &entry)
 	require.NoError(t, err)
 
 	// Clear
@@ -185,7 +186,7 @@ func TestWAL_Close(t *testing.T) {
 
 	// Write entry
 	entry := WALEntry{Action: WALActionInsert, ID: "test", Vector: fixtures.Vec3dSimple}
-	err = wal.WriteEntry(&entry)
+	err = wal.WriteEntry(context.Background(), &entry)
 	require.NoError(t, err)
 
 	// Close
@@ -216,7 +217,7 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 				ID:     string(rune('a' + n)),
 				Vector: []float32{float32(n), float32(n * 2)},
 			}
-			_ = wal.WriteEntry(&entry) //nolint:errcheck // test concurrency
+			_ = wal.WriteEntry(context.Background(), &entry) //nolint:errcheck // test concurrency
 		}(i)
 	}
 
@@ -266,7 +267,7 @@ func TestReplayWAL_Variations(t *testing.T) {
 					return err
 				}
 				defer wal.Close() //nolint:errcheck // test setup
-				return wal.WriteEntry(&WALEntry{
+				return wal.WriteEntry(context.Background(), &WALEntry{
 					Action: WALActionInsert,
 					ID:     "vec1",
 					Vector: fixtures.Vec3dSimple,
@@ -287,7 +288,7 @@ func TestReplayWAL_Variations(t *testing.T) {
 					return err
 				}
 				defer wal.Close() //nolint:errcheck // test setup
-				return wal.WriteEntry(&WALEntry{
+				return wal.WriteEntry(context.Background(), &WALEntry{
 					Action: WALActionDelete,
 					ID:     "nonexistent",
 				})
@@ -313,7 +314,7 @@ func TestReplayWAL_Variations(t *testing.T) {
 				}
 
 				for _, e := range entries {
-					if err := wal.WriteEntry(&e); err != nil {
+					if err := wal.WriteEntry(context.Background(), &e); err != nil {
 						return err
 					}
 				}
@@ -404,7 +405,7 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 	}
 
 	for _, e := range entries {
-		err := wal.WriteEntry(&e)
+		err := wal.WriteEntry(context.Background(), &e)
 		require.NoError(t, err)
 	}
 	_ = wal.Close() //nolint:errcheck // test cleanup
@@ -445,11 +446,11 @@ func TestWAL_Integration(t *testing.T) {
 	idx := newTestIndexWithWAL(t, wal)
 
 	// Insert data
-	_ = idx.Insert("v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)    //nolint:errcheck // test setup
-	_ = idx.Insert("v2", fixtures.Vec3dAlternate, core.SparseVector{}, fixtures.MetaNested) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)    //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, fixtures.MetaNested) //nolint:errcheck // test setup
 
 	// Save snapshot
-	err = idx.SaveToFile(snapshotPath)
+	err = idx.SaveToFile(context.Background(), snapshotPath)
 	require.NoError(t, err)
 
 	// Clear WAL after snapshot
@@ -457,13 +458,13 @@ func TestWAL_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Insert more data after snapshot
-	_ = idx.Insert("v3", fixtures.Vec3dThird, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil) //nolint:errcheck // test setup
 
 	_ = wal.Close() //nolint:errcheck // test cleanup
 
 	// Simulate crash recovery: Load snapshot + Replay WAL
 	newIdx := newTestIndex(t)
-	err = newIdx.LoadFromFile(snapshotPath)
+	err = newIdx.LoadFromFile(context.Background(), snapshotPath)
 	require.NoError(t, err)
 
 	err = newIdx.ReplayWAL(walPath)
