@@ -189,6 +189,7 @@ tasks:
     desc: Generate Go protobuf + gRPC stubs from proto/ into gen/
     cmds:
       - buf generate
+      - goimports -w gen/
     sources:
       - proto/**/*.proto
     generates:
@@ -235,6 +236,7 @@ tasks:
       - echo "==> Installing buf..."
       - task: install-buf
       - echo "==> Installing protoc plugins..."
-      - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-      - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+      - go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+      - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
+      - go install golang.org/x/tools/cmd/goimports@latest
       - echo "All tools installed."
