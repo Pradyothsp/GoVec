@@ -4,6 +4,9 @@ import (
 	"encoding/gob"
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
 )
@@ -39,6 +42,7 @@ type vectorNodeSnapshot struct {
 // When mmap is enabled (vectorStore != nil) it writes version 5 (no inline vectors).
 // Otherwise it writes the standard version 3 format.
 func (idx *VectorIndex[T]) SaveToFile(path string) error {
+	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -52,10 +56,21 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 		return fmt.Errorf("unknown vector type")
 	}
 
+	var err error
 	if idx.vectorStore != nil {
-		return idx.saveToFileMmap(path, quantType)
+		err = idx.saveToFileMmap(path, quantType)
+	} else {
+		err = idx.saveToFileHeap(path, quantType)
 	}
-	return idx.saveToFileHeap(path, quantType)
+
+	if err == nil {
+		log.Info().
+			Str("path", path).
+			Int("vectors", len(idx.Store)).
+			Dur("duration", time.Since(start)).
+			Msg("snapshot saved to disk")
+	}
+	return err
 }
 
 // saveToFileHeap writes the standard (heap-backed) v3 snapshot.
@@ -187,6 +202,7 @@ func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 // LoadFromFile reads the index from disk.
 // A missing file is not an error — the server starts with an empty index.
 func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
+	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -241,37 +257,45 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 
 	if header.Version == 5 {
 		// Mmap format: vectors live in the mmap store, not in the GOB stream.
-		return idx.loadFromFileMmap(decoder, &header)
-	}
+		err = idx.loadFromFileMmap(decoder, &header)
+	} else {
+		// Standard heap format (v3).
+		if err := decoder.Decode(&idx.Store); err != nil {
+			return fmt.Errorf("failed to decode store: %w", err)
+		}
 
-	// Standard heap format (v3).
-	if err := decoder.Decode(&idx.Store); err != nil {
-		return fmt.Errorf("failed to decode store: %w", err)
-	}
+		if idx.metaIndex != nil {
+			idx.metaIndex.Clear()
+			for internalID, node := range idx.Store {
+				idx.metaIndex.Add(internalID, node.Metadata)
+			}
+		}
 
-	if idx.metaIndex != nil {
-		idx.metaIndex.Clear()
-		for internalID, node := range idx.Store {
-			idx.metaIndex.Add(internalID, node.Metadata)
+		if header.Version == 2 && header.HybridSearchEnabled {
+			if idx.InvertedIndex != nil {
+				var loadedIndex map[uint32][]core.Posting
+				if err := decoder.Decode(&loadedIndex); err != nil {
+					return fmt.Errorf("failed to decode inverted index: %w", err)
+				}
+				idx.InvertedIndex = loadedIndex
+			} else {
+				var discarded map[uint32][]core.Posting
+				if err := decoder.Decode(&discarded); err != nil {
+					return fmt.Errorf("failed to skip inverted index: %w", err)
+				}
+			}
 		}
 	}
 
-	if header.Version == 2 && header.HybridSearchEnabled {
-		if idx.InvertedIndex != nil {
-			var loadedIndex map[uint32][]core.Posting
-			if err := decoder.Decode(&loadedIndex); err != nil {
-				return fmt.Errorf("failed to decode inverted index: %w", err)
-			}
-			idx.InvertedIndex = loadedIndex
-		} else {
-			var discarded map[uint32][]core.Posting
-			if err := decoder.Decode(&discarded); err != nil {
-				return fmt.Errorf("failed to skip inverted index: %w", err)
-			}
-		}
+	if err == nil {
+		log.Info().
+			Str("path", path).
+			Int("vectors", len(idx.Store)).
+			Dur("duration", time.Since(start)).
+			Msg("snapshot loaded from disk")
 	}
 
-	return nil
+	return err
 }
 
 // loadFromFileMmap reconstructs the Store from mmap-backed snapshots.

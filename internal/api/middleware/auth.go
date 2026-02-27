@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/api/response"
 )
@@ -24,6 +25,11 @@ func BearerAuth(apiKey string) gin.HandlerFunc {
 		// Secure Constant-Time Comparison
 		// subtle.ConstantTimeCompare returns 1 if they match, 0 if they don't.
 		if !found || subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
+			log.Warn().
+				Str("ip", c.ClientIP()).
+				Str("method", c.Request.Method).
+				Str("path", c.Request.URL.Path).
+				Msg("unauthorized access attempt")
 			response.Fail(c, http.StatusUnauthorized, "unauthorized")
 			c.Abort()
 			return

@@ -14,11 +14,25 @@ func RequestLogger() gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 
-		log.Info().
+		status := c.Writer.Status()
+		latency := time.Since(start)
+
+		event := log.Info()
+		if status >= 500 {
+			event = log.Error()
+		} else if status >= 400 {
+			event = log.Warn()
+		}
+
+		if len(c.Errors) > 0 {
+			event.Interface("errors", c.Errors.Errors())
+		}
+
+		event.
 			Str("method", c.Request.Method).
 			Str("path", c.Request.URL.Path).
-			Int("status", c.Writer.Status()).
-			Dur("latency_ms", time.Since(start)).
+			Int("status", status).
+			Dur("latency_ms", latency).
 			Str("ip", c.ClientIP()).
 			Msg("request")
 	}

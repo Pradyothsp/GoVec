@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/api/response"
 	"github.com/Pradyothsp/govec/internal/index"
@@ -63,6 +64,7 @@ func (h *SystemHandler) Info(c *gin.Context) {
 // @Router       /api/v1/admin/flush [post]
 func (h *SystemHandler) Flush(c *gin.Context) {
 	if err := h.Engine.SaveToFile(h.DataPath); err != nil {
+		log.Error().Err(err).Str("path", h.DataPath).Msg("failed to flush index to disk")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
