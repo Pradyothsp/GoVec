@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package govec.v1;
+
+option go_package = "github.com/Pradyothsp/govec/gen/govec/v1;govecv1";
+
+import "google/protobuf/struct.proto";
+
+message SparseVector {
+  repeated uint32 indices = 1 [packed = true];
+  repeated float  values  = 2 [packed = true];
+}
+
+message InsertRequest {
+  string id                               = 1;
+  repeated float vector                   = 2 [packed = true];
+  SparseVector sparse                     = 3;
+  map<string, google.protobuf.Value> metadata = 4;
+}
+
+message InsertResponse {
+  string status = 1;
+}
+
+message BatchInsertResponse {
+  int32             inserted_count = 1;
+  repeated BatchError errors       = 2;
+}
+
+message BatchError {
+  string id    = 1;
+  string error = 2;
+}
+
+message SearchRequest {
+  repeated float query_vector             = 1 [packed = true];
+  SparseVector   sparse_query             = 2;
+  int32          k                        = 3;
+  map<string, google.protobuf.Value> filters = 4;
+}
+
+message SearchResult {
+  string id                            = 1;
+  float  score                         = 2;
+  map<string, google.protobuf.Value> meta = 3;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+}
+
+message DeleteRequest {
+  string id = 1;
+}
+
+message DeleteResponse {
+  string status = 1;
+  string id     = 2;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  int32 vector_count = 1;
+}
+
+message InfoRequest {}
+
+message InfoResponse {
+  string quantization   = 1;
+  string index_type     = 2;
+  string distance_metric = 3;
+  int32  dimensions     = 4;
+  int32  vector_count   = 5;
+}
+
+message FlushRequest {}
+
+message FlushResponse {
+  string status = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+service GoVecService {
+  rpc Insert      (InsertRequest)        returns (InsertResponse);
+  rpc BatchInsert (stream InsertRequest) returns (BatchInsertResponse);
+  rpc Search      (SearchRequest)        returns (SearchResponse);
+  rpc Delete      (DeleteRequest)        returns (DeleteResponse);
+  rpc Stats       (StatsRequest)         returns (StatsResponse);
+  rpc Info        (InfoRequest)          returns (InfoResponse);
+  rpc Flush       (FlushRequest)         returns (FlushResponse);
+  rpc Health      (HealthRequest)        returns (HealthResponse);
+}
