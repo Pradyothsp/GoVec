@@ -45,11 +45,19 @@ type EngineConfig struct {
 	HnswEfSearch        int            `yaml:"hnsw_ef_search"`
 }
 
+// GRPCConfig holds gRPC server configuration.
+type GRPCConfig struct {
+	Enabled          bool `yaml:"enabled"`              // default: false
+	Port             int  `yaml:"port"`                 // default: 50051
+	MaxRecvMsgSizeMB int  `yaml:"max_recv_msg_size_mb"` // default: 64
+}
+
 // Config is the root configuration aggregate
 type Config struct {
 	Server  ServerConfig  `yaml:"server"`
 	Storage StorageConfig `yaml:"storage"`
 	Engine  EngineConfig  `yaml:"engine"`
+	GRPC    GRPCConfig    `yaml:"grpc"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -107,6 +115,11 @@ func DefaultConfig() *Config {
 			EnableMetadataIndex: false,
 			HnswM:               16,
 			HnswEfSearch:        20,
+		},
+		GRPC: GRPCConfig{
+			Enabled:          false,
+			Port:             50051,
+			MaxRecvMsgSizeMB: 64,
 		},
 	}
 }

@@ -79,7 +79,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(gofmt -l . | grep -v "^build/swagger" | grep -v "^gen/" || true)
           if [ -n "$unformatted" ]; then
             echo "The following files are not formatted:"
             echo "$unformatted"
@@ -91,3 +91,21 @@ jobs:
           go install github.com/swaggo/swag/cmd/swag@latest
           swag init -g cmd/server/main.go --output build/swagger
           git diff --exit-code build/swagger
+
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.66.0"
+
+      - name: Install protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Lint proto files
+        run: buf lint
+
+      - name: Check proto stubs are up to date
+        run: |
+          buf generate
+          git diff --exit-code gen/

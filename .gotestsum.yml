@@ -19,8 +19,10 @@ watch:
   dirs:
     - ./internal
     - ./cmd
+    - ./gen
   # Ignore patterns
   ignore:
     - "*.md"
+    - "*.proto"
     - ".git"
     - "vendor"

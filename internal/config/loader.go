@@ -150,4 +150,30 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_AUTO_SAVE_INTERVAL, using previous value")
 		}
 	}
+
+	// gRPC configuration
+	if val := os.Getenv("GOVEC_GRPC_ENABLED"); val != "" {
+		switch strings.ToLower(val) {
+		case "true":
+			cfg.GRPC.Enabled = true
+		case "false":
+			cfg.GRPC.Enabled = false
+		default:
+			log.Warn().Str("value", val).Msg("failed to parse GOVEC_GRPC_ENABLED, expected 'true' or 'false', using previous value")
+		}
+	}
+	if val := os.Getenv("GOVEC_GRPC_PORT"); val != "" {
+		if port, err := strconv.Atoi(val); err == nil {
+			cfg.GRPC.Port = port
+		} else {
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_GRPC_PORT, using previous value")
+		}
+	}
+	if val := os.Getenv("GOVEC_GRPC_MAX_RECV_MSG_SIZE_MB"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			cfg.GRPC.MaxRecvMsgSizeMB = n
+		} else {
+			log.Warn().Str("value", val).Err(err).Msg("failed to parse GOVEC_GRPC_MAX_RECV_MSG_SIZE_MB, using previous value")
+		}
+	}
 }

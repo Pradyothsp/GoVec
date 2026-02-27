@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec // G108: pprof only starts when cfg.Server.PprofEnabled is true; addr is localhost-bound
 	"os"
@@ -11,9 +13,11 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
 
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/config"
+	"github.com/Pradyothsp/govec/internal/grpcserver"
 	"github.com/Pradyothsp/govec/internal/index"
 )
 
@@ -79,6 +83,23 @@ func main() {
 	defer wal.Close() //nolint:errcheck // best-effort cleanup on shutdown
 
 	router := api.SetupRouter(engine, cfg.Server.APIKey, cfg.Storage.DataPath)
+
+	// Conditionally start gRPC server
+	var grpcSrv *grpc.Server
+	if cfg.GRPC.Enabled {
+		grpcSrv = grpcserver.SetupGRPCServer(engine, cfg.Server.APIKey, cfg.Storage.DataPath, cfg.GRPC.MaxRecvMsgSizeMB)
+		grpcAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.GRPC.Port)
+		lis, err := net.Listen("tcp", grpcAddr)
+		if err != nil {
+			log.Fatal().Err(err).Str("addr", grpcAddr).Msg("failed to listen for gRPC") //nolint:gocritic // exitAfterDefer: intentional fatal, consistent with rest of main
+		}
+		go func() {
+			log.Info().Str("addr", grpcAddr).Msg("gRPC server listening")
+			if err := grpcSrv.Serve(lis); err != nil {
+				log.Error().Err(err).Msg("gRPC server error")
+			}
+		}()
+	}
 
 	// RECOVERY SEQUENCE
 	// Step 1: Load the base snapshot from DataPath (GOB format)
@@ -163,6 +184,11 @@ func main() {
 		if err := debugSrv.Shutdown(ctx); err != nil {
 			log.Error().Err(err).Msg("pprof server forced to shutdown")
 		}
+	}
+
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
+		log.Info().Msg("gRPC server stopped")
 	}
 
 	log.Info().Msg("server stopped")

@@ -121,14 +121,15 @@ tasks:
     cmds:
       - govulncheck ./...
 
-  # Run all static checks (lint + vet + fmt + vuln)
+  # Run all static checks (lint + vet + fmt + vuln + proto:lint)
   check:
-    desc: Run all static checks (lint, vet, fmt, vuln)
+    desc: Run all static checks (lint, vet, fmt, vuln, proto)
     cmds:
       - task: vet
       - task: fmt:check
       - task: lint
       - task: vuln
+      - task: proto:lint
 
   # Build the project
   build:
@@ -166,11 +167,48 @@ tasks:
     status:
       - command -v gotestsum
 
+  # ── Code Generation ────────────────────────────────────────────────────────
+
+  # Generate all code artifacts (swagger docs + gRPC stubs)
+  gen:
+    desc: Run all code generators (swagger + proto)
+    cmds:
+      - task: gen:swagger
+      - task: gen:proto
+
   # Generate Swagger/OpenAPI documentation from annotations
-  swagger:
-    desc: Generate Swagger/OpenAPI documentation from annotations
+  gen:swagger:
+    aliases: [swagger]
+    desc: Generate Swagger/OpenAPI documentation from Go annotations
     cmds:
       - swag init -g cmd/server/main.go --output build/swagger
+
+  # Generate Go protobuf + gRPC stubs from proto/ into gen/
+  gen:proto:
+    aliases: [proto:gen]
+    desc: Generate Go protobuf + gRPC stubs from proto/ into gen/
+    cmds:
+      - buf generate
+    sources:
+      - proto/**/*.proto
+    generates:
+      - gen/**/*.go
+
+  # Lint proto files (validation, not generation — also called by 'check')
+  proto:lint:
+    desc: Lint proto files with buf
+    cmds:
+      - buf lint
+
+  # ── Tool Installation ───────────────────────────────────────────────────────
+
+  # Install buf CLI
+  install-buf:
+    desc: Install buf CLI for protobuf management
+    cmds:
+      - brew install bufbuild/buf/buf
+    status:
+      - command -v buf
 
   # Install swag CLI if not present
   install-swag:
@@ -182,7 +220,7 @@ tasks:
 
   # Install all development tools
   install-tools:
-    desc: Install all development tools (gotestsum, golangci-lint, govulncheck, swag)
+    desc: Install all development tools (gotestsum, golangci-lint, govulncheck, swag, buf)
     vars:
       GOLANGCI_LINT_VERSION: v2.9.0
     cmds:
@@ -194,4 +232,9 @@ tasks:
       - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin {{.GOLANGCI_LINT_VERSION}}
       - echo "==> Installing swag..."
       - go install github.com/swaggo/swag/cmd/swag@latest
+      - echo "==> Installing buf..."
+      - task: install-buf
+      - echo "==> Installing protoc plugins..."
+      - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+      - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
       - echo "All tools installed."
