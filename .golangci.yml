@@ -67,10 +67,11 @@ linters:
         text: "avoid package names that conflict"
 
     # Example code does not need production-level error handling
-    # Auto-generated swagger docs should not be linted
+    # Auto-generated code should not be linted
     paths:
       - "^examples/"
-      - "^docs/"
+      - "^build/swagger/"
+      - "^gen/"
 
 formatters:
   enable:

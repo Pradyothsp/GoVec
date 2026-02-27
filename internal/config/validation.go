@@ -20,6 +20,10 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("engine config: %w", err)
 	}
 
+	if err := ValidateGRPCConfig(cfg.GRPC, cfg.Server.Port); err != nil {
+		return fmt.Errorf("grpc config: %w", err)
+	}
+
 	return nil
 }
 
@@ -61,6 +65,26 @@ func ValidateStorageConfig(cfg StorageConfig) error {
 		return fmt.Errorf("auto_save_interval must be >= 1s when auto_save_enabled is true, got %v", cfg.AutoSaveInterval)
 	}
 
+	return nil
+}
+
+// ValidateGRPCConfig validates gRPC server configuration.
+// Validation is only applied when Enabled is true.
+//
+//nolint:gocritic // GRPCConfig is passed by value to match existing codebase convention
+func ValidateGRPCConfig(cfg GRPCConfig, httpPort int) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", cfg.Port)
+	}
+	if cfg.Port == httpPort {
+		return fmt.Errorf("grpc port %d must differ from http port %d", cfg.Port, httpPort)
+	}
+	if cfg.MaxRecvMsgSizeMB < 1 {
+		return fmt.Errorf("max_recv_msg_size_mb must be >= 1, got %d", cfg.MaxRecvMsgSizeMB)
+	}
 	return nil
 }
 
