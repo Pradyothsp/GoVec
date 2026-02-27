@@ -22,6 +22,7 @@ import (
 func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(middleware.CorrelationID())
 	r.Use(middleware.RequestLogger())
 
 	r.GET("/health", healthCheck)

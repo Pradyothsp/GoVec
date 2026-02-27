@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 // RequestLogger returns a Gin middleware that emits a structured JSON access log
@@ -17,11 +17,12 @@ func RequestLogger() gin.HandlerFunc {
 		status := c.Writer.Status()
 		latency := time.Since(start)
 
-		event := log.Info()
+		logger := zerolog.Ctx(c.Request.Context())
+		event := logger.Info()
 		if status >= 500 {
-			event = log.Error()
+			event = logger.Error()
 		} else if status >= 400 {
-			event = log.Warn()
+			event = logger.Warn()
 		}
 
 		if len(c.Errors) > 0 {
