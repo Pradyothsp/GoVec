@@ -3,6 +3,7 @@ package index
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
@@ -82,11 +84,11 @@ func NewHNSWIndex[T hnsw.VectorType](
 }
 
 // Insert adds or updates a vector in the index with thread-safety.
-func (idx *HNSWIndex[T]) Insert(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
+func (idx *HNSWIndex[T]) Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	err := idx.wal.WriteEntry(&WALEntry{
+	err := idx.wal.WriteEntry(ctx, &WALEntry{
 		Action: WALActionInsert,
 		ID:     id,
 		Vector: vec,
@@ -94,7 +96,7 @@ func (idx *HNSWIndex[T]) Insert(id string, vec []float32, sparse core.SparseVect
 		Meta:   meta,
 	})
 	if err != nil {
-		log.Error().Err(err).Msg("failed to write WAL entry")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return err
 	}
 
@@ -168,7 +170,7 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 //   - Non-selective filters (>50% match): post-filter with mild over-fetch.
 //
 // When hybrid search is enabled, dense and sparse scores are combined with alpha=0.7.
-func (idx *HNSWIndex[T]) Search(query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error) {
+func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -262,7 +264,7 @@ func (idx *HNSWIndex[T]) Search(query []float32, sparseQuery core.SparseVector, 
 }
 
 // Delete removes a vector from the index by ID.
-func (idx *HNSWIndex[T]) Delete(id string) (bool, error) {
+func (idx *HNSWIndex[T]) Delete(ctx context.Context, id string) (bool, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -276,17 +278,17 @@ func (idx *HNSWIndex[T]) Delete(id string) (bool, error) {
 		return false, nil
 	}
 
-	err = idx.wal.WriteEntry(&WALEntry{
+	err = idx.wal.WriteEntry(ctx, &WALEntry{
 		Action: WALActionDelete,
 		ID:     id,
 	})
 	if err != nil {
-		log.Error().Err(err).Msg("failed to write WAL entry")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return false, err
 	}
 
 	if err := idx.deleteInternal(id); err != nil {
-		log.Error().Err(err).Msg("failed to delete vector")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to delete vector")
 		return false, err
 	}
 
@@ -322,7 +324,7 @@ func (idx *HNSWIndex[T]) deleteInternal(id string) error {
 // SaveToFile serializes the HNSW index to a snapshot file.
 // When mmap is enabled it writes version 6 (topology-only graph; no inline vectors).
 // Otherwise it writes the standard version 4 format.
-func (idx *HNSWIndex[T]) SaveToFile(path string) error {
+func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -345,7 +347,7 @@ func (idx *HNSWIndex[T]) SaveToFile(path string) error {
 	}
 
 	if err == nil {
-		log.Info().
+		zerolog.Ctx(ctx).Info().
 			Str("path", path).
 			Int("vectors", idx.graph.Len()).
 			Dur("duration", time.Since(start)).
@@ -508,7 +510,7 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 // LoadFromFile reads the HNSW index from a snapshot file.
 // Supports version 4 (heap-backed vectors) and version 6 (mmap-backed vectors).
 // A missing file is not an error — the server starts with an empty index.
-func (idx *HNSWIndex[T]) LoadFromFile(path string) (err error) {
+func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err error) {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -594,7 +596,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(path string) (err error) {
 	}
 
 	if err == nil {
-		log.Info().
+		zerolog.Ctx(ctx).Info().
 			Str("path", path).
 			Int("vectors", idx.graph.Len()).
 			Dur("duration", time.Since(start)).

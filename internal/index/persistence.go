@@ -1,12 +1,13 @@
 package index
 
 import (
+	"context"
 	"encoding/gob"
 	"fmt"
 	"os"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 
 	"github.com/Pradyothsp/govec/internal/core"
 )
@@ -41,7 +42,7 @@ type vectorNodeSnapshot struct {
 // SaveToFile serializes the index to a specific path.
 // When mmap is enabled (vectorStore != nil) it writes version 5 (no inline vectors).
 // Otherwise it writes the standard version 3 format.
-func (idx *VectorIndex[T]) SaveToFile(path string) error {
+func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -64,7 +65,7 @@ func (idx *VectorIndex[T]) SaveToFile(path string) error {
 	}
 
 	if err == nil {
-		log.Info().
+		zerolog.Ctx(ctx).Info().
 			Str("path", path).
 			Int("vectors", len(idx.Store)).
 			Dur("duration", time.Since(start)).
@@ -201,7 +202,7 @@ func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 
 // LoadFromFile reads the index from disk.
 // A missing file is not an error — the server starts with an empty index.
-func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
+func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err error) {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -288,7 +289,7 @@ func (idx *VectorIndex[T]) LoadFromFile(path string) (err error) {
 	}
 
 	if err == nil {
-		log.Info().
+		zerolog.Ctx(ctx).Info().
 			Str("path", path).
 			Int("vectors", len(idx.Store)).
 			Dur("duration", time.Since(start)).

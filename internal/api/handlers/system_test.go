@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func TestStats_EmptyIndex(t *testing.T) {
 
 func TestStats_AfterInsert(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	require.NoError(t, idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
 
 	h := NewSystemHandler(idx, "")
 
@@ -82,7 +83,7 @@ func TestInfo_EmptyIndex(t *testing.T) {
 
 func TestInfo_DimensionsSetAfterInsert(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	require.NoError(t, idx.Insert("v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, nil))
 
 	h := NewSystemHandler(idx, "")
 
@@ -107,7 +108,7 @@ func TestInfo_DimensionsSetAfterInsert(t *testing.T) {
 
 func TestFlush_Success(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	require.NoError(t, idx.Insert("v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
 
 	path := filepath.Join(t.TempDir(), "test.bin")
 	h := NewSystemHandler(idx, path)

@@ -1,11 +1,13 @@
 package index
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
 	"sync"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
@@ -48,12 +50,12 @@ func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, id
 }
 
 // Insert adds or updates a vector in the index with thread-safety
-func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
+func (idx *VectorIndex[T]) Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	// 1. Write to WAL FIRST (write-ahead guarantee)
-	err := idx.wal.WriteEntry(&WALEntry{
+	err := idx.wal.WriteEntry(ctx, &WALEntry{
 		Action: WALActionInsert,
 		ID:     id,
 		Vector: vec,
@@ -62,14 +64,14 @@ func (idx *VectorIndex[T]) Insert(id string, vec []float32, sparse core.SparseVe
 	})
 
 	if err != nil {
-		log.Error().Err(err).Msg("failed to write WAL entry")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return err
 	}
 
 	// 2. Execute core insert logic
 	err = idx.insertInternal(id, vec, sparse, meta)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to insert vector")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to insert vector")
 		return err
 	}
 
@@ -137,7 +139,7 @@ func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.
 //	final_score = alpha * dense_score + (1 - alpha) * sparse_score
 //
 // where alpha = 0.7 (default weighting: 70% semantic, 30% keyword)
-func (idx *VectorIndex[T]) Search(query []float32, sparseQuery core.SparseVector, limit int, filters map[string]interface{}) ([]SearchResult, error) {
+func (idx *VectorIndex[T]) Search(_ context.Context, query []float32, sparseQuery core.SparseVector, limit int, filters map[string]interface{}) ([]SearchResult, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -234,7 +236,7 @@ func (idx *VectorIndex[T]) computeSparseScores(sparseQuery core.SparseVector) ma
 }
 
 // Delete removes a vector from the index by ID
-func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
+func (idx *VectorIndex[T]) Delete(ctx context.Context, id string) (bool, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -250,19 +252,19 @@ func (idx *VectorIndex[T]) Delete(id string) (bool, error) {
 	}
 
 	// 2. Write to WAL
-	err = idx.wal.WriteEntry(&WALEntry{
+	err = idx.wal.WriteEntry(ctx, &WALEntry{
 		Action: WALActionDelete,
 		ID:     id,
 	})
 	if err != nil {
-		log.Error().Err(err).Msg("failed to write WAL entry")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return false, err
 	}
 
 	// 3. Execute core delete logic
 	err = idx.deleteInternal(id)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to delete vector")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to delete vector")
 		return false, err
 	}
 

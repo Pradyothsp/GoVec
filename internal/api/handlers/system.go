@@ -63,7 +63,7 @@ func (h *SystemHandler) Info(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /api/v1/admin/flush [post]
 func (h *SystemHandler) Flush(c *gin.Context) {
-	if err := h.Engine.SaveToFile(h.DataPath); err != nil {
+	if err := h.Engine.SaveToFile(c.Request.Context(), h.DataPath); err != nil {
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Str("path", h.DataPath).Msg("failed to flush index to disk")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return

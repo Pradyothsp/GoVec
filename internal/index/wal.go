@@ -2,6 +2,7 @@ package index
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,8 +52,9 @@ func NewWAL(filepath string) (*WAL, error) {
 	return &WAL{file: f}, nil
 }
 
-// WriteEntry saves an operation to the disk immediately
-func (w *WAL) WriteEntry(entry *WALEntry) error {
+// WriteEntry saves an operation to the disk immediately.
+// ctx is accepted for API consistency and future use (e.g. deadline-aware writes).
+func (w *WAL) WriteEntry(_ context.Context, entry *WALEntry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

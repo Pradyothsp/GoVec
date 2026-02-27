@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,7 +30,7 @@ func TestVectorIndex_Insert_WritesToWAL(t *testing.T) {
 	idx := index.NewVectorIndex[[]float32](wal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Insert vector
-	err = idx.Insert("vec1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"label": "test"})
+	err = idx.Insert(context.Background(), "vec1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"label": "test"})
 	require.NoError(t, err)
 
 	// Read WAL file directly
@@ -58,7 +59,7 @@ func TestVectorIndex_Insert_WALFailurePreventMemoryUpdate(t *testing.T) {
 	idx := index.NewVectorIndex[[]float32](wal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Attempt Insert (should fail)
-	err = idx.Insert("vec1", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"label": "test"})
+	err = idx.Insert(context.Background(), "vec1", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"label": "test"})
 	assert.Error(t, err, "Insert should fail when WAL write fails")
 
 	// Verify memory NOT updated (vec1 should not be in IDMapper)
@@ -75,7 +76,7 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 	replayWal, err := index.NewWAL(replayWalPath)
 	require.NoError(t, err)
 	for i := 0; i < 10; i++ {
-		err = replayWal.WriteEntry(&index.WALEntry{
+		err = replayWal.WriteEntry(context.Background(), &index.WALEntry{
 			Action: index.WALActionInsert,
 			ID:     "replay" + string(rune('0'+i)),
 			Vector: []float32{float32(i)},
@@ -118,7 +119,7 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 			}
 		}()
 		for i := 0; i < 10; i++ {
-			err := idx.Insert("insert"+string(rune('0'+i)), []float32{float32(i + 100)}, core.SparseVector{}, nil)
+			err := idx.Insert(context.Background(), "insert"+string(rune('0'+i)), []float32{float32(i + 100)}, core.SparseVector{}, nil)
 			if err != nil && insertErr == nil {
 				insertErr = err
 			}
@@ -148,10 +149,10 @@ func TestVectorIndex_Delete_WritesToWAL(t *testing.T) {
 	idx := index.NewVectorIndex[[]float32](wal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Insert then delete
-	err = idx.Insert("vec1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
+	err = idx.Insert(context.Background(), "vec1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 	require.NoError(t, err)
 
-	deleted, err := idx.Delete("vec1")
+	deleted, err := idx.Delete(context.Background(), "vec1")
 	require.NoError(t, err)
 	assert.True(t, deleted)
 
@@ -179,14 +180,14 @@ func TestVectorIndex_Delete_WALFailurePreventsDelete(t *testing.T) {
 	idx := index.NewVectorIndex[[]float32](wal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Insert vector
-	err = idx.Insert("vec1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
+	err = idx.Insert(context.Background(), "vec1", []float32{1.0, 2.0}, core.SparseVector{}, nil)
 	require.NoError(t, err)
 
 	// Close WAL to make writes fail
 	wal.Close()
 
 	// Attempt Delete (should fail)
-	deleted, err := idx.Delete("vec1")
+	deleted, err := idx.Delete(context.Background(), "vec1")
 	assert.Error(t, err, "Delete should fail when WAL write fails")
 	assert.False(t, deleted, "Delete should return false on WAL failure")
 
@@ -205,7 +206,7 @@ func TestVectorIndex_Delete_NonExistentID(t *testing.T) {
 	idx := index.NewVectorIndex[[]float32](wal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Delete non-existent ID
-	deleted, err := idx.Delete("nonexistent")
+	deleted, err := idx.Delete(context.Background(), "nonexistent")
 	require.NoError(t, err)
 	assert.False(t, deleted, "Should return false for non-existent ID")
 
@@ -231,7 +232,7 @@ func TestVectorIndex_SaveToFile_ClearsWAL(t *testing.T) {
 
 	// Insert 10 vectors
 	for i := 0; i < 10; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
+		err = idx.Insert(context.Background(), "vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -241,7 +242,7 @@ func TestVectorIndex_SaveToFile_ClearsWAL(t *testing.T) {
 	assert.Greater(t, info.Size(), int64(0), "WAL should have entries before save")
 
 	// Save to file
-	err = idx.SaveToFile(snapPath)
+	err = idx.SaveToFile(context.Background(), snapPath)
 	require.NoError(t, err)
 
 	// Verify snapshot created
@@ -266,7 +267,7 @@ func TestVectorIndex_SaveToFile_WALClearFailure(t *testing.T) {
 
 	// Insert vectors
 	for i := 0; i < 5; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
+		err = idx.Insert(context.Background(), "vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -274,7 +275,7 @@ func TestVectorIndex_SaveToFile_WALClearFailure(t *testing.T) {
 	wal.Close()
 
 	// Save to file (should fail atomically)
-	err = idx.SaveToFile(snapPath)
+	err = idx.SaveToFile(context.Background(), snapPath)
 	assert.Error(t, err, "SaveToFile should return error when WAL.Clear fails")
 
 	// CRITICAL: After two-phase commit fix:
@@ -302,17 +303,17 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 
 	// Insert vec1-3
 	for i := 1; i <= 3; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
+		err = idx.Insert(context.Background(), "vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 
 	// Save snapshot
-	err = idx.SaveToFile(snapPath)
+	err = idx.SaveToFile(context.Background(), snapPath)
 	require.NoError(t, err)
 
 	// Insert vec4-5 (not saved)
 	for i := 4; i <= 5; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
+		err = idx.Insert(context.Background(), "vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 	wal.Close()
@@ -325,7 +326,7 @@ func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Load from snapshot
-	err = recoveredIdx.LoadFromFile(snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), snapPath)
 	require.NoError(t, err)
 
 	// Replay WAL
@@ -353,7 +354,7 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 
 	// Insert 10 vectors (no save)
 	for i := 0; i < 10; i++ {
-		err = idx.Insert("vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
+		err = idx.Insert(context.Background(), "vec"+string(rune('0'+i)), []float32{float32(i)}, core.SparseVector{}, nil)
 		require.NoError(t, err)
 	}
 	wal.Close()
@@ -366,7 +367,7 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
 
 	// Load from missing snapshot (graceful)
-	err = recoveredIdx.LoadFromFile(snapPath)
+	err = recoveredIdx.LoadFromFile(context.Background(), snapPath)
 	require.NoError(t, err, "Missing snapshot should be handled gracefully")
 
 	// Replay WAL

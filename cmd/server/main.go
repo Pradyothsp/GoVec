@@ -108,7 +108,7 @@ func main() {
 	// RECOVERY SEQUENCE
 	// Step 1: Load the base snapshot from DataPath (GOB format)
 	log.Info().Str("path", cfg.Storage.DataPath).Msg("loading snapshot from disk")
-	if err := engine.LoadFromFile(cfg.Storage.DataPath); err != nil {
+	if err := engine.LoadFromFile(context.Background(), cfg.Storage.DataPath); err != nil {
 		if os.IsNotExist(err) {
 			log.Info().Msg("no snapshot found, starting fresh")
 		} else {
@@ -133,7 +133,7 @@ func main() {
 			defer ticker.Stop()
 			for range ticker.C {
 				log.Info().Msg("auto-saving snapshot")
-				if err := engine.SaveToFile(cfg.Storage.DataPath); err != nil {
+				if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
 					log.Error().Err(err).Msg("failed to save snapshot")
 				} else {
 					log.Info().Msg("snapshot saved")
@@ -170,7 +170,7 @@ func main() {
 
 	// Save data before shutdown
 	log.Info().Msg("saving data to disk")
-	if err := engine.SaveToFile(cfg.Storage.DataPath); err != nil {
+	if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
 		log.Error().Err(err).Msg("error saving data on shutdown")
 	} else {
 		log.Info().Msg("data saved successfully")

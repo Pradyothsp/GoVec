@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -50,7 +51,7 @@ func runBenchmarkWithIndex(b *testing.B, quantization, indexType string,
 
 	insertStart := time.Now()
 	for i, vec := range vectors {
-		if err := engine.Insert(fmt.Sprintf("vec%d", i), vec, core.SparseVector{}, map[string]interface{}{"index": i}); err != nil {
+		if err := engine.Insert(context.Background(), fmt.Sprintf("vec%d", i), vec, core.SparseVector{}, map[string]interface{}{"index": i}); err != nil {
 			b.Fatalf("Insert failed: %v", err)
 		}
 	}
@@ -59,7 +60,7 @@ func runBenchmarkWithIndex(b *testing.B, quantization, indexType string,
 	runtime.ReadMemStats(&memAfter)
 	memAllocated := memAfter.Alloc - memBefore.Alloc
 
-	if err := engine.SaveToFile(dataPath); err != nil {
+	if err := engine.SaveToFile(context.Background(), dataPath); err != nil {
 		b.Fatalf("SaveToFile failed: %v", err)
 	}
 	fileInfo, err := os.Stat(dataPath)
@@ -71,7 +72,7 @@ func runBenchmarkWithIndex(b *testing.B, quantization, indexType string,
 	queries := generateTestVectors(numSearches, vectorDim)
 	searchStart := time.Now()
 	for _, q := range queries {
-		if _, err := engine.Search(q, core.SparseVector{}, topK, nil); err != nil {
+		if _, err := engine.Search(context.Background(), q, core.SparseVector{}, topK, nil); err != nil {
 			b.Fatalf("Search failed: %v", err)
 		}
 	}
@@ -82,7 +83,7 @@ func runBenchmarkWithIndex(b *testing.B, quantization, indexType string,
 	for len(sampleQuery) < vectorDim {
 		sampleQuery = append(sampleQuery, 0.0)
 	}
-	topResults, err := engine.Search(sampleQuery, core.SparseVector{}, topK, nil)
+	topResults, err := engine.Search(context.Background(), sampleQuery, core.SparseVector{}, topK, nil)
 	if err != nil {
 		b.Fatalf("sample Search failed: %v", err)
 	}
@@ -257,7 +258,7 @@ func BenchmarkHNSW_Insert_BuildTime(b *testing.B) {
 		vectors := generateTestVectors(b.N, vectorDim)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			if err := engine.Insert(fmt.Sprintf("v%d", i), vectors[i], core.SparseVector{}, nil); err != nil {
+			if err := engine.Insert(context.Background(), fmt.Sprintf("v%d", i), vectors[i], core.SparseVector{}, nil); err != nil {
 				b.Fatalf("Insert failed: %v", err)
 			}
 		}
@@ -269,7 +270,7 @@ func BenchmarkHNSW_Insert_BuildTime(b *testing.B) {
 		vectors := generateTestVectors(b.N, vectorDim)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			if err := engine.Insert(fmt.Sprintf("v%d", i), vectors[i], core.SparseVector{}, nil); err != nil {
+			if err := engine.Insert(context.Background(), fmt.Sprintf("v%d", i), vectors[i], core.SparseVector{}, nil); err != nil {
 				b.Fatalf("Insert failed: %v", err)
 			}
 		}
@@ -320,10 +321,10 @@ func BenchmarkHNSW_Recall_vs_DatasetSize(b *testing.B) {
 		vectors := generateTestVectors(n, vectorDim)
 		for i, v := range vectors {
 			id := fmt.Sprintf("v%d", i)
-			if err := bruteEngine.Insert(id, v, core.SparseVector{}, nil); err != nil {
+			if err := bruteEngine.Insert(context.Background(), id, v, core.SparseVector{}, nil); err != nil {
 				b.Fatalf("brute Insert failed: %v", err)
 			}
-			if err := hnswEngine.Insert(id, v, core.SparseVector{}, nil); err != nil {
+			if err := hnswEngine.Insert(context.Background(), id, v, core.SparseVector{}, nil); err != nil {
 				b.Fatalf("hnsw Insert failed: %v", err)
 			}
 		}
@@ -331,11 +332,11 @@ func BenchmarkHNSW_Recall_vs_DatasetSize(b *testing.B) {
 		queries := generateTestVectors(numQueries, vectorDim)
 		totalRecall := 0.0
 		for _, q := range queries {
-			gt, err := bruteEngine.Search(q, core.SparseVector{}, topK, nil)
+			gt, err := bruteEngine.Search(context.Background(), q, core.SparseVector{}, topK, nil)
 			if err != nil {
 				b.Fatalf("brute Search failed: %v", err)
 			}
-			approx, err := hnswEngine.Search(q, core.SparseVector{}, topK, nil)
+			approx, err := hnswEngine.Search(context.Background(), q, core.SparseVector{}, topK, nil)
 			if err != nil {
 				b.Fatalf("hnsw Search failed: %v", err)
 			}
