@@ -1,0 +1,14 @@
+# Local settings overrides (sensitive data)
+settings.local.json
+
+# Temporary and backup files
+*.tmp
+*.bak
+*~
+.DS_Store
+
+# Log files
+*.log
+
+# Plans files
+/plans
