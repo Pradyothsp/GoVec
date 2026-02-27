@@ -101,6 +101,7 @@ jobs:
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
+          go install golang.org/x/tools/cmd/goimports@latest
 
       - name: Lint proto files
         run: buf lint
@@ -108,4 +109,5 @@ jobs:
       - name: Check proto stubs are up to date
         run: |
           buf generate
+          goimports -w gen/
           git diff --exit-code gen/
