@@ -62,13 +62,14 @@ type Config struct {
 
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
-	Host            string        `yaml:"host"`
-	Port            int           `yaml:"port"`
-	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
-	APIKey          string        `yaml:"api_key"`
-	LogLevel        string        `yaml:"log_level"` // trace, debug, info, warn, error
-	PprofEnabled    bool          `yaml:"pprof_enabled"`
-	PprofAddr       string        `yaml:"pprof_addr"` // must be localhost-bound in production
+	Host              string        `yaml:"host"`
+	Port              int           `yaml:"port"`
+	ShutdownTimeout   time.Duration `yaml:"shutdown_timeout"`
+	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout"`
+	APIKey            string        `yaml:"api_key"`
+	LogLevel          string        `yaml:"log_level"` // trace, debug, info, warn, error
+	PprofEnabled      bool          `yaml:"pprof_enabled"`
+	PprofAddr         string        `yaml:"pprof_addr"` // must be localhost-bound in production
 }
 
 // Address returns the server address in "host:port" format
@@ -91,12 +92,13 @@ type StorageConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:            "",
-			Port:            8000,
-			ShutdownTimeout: 10 * time.Second,
-			LogLevel:        "info",
-			PprofEnabled:    false,
-			PprofAddr:       "localhost:6060",
+			Host:              "",
+			Port:              8000,
+			ShutdownTimeout:   10 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
+			LogLevel:          "info",
+			PprofEnabled:      false,
+			PprofAddr:         "localhost:6060",
 		},
 		Storage: StorageConfig{
 			DataPath:         "./govec_data.bin",

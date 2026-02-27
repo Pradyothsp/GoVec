@@ -45,6 +45,11 @@ func ValidateServerConfig(cfg ServerConfig) error {
 		return fmt.Errorf("shutdown_timeout must be non-negative, got %v", cfg.ShutdownTimeout)
 	}
 
+	// ReadHeaderTimeout must be positive (zero disables it, which is a security risk)
+	if cfg.ReadHeaderTimeout <= 0 {
+		return fmt.Errorf("read_header_timeout must be positive, got %v", cfg.ReadHeaderTimeout)
+	}
+
 	// Log level must be one of the known zerolog levels
 	if cfg.LogLevel != "" && !validLogLevels[strings.ToLower(cfg.LogLevel)] {
 		return fmt.Errorf("invalid log_level: '%s', must be one of: trace, debug, info, warn, error", cfg.LogLevel)

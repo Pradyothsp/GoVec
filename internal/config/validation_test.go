@@ -125,9 +125,10 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: ServerConfig{
-				Host:            "",
-				Port:            8000,
-				ShutdownTimeout: 10 * time.Second,
+				Host:              "",
+				Port:              8000,
+				ShutdownTimeout:   10 * time.Second,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 			wantError: false,
 		},
@@ -150,8 +151,9 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "negative shutdown timeout",
 			cfg: ServerConfig{
-				Port:            8000,
-				ShutdownTimeout: -1 * time.Second,
+				Port:              8000,
+				ShutdownTimeout:   -1 * time.Second,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 			wantError: true,
 			errorMsg:  "shutdown_timeout must be non-negative",
@@ -159,34 +161,56 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "zero shutdown timeout is allowed",
 			cfg: ServerConfig{
-				Port:            8000,
-				ShutdownTimeout: 0,
+				Port:              8000,
+				ShutdownTimeout:   0,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 			wantError: false,
 		},
 		{
 			name: "very short shutdown timeout is allowed",
 			cfg: ServerConfig{
-				Port:            8000,
-				ShutdownTimeout: 100 * time.Millisecond,
+				Port:              8000,
+				ShutdownTimeout:   100 * time.Millisecond,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 			wantError: false,
 		},
 		{
 			name: "minimum port",
 			cfg: ServerConfig{
-				Port:            1,
-				ShutdownTimeout: 1 * time.Second,
+				Port:              1,
+				ShutdownTimeout:   1 * time.Second,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 			wantError: false,
 		},
 		{
 			name: "maximum port",
 			cfg: ServerConfig{
-				Port:            65535,
-				ShutdownTimeout: 1 * time.Second,
+				Port:              65535,
+				ShutdownTimeout:   1 * time.Second,
+				ReadHeaderTimeout: 10 * time.Second,
 			},
 			wantError: false,
+		},
+		{
+			name: "zero read_header_timeout is invalid",
+			cfg: ServerConfig{
+				Port:              8000,
+				ReadHeaderTimeout: 0,
+			},
+			wantError: true,
+			errorMsg:  "read_header_timeout must be positive",
+		},
+		{
+			name: "negative read_header_timeout is invalid",
+			cfg: ServerConfig{
+				Port:              8000,
+				ReadHeaderTimeout: -1 * time.Second,
+			},
+			wantError: true,
+			errorMsg:  "read_header_timeout must be positive",
 		},
 	}
 
