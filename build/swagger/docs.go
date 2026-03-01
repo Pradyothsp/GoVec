@@ -589,6 +589,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "cosine"
                 },
+                "enable_mmap": {
+                    "type": "boolean",
+                    "example": false
+                },
                 "index_type": {
                     "type": "string",
                     "example": "brute"

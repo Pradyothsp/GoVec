@@ -348,6 +348,7 @@ func (idx *VectorIndex[T]) Info() EngineInfo {
 		DistanceMetric: idx.distanceMetric,
 		Dimensions:     idx.dimensions,
 		VectorCount:    len(idx.Store),
+		EnableMmap:     idx.vectorStore != nil,
 	}
 }
 

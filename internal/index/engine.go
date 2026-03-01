@@ -13,6 +13,7 @@ type EngineInfo struct {
 	DistanceMetric string `json:"distance_metric" example:"cosine"`
 	Dimensions     int    `json:"dimensions" example:"0"`
 	VectorCount    int    `json:"vector_count" example:"0"`
+	EnableMmap     bool   `json:"enable_mmap" example:"false"`
 }
 
 // Engine defines the common interface for all vector storage engines
