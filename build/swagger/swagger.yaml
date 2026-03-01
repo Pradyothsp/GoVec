@@ -93,6 +93,9 @@ definitions:
       distance_metric:
         example: cosine
         type: string
+      enable_mmap:
+        example: false
+        type: boolean
       index_type:
         example: brute
         type: string
