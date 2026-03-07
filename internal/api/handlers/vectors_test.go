@@ -297,6 +297,68 @@ func TestDelete_SuccessResponse(t *testing.T) {
 	assert.Contains(t, response, "data")
 }
 
+// TestGetByID_NotFound verifies 404 when the ID does not exist.
+func TestGetByID_NotFound(t *testing.T) {
+	index := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(index)
+
+	router := gin.New()
+	router.GET("/vectors/:id", handler.GetByID)
+
+	req := httptest.NewRequest("GET", "/vectors/nonexistent", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not found")
+}
+
+// TestGetByID_Success verifies that a stored vector is returned with all fields intact.
+func TestGetByID_Success(t *testing.T) {
+	index := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(index)
+
+	// Pre-populate index
+	_, vec, meta := testutil.CreateTestVector("vec1", 3)
+	_ = index.Insert(context.Background(), "vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
+
+	router := gin.New()
+	router.GET("/vectors/:id", handler.GetByID)
+
+	req := httptest.NewRequest("GET", "/vectors/vec1", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, true, resp["success"].(bool))
+
+	data, ok := resp["data"].(map[string]interface{})
+	require.True(t, ok, "data field should be an object")
+
+	// ID round-trip
+	assert.Equal(t, "vec1", data["id"])
+
+	// Vector round-trip: JSON unmarshals numbers as float64
+	rawVec, ok := data["vector"].([]interface{})
+	require.True(t, ok, "vector should be an array")
+	require.Len(t, rawVec, len(vec))
+	for i, v := range vec {
+		assert.InDelta(t, float64(v), rawVec[i].(float64), 1e-6)
+	}
+
+	// Metadata round-trip
+	rawMeta, ok := data["metadata"].(map[string]interface{})
+	require.True(t, ok, "metadata should be an object")
+	assert.Equal(t, meta["type"], rawMeta["type"])
+	assert.Equal(t, meta["id"], rawMeta["id"])
+}
+
 // TestMalformedJSON verifies error handling for invalid JSON payloads
 func TestMalformedJSON(t *testing.T) {
 	index := testutil.NewTestIndex(t)

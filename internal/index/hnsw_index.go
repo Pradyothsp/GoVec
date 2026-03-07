@@ -47,6 +47,39 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	vectorStore  *storage.MmapStore   // nil when mmap is disabled
 }
 
+// GetByID returns a vector by ID.
+func (idx *HNSWIndex[T]) GetByID(_ context.Context, id string) (*VectorRecord, error) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	internalID, err := idx.IDMapper.ToUint32ID(id)
+	if err != nil {
+		return nil, core.ErrNotFound
+	}
+
+	node, ok := idx.metadata[internalID]
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+
+	var vec []float32
+	switch v := any(node.Vector).(type) {
+	case []float32:
+		vec = v
+	case []int8:
+		vec = core.DequantizeVector(v)
+	default:
+		return nil, fmt.Errorf("unsupported vector type %T", node.Vector)
+	}
+
+	return &VectorRecord{
+		ID:           node.ExternalID,
+		Vector:       vec,
+		SparseVector: node.Sparse,
+		Metadata:     node.Metadata,
+	}, nil
+}
+
 // NewHNSWIndex creates an empty HNSWIndex ready for use.
 // Pass a non-nil metaIndex to enable metadata-accelerated filtered search.
 // Pass a non-nil vectorStore to enable mmap-backed vector storage.

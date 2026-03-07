@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -211,6 +212,40 @@ func (h *VectorHandler) Search(c *gin.Context) {
 	}
 
 	response.OK(c, http.StatusOK, results)
+}
+
+// GetByID handles GET /api/v1/vectors/:id
+//
+// @Summary      Get a vector by ID
+// @Tags         vectors
+// @Produce      json
+// @Param        id   path      string            true  "Vector ID"
+// @Success      200  {object}  response.Response{data=index.VectorRecord}
+// @Failure      400  {object}  response.ErrorResponse
+// @Failure      401  {object}  response.ErrorResponse
+// @Failure      404  {object}  response.ErrorResponse
+// @Failure      500  {object}  response.ErrorResponse
+// @Security     BearerAuth
+// @Router       /api/v1/vectors/{id} [get]
+func (h *VectorHandler) GetByID(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.Fail(c, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	record, err := h.Engine.GetByID(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "vector not found")
+			return
+		}
+		zerolog.Ctx(c.Request.Context()).Error().Err(err).Str("id", id).Msg("failed to get vector by ID")
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.OK(c, http.StatusOK, record)
 }
 
 // Delete handles DELETE /api/v1/vectors/:id
