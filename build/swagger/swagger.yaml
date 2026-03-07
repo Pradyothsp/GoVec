@@ -117,6 +117,20 @@ definitions:
         example: 0.97
         type: number
     type: object
+  index.VectorRecord:
+    properties:
+      id:
+        example: vec-001
+        type: string
+      metadata:
+        type: object
+      sparse_vector:
+        type: object
+      vector:
+        items:
+          type: number
+        type: array
+    type: object
   response.ErrorResponse:
     properties:
       error:
@@ -295,6 +309,46 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete a vector by ID
+      tags:
+      - vectors
+    get:
+      parameters:
+      - description: Vector ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/index.VectorRecord'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a vector by ID
       tags:
       - vectors
   /api/v1/vectors/batch:

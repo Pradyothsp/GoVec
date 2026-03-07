@@ -35,6 +35,39 @@ type VectorIndex[T any] struct {
 	vectorStore  *storage.MmapStore          // nil when mmap is disabled
 }
 
+// GetByID retrieves a VectorRecord by its external ID, returning an error if the ID does not exist or lookup fails.
+func (idx *VectorIndex[T]) GetByID(_ context.Context, id string) (*VectorRecord, error) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	internalID, err := idx.IDMapper.ToUint32ID(id)
+	if err != nil {
+		return nil, core.ErrNotFound
+	}
+
+	node, ok := idx.Store[internalID]
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+
+	var vec []float32
+	switch v := any(node.Vector).(type) {
+	case []float32:
+		vec = v
+	case []int8:
+		vec = core.DequantizeVector(v)
+	default:
+		return nil, fmt.Errorf("unsupported vector type %T", node.Vector)
+	}
+
+	return &VectorRecord{
+		ID:           node.ExternalID,
+		Vector:       vec,
+		SparseVector: node.Sparse,
+		Metadata:     node.Metadata,
+	}, nil
+}
+
 // NewVectorIndex creates an empty VectorIndex ready for use.
 // Pass a non-nil vectorStore to enable mmap-backed vector storage.
 func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error), vectorStore *storage.MmapStore) *VectorIndex[T] {

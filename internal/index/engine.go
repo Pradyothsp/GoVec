@@ -22,7 +22,10 @@ type Engine interface {
 	// Insert adds or updates a vector with the given ID, optional sparse vector, and metadata
 	Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]interface{}) error
 
-	// Search finds the k nearest neighbors to the query vector (with optional sparse query for hybrid search)
+	// GetByID retrieves the full record for a vector by ID
+	GetByID(ctx context.Context, id string) (*VectorRecord, error)
+
+	// Search finds the k nearest neighbors to the query vector (with an optional sparse query for hybrid search)
 	Search(ctx context.Context, query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error)
 
 	// Delete removes a vector by ID
@@ -45,6 +48,14 @@ type Engine interface {
 
 	// Info returns engine configuration and runtime statistics
 	Info() EngineInfo
+}
+
+// VectorRecord holds the full stored data for a vector, returned by GetByID.
+type VectorRecord struct {
+	ID           string                 `json:"id" example:"vec-001"`
+	Vector       []float32              `json:"vector" swaggertype:"array,number"`
+	SparseVector core.SparseVector      `json:"sparse_vector,omitempty" swaggertype:"object"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty" swaggertype:"object"`
 }
 
 // SearchResult represents a single search result with score and metadata

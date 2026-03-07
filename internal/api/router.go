@@ -36,8 +36,9 @@ func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
 	v1.Use(middleware.BearerAuth(apiKey))
 	v1.Use(middleware.Timeout(30 * time.Second))
 
-	v1.POST("/vectors/batch", vecHandler.BatchInsert)
 	v1.POST("/vectors", vecHandler.Insert)
+	v1.POST("/vectors/batch", vecHandler.BatchInsert)
+	v1.GET("/vectors/:id", vecHandler.GetByID)
 	v1.POST("/vectors/search", vecHandler.Search)
 	v1.DELETE("/vectors/:id", vecHandler.Delete)
 

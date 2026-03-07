@@ -349,6 +349,73 @@ const docTemplate = `{
             }
         },
         "/api/v1/vectors/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vectors"
+                ],
+                "summary": "Get a vector by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Vector ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/index.VectorRecord"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -620,6 +687,27 @@ const docTemplate = `{
                 "score": {
                     "type": "number",
                     "example": 0.97
+                }
+            }
+        },
+        "index.VectorRecord": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "vec-001"
+                },
+                "metadata": {
+                    "type": "object"
+                },
+                "sparse_vector": {
+                    "type": "object"
+                },
+                "vector": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
                 }
             }
         },

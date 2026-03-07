@@ -1,6 +1,6 @@
 module github.com/Pradyothsp/govec
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/gin-gonic/gin v1.11.0
