@@ -140,3 +140,23 @@ func TestFlush_InvalidPath(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+func TestReset_Success(t *testing.T) {
+	idx := testutil.NewTestIndex(t)
+	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{3.0, 4.0}, core.SparseVector{}, nil))
+	require.Equal(t, 2, idx.Len())
+
+	h := NewSystemHandler(idx, "")
+
+	router := gin.New()
+	router.POST("/admin/reset", h.Reset)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/reset", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"success":true,"data":{"status":"reset"}}`, rec.Body.String())
+	assert.Equal(t, 0, idx.Len(), "index should be empty after reset")
+}

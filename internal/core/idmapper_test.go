@@ -388,6 +388,44 @@ func TestIsTombstone(t *testing.T) {
 	}
 }
 
+// TestClear tests that Clear resets all mappings, tombstones, and the ID counter
+func TestClear(t *testing.T) {
+	mapper := NewIDMapper()
+
+	id1, _ := mapper.GetOrCreate("doc1")
+	mapper.GetOrCreate("doc2")
+	mapper.Delete("doc1")
+
+	if mapper.Count() != 1 {
+		t.Fatalf("expected Count() = 1 before Clear, got %d", mapper.Count())
+	}
+
+	mapper.Clear()
+
+	if mapper.Count() != 0 {
+		t.Errorf("expected Count() = 0 after Clear, got %d", mapper.Count())
+	}
+
+	if mapper.NextID() != 0 {
+		t.Errorf("expected NextID() = 0 after Clear, got %d", mapper.NextID())
+	}
+
+	if mapper.IsTombstone(id1) {
+		t.Error("expected tombstones to be cleared after Clear")
+	}
+
+	// A fresh mapping after Clear should reuse ID 0 -- this is safe because
+	// Clear implies the entire collection was wiped alongside it, so there is
+	// no live data left for the recycled ID to collide with.
+	newID, err := mapper.GetOrCreate("doc3")
+	if err != nil {
+		t.Fatalf("GetOrCreate after Clear failed: %v", err)
+	}
+	if newID != 0 {
+		t.Errorf("expected first ID after Clear to be 0, got %d", newID)
+	}
+}
+
 // TestPersistence_GOBEncoding tests GOB serialization
 func TestPersistence_GOBEncoding(t *testing.T) {
 	mapper := NewIDMapper()

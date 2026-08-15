@@ -114,6 +114,22 @@ func (m *IDMapper) Delete(stringID string) error {
 	return nil
 }
 
+// Clear resets the mapper to its initial empty state: all string/uint32
+// mappings and tombstones are dropped, and nextID restarts at 0. This is
+// only safe when the entire collection is being wiped alongside it (e.g.
+// Engine.Clear) -- unlike Delete, it does not preserve the never-recycle
+// guarantee, since there is no live data left for a recycled ID to collide
+// with.
+func (m *IDMapper) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nextID = 0
+	m.stringToID = make(map[string]uint32)
+	m.idToString = make(map[uint32]string)
+	m.tombstones = make(map[uint32]struct{})
+}
+
 // IsTombstone checks if a uint32 ID has been deleted.
 func (m *IDMapper) IsTombstone(id uint32) bool {
 	m.mu.RLock()

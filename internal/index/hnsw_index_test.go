@@ -415,6 +415,42 @@ func TestHNSWIndex_Clear(t *testing.T) {
 	assert.Empty(t, idx.metadata)
 }
 
+// TestHNSWIndex_Clear_ResetsIDMapperAndWAL verifies Clear wipes ID mappings/tombstones
+// and truncates the WAL, not just the graph/metadata -- these are easy to miss since
+// they're separate fields the caller could forget to reset.
+func TestHNSWIndex_Clear_ResetsIDMapperAndWAL(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "hnsw_clear_test.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = wal.Close() })
+
+	idMapper := core.NewIDMapper()
+	identityFunc := func(v []float32) []float32 { return v }
+	idx := NewHNSWIndex[[]float32](
+		wal, nil, idMapper, identityFunc, core.CosineSimilarity,
+		hnsw.CosineDistanceFloat32, 16, 20, core.NewMetadataIndex(), nil,
+	)
+
+	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+	_, err = idx.Delete(context.Background(), "v2")
+	require.NoError(t, err)
+
+	info, err := os.Stat(walPath)
+	require.NoError(t, err)
+	assert.Positive(t, info.Size(), "WAL should have entries before Clear")
+
+	idx.Clear()
+
+	assert.Equal(t, 0, idx.Len())
+	assert.Equal(t, 0, idx.IDMapper.Count(), "IDMapper should have no active mappings after Clear")
+	assert.Equal(t, uint32(0), idx.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Clear")
+
+	info, err = os.Stat(walPath)
+	require.NoError(t, err)
+	assert.Zero(t, info.Size(), "WAL should be truncated after Clear")
+}
+
 func TestHNSWIndex_Clear_AllowsReinsertion(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 

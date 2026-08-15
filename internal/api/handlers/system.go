@@ -70,3 +70,21 @@ func (h *SystemHandler) Flush(c *gin.Context) {
 	}
 	response.OK(c, http.StatusOK, gin.H{"status": "flushed"})
 }
+
+// Reset handles POST /api/v1/admin/reset
+//
+// Reset wipes all vectors, ID mappings, and the WAL in memory. It does not
+// persist the cleared state to disk -- call Flush afterward if the reset
+// should survive a restart.
+//
+// @Summary      Clear all vectors from the index
+// @Tags         system
+// @Produce      json
+// @Success      200  {object}  response.Response{data=object}
+// @Failure      401  {object}  response.ErrorResponse
+// @Security     BearerAuth
+// @Router       /api/v1/admin/reset [post]
+func (h *SystemHandler) Reset(c *gin.Context) {
+	h.Engine.Clear()
+	response.OK(c, http.StatusOK, gin.H{"status": "reset"})
+}

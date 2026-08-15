@@ -104,6 +104,8 @@ engine:
 
 ### Implemented
 - ✅ REST API (Insert, Search, Health)
+- ✅ Vector deletion (`DELETE /api/v1/vectors/:id`) and upsert-on-insert
+- ✅ Reset/clear all vectors (`POST /api/v1/admin/reset`) -- see `docs/architecture/ID_MAPPING.md` amendment
 - ✅ Generic Vector Engine (float32 & int8)
 - ✅ Write-Ahead Log (WAL) & Crash Recovery
 - ✅ Atomic Persistence (GOB encoding)
@@ -115,7 +117,6 @@ engine:
 - ⏳ Product & Binary quantization
 - ⏳ Advanced indexing (HNSW integration)
 - ⏳ Metadata filtering in search
-- ⏳ Vector deletion and update endpoints
 
 ## Testing & Workflow
 
