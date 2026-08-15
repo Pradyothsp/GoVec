@@ -172,9 +172,12 @@ func (n *layerNode[K, V]) search(
 				}
 			}
 
-			// Check if this new neighbor improves the current best result.
-			// Guard result.Min() — result may be empty if all nodes so far were filtered.
-			improved = improved || result.Len() == 0 || dist < result.Min().dist
+			// Check if this new neighbor improves the current worst kept result --
+			// that's the one eviction would target below, not the best-so-far
+			// (result.Min()), which would demand beating the single closest node
+			// ever seen just to keep searching.
+			// Guard result.Max() — result may be empty if all nodes so far were filtered.
+			improved = improved || result.Len() == 0 || dist < result.Max().dist
 			if result.Len() < k {
 				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
 			} else if dist < result.Max().dist { // If new node is better than the worst in result set
