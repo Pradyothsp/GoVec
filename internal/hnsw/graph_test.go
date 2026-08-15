@@ -114,14 +114,17 @@ func TestGraph_AddSearch(t *testing.T) {
 		4,
 	)
 
+	// True nearest 4 to 64.5 by distance: 64 (0.5), 65 (0.5), then a tie
+	// between 63 and 66 (both 1.5). 62 (2.5) is farther than both and must
+	// not appear.
 	require.Len(t, nearest, 4)
 	require.EqualValues(
 		t,
 		[]Node[int, []float32]{
 			{64, []float32{64}},
 			{65, []float32{65}},
-			{62, []float32{62}},
 			{63, []float32{63}},
+			{66, []float32{66}},
 		},
 		nearest,
 	)

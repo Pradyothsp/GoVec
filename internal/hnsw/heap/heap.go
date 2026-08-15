@@ -72,9 +72,9 @@ func (h *Heap[T]) Pop() T {
 	return heap.Pop(&h.inner).(T)
 }
 
-// PopLast removes and returns the last (worst) element from the heap.
+// PopLast removes and returns the maximum (worst) element from the heap.
 func (h *Heap[T]) PopLast() T {
-	return h.Remove(h.Len() - 1)
+	return h.Remove(h.maxIndex())
 }
 
 // Remove removes and returns the element at index i from the heap.
@@ -91,7 +91,20 @@ func (h *Heap[T]) Min() T {
 
 // Max returns the maximum element in the heap.
 func (h *Heap[T]) Max() T {
-	return h.inner.data[h.inner.Len()-1]
+	return h.inner.data[h.maxIndex()]
+}
+
+// maxIndex returns the index of the maximum element in the heap's flat array.
+// A binary min-heap only guarantees parent <= children, so the maximum is not
+// necessarily the last element -- it must be found by scanning every element.
+func (h *Heap[T]) maxIndex() int {
+	maxIdx := 0
+	for i := 1; i < h.inner.Len(); i++ {
+		if h.inner.data[maxIdx].Less(h.inner.data[i]) {
+			maxIdx = i
+		}
+	}
+	return maxIdx
 }
 
 // Slice returns a copy of the heap's underlying data as a slice.
