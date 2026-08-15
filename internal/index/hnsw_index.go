@@ -273,8 +273,7 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 			continue
 		}
 
-		// HNSW returns cosine distance (lower = closer); invert to get similarity score.
-		denseScore := 1 - candidate.Distance
+		denseScore := idx.distanceToScore(candidate.Distance)
 
 		var finalScore float32
 		if useHybridSearch {
@@ -294,6 +293,19 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 	}
 
 	return results, nil
+}
+
+// distanceToScore converts a graph distance into a "higher = closer" score, matching
+// the convention core.MathBlock funcs use for the brute-force engine (see
+// core.EuclideanSimilarity) so hybrid-search alpha-blending behaves consistently
+// across index types. The conversion is metric-specific: cosine distance is bounded
+// (~[0,2]), so 1-distance works directly; Euclidean distance is unbounded, so it's
+// converted the same way core.EuclideanSimilarity is: 1/(1+distance).
+func (idx *HNSWIndex[T]) distanceToScore(distance float32) float32 {
+	if idx.distanceMetric == "euclidean" {
+		return 1 / (1 + distance)
+	}
+	return 1 - distance
 }
 
 // Delete removes a vector from the index by ID.

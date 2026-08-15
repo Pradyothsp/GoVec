@@ -31,6 +31,8 @@ type DistanceMetric string
 const (
 	// DistanceMetricCosine measures the angle between vectors (ignores magnitude).
 	DistanceMetricCosine DistanceMetric = "cosine"
+	// DistanceMetricEuclidean measures straight-line distance between vectors (magnitude-sensitive).
+	DistanceMetricEuclidean DistanceMetric = "euclidean"
 )
 
 // EngineConfig holds vector engine configuration

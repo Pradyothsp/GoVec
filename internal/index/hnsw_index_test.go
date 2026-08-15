@@ -688,3 +688,30 @@ func TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability(t *testing.T) {
 	require.Len(t, results, 1, "float filter must work after GOB round-trip")
 	assert.Equal(t, "doc1", results[0].ID)
 }
+
+func TestHNSWIndex_DistanceToScore_Cosine(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	idx.distanceMetric = "cosine"
+
+	got := idx.distanceToScore(0.25)
+	want := float32(0.75)
+	assert.InDelta(t, want, got, 0.0001)
+}
+
+func TestHNSWIndex_DistanceToScore_Euclidean(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	idx.distanceMetric = "euclidean"
+
+	got := idx.distanceToScore(4)
+	want := float32(0.2) // 1 / (1 + 4)
+	assert.InDelta(t, want, got, 0.0001)
+}
+
+func TestHNSWIndex_DistanceToScore_Euclidean_FartherIsLowerScore(t *testing.T) {
+	idx := newTestHNSWIndex(t)
+	idx.distanceMetric = "euclidean"
+
+	near := idx.distanceToScore(1)
+	far := idx.distanceToScore(100)
+	assert.Greater(t, near, far)
+}

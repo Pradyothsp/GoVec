@@ -74,7 +74,7 @@ The engine uses Go generics (`VectorIndex[T]`) to support different vector types
 
 **Key Components:**
 - `internal/index/engine.go`: Common `Engine` interface.
-- `internal/index/factory.go`: Creates `VectorIndex[T]` based on configuration.
+- `internal/index/factory.go`: Creates `VectorIndex[T]` (brute-force) or `HNSWIndex[T]` (ANN) based on configuration.
 - `internal/index/wal.go`: Write-ahead log for durability and recovery.
 - `internal/core/persistence.go`: Atomic snapshot saving/loading using GOB.
 
@@ -92,7 +92,7 @@ storage:
   auto_save_interval: 60s
 engine:
   quantization: "none"      # "none" (float32) or "scalar" (int8)
-  distance_metric: "cosine"
+  distance_metric: "cosine" # "cosine" or "euclidean"
 ```
 
 ### Key Environment Variables
@@ -107,15 +107,15 @@ engine:
 - ✅ Vector deletion (`DELETE /api/v1/vectors/:id`) and upsert-on-insert
 - ✅ Reset/clear all vectors (`POST /api/v1/admin/reset`) -- see `docs/architecture/ID_MAPPING.md` amendment
 - ✅ Generic Vector Engine (float32 & int8)
+- ✅ Approximate nearest neighbor search (HNSW, alongside brute-force linear scan) -- see `internal/hnsw`, `internal/index/factory.go`
+- ✅ Cosine and Euclidean distance metrics (`engine.distance_metric`), both index types -- see `docs/architecture/DISTANCE_METRICS.md`
 - ✅ Write-Ahead Log (WAL) & Crash Recovery
 - ✅ Atomic Persistence (GOB encoding)
 - ✅ CI/CD with GitHub Actions (lint, test, vuln)
 - ✅ Docker support (multi-stage)
 
 ### Planned
-- ⏳ Euclidean distance metric
 - ⏳ Product & Binary quantization
-- ⏳ Advanced indexing (HNSW integration)
 - ⏳ Metadata filtering in search
 
 ## Testing & Workflow

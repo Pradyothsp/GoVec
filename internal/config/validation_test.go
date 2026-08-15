@@ -72,10 +72,18 @@ func TestValidateEngineConfig(t *testing.T) {
 			errorMsg:  "invalid quantization",
 		},
 		{
-			name: "invalid distance metric",
+			name: "valid euclidean distance metric",
 			cfg: EngineConfig{
 				Quantization:   "none",
 				DistanceMetric: "euclidean",
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid distance metric",
+			cfg: EngineConfig{
+				Quantization:   "none",
+				DistanceMetric: "manhattan",
 			},
 			wantError: true,
 			errorMsg:  "invalid distance metric",

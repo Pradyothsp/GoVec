@@ -132,7 +132,7 @@ func TestNewEngine_UnsupportedMetric(t *testing.T) {
 
 	cfg := config.EngineConfig{
 		Quantization:   "none",
-		DistanceMetric: "euclidean", // Not supported yet
+		DistanceMetric: "manhattan", // Not supported
 	}
 
 	_, err = NewEngine(cfg, config.StorageConfig{}, wal)
@@ -224,5 +224,69 @@ func TestNewEngine_CompareQuantizationResults(t *testing.T) {
 		t.Logf("Warning: Top result differs - float=%s (score=%f), int8=%s (score=%f)",
 			resultsFloat[0].ID, resultsFloat[0].Score,
 			resultsInt8[0].ID, resultsInt8[0].Score)
+	}
+}
+
+func TestNewEngine_HNSW_EuclideanMetric(t *testing.T) {
+	walPath := t.TempDir() + "/test.wal"
+	wal, err := NewWAL(walPath)
+	if err != nil {
+		t.Fatalf("failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+	defer os.Remove(walPath)
+
+	cfg := config.EngineConfig{
+		IndexType:      config.IndexTypeHNSW,
+		Quantization:   "none",
+		DistanceMetric: config.DistanceMetricEuclidean,
+	}
+
+	engine, err := NewEngine(cfg, config.StorageConfig{}, wal)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+
+	if engine.Info().DistanceMetric != string(config.DistanceMetricEuclidean) {
+		t.Fatalf("expected distance metric 'euclidean', got '%s'", engine.Info().DistanceMetric)
+	}
+
+	origin := []float32{0, 0, 0}
+	near := []float32{1, 0, 0}
+	far := []float32{10, 0, 0}
+
+	if err := engine.Insert(context.Background(), "near", near, core.SparseVector{}, nil); err != nil {
+		t.Fatalf("Insert(near) failed: %v", err)
+	}
+	if err := engine.Insert(context.Background(), "far", far, core.SparseVector{}, nil); err != nil {
+		t.Fatalf("Insert(far) failed: %v", err)
+	}
+
+	results, err := engine.Search(context.Background(), origin, core.SparseVector{}, 2, nil)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].ID != "near" {
+		t.Errorf("expected 'near' ranked first under Euclidean distance, got '%s'", results[0].ID)
+	}
+	if results[0].Score <= results[1].Score {
+		t.Errorf("expected closer vector to score higher: near=%f far=%f", results[0].Score, results[1].Score)
+	}
+}
+
+func TestHnswDistanceFuncFloat32_UnsupportedMetric(t *testing.T) {
+	_, err := hnswDistanceFuncFloat32("manhattan")
+	if err == nil {
+		t.Fatal("expected error for unsupported metric, got nil")
+	}
+}
+
+func TestHnswDistanceFuncInt8_UnsupportedMetric(t *testing.T) {
+	_, err := hnswDistanceFuncInt8("manhattan")
+	if err == nil {
+		t.Fatal("expected error for unsupported metric, got nil")
 	}
 }

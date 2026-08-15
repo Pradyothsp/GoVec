@@ -110,8 +110,8 @@ func ValidateEngineConfig(cfg EngineConfig) error {
 		return fmt.Errorf("invalid quantization: '%s', must be 'none' or 'scalar'", cfg.Quantization)
 	}
 
-	if cfg.DistanceMetric != DistanceMetricCosine {
-		return fmt.Errorf("invalid distance metric: '%s', must be 'cosine'", cfg.DistanceMetric)
+	if cfg.DistanceMetric != DistanceMetricCosine && cfg.DistanceMetric != DistanceMetricEuclidean {
+		return fmt.Errorf("invalid distance metric: '%s', must be 'cosine' or 'euclidean'", cfg.DistanceMetric)
 	}
 
 	return nil

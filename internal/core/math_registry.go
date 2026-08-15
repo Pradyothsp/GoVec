@@ -16,6 +16,11 @@ func ResolveMetric(metric string) (MathBlock, error) {
 			FloatFunc: CosineSimilarity,
 			Int8Func:  CosineSimilarityInt8,
 		}, nil
+	case "euclidean":
+		return MathBlock{
+			FloatFunc: EuclideanSimilarity,
+			Int8Func:  EuclideanSimilarityInt8,
+		}, nil
 	default:
 		return MathBlock{}, fmt.Errorf("unknown distance metric: %s", metric)
 	}
