@@ -96,6 +96,18 @@ func TestRouterEndpointRegistration(t *testing.T) {
 		assert.JSONEq(t, `{"success":false,"data":null,"error":"vector not found"}`, w.Body.String())
 	})
 
+	t.Run("POST_admin_reset_endpoint_exists", func(t *testing.T) {
+		idx.Insert(context.Background(), "reset_test", []float32{1.0, 2.0}, core.SparseVector{}, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/reset", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code, "POST /api/v1/admin/reset should exist and return 200")
+		assert.JSONEq(t, `{"success":true,"data":{"status":"reset"}}`, w.Body.String())
+		assert.Equal(t, 0, idx.Len(), "index should be empty after reset")
+	})
+
 	t.Run("unknown_route_returns_404", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/unknown", nil)
 		w := httptest.NewRecorder()

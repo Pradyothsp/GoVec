@@ -45,6 +45,7 @@ func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
 	v1.GET("/stats", sysHandler.Stats)
 	v1.GET("/info", sysHandler.Info)
 	v1.POST("/admin/flush", sysHandler.Flush)
+	v1.POST("/admin/reset", sysHandler.Reset)
 
 	return r
 }

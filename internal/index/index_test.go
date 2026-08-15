@@ -3,6 +3,8 @@ package index
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -404,6 +406,44 @@ func TestClear(t *testing.T) {
 	// Clear
 	idx.Clear()
 	assert.Empty(t, idx.Store, "Store should be empty after clear")
+}
+
+// TestClear_ResetsIDMapperAndWAL verifies Clear wipes ID mappings/tombstones
+// and truncates the WAL, not just the Store -- these are easy to miss since
+// they're separate fields the caller could forget to reset.
+func TestClear_ResetsIDMapperAndWAL(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = wal.Close() })
+
+	idx := newTestIndexWithWAL(t, wal)
+
+	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
+	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	_, err = idx.Delete(context.Background(), "v2")
+	require.NoError(t, err)
+
+	info, err := os.Stat(walPath)
+	require.NoError(t, err)
+	assert.Positive(t, info.Size(), "WAL should have entries before Clear")
+
+	idx.Clear()
+
+	assert.Empty(t, idx.Store, "Store should be empty after Clear")
+	assert.Equal(t, 0, idx.IDMapper.Count(), "IDMapper should have no active mappings after Clear")
+	assert.Equal(t, uint32(0), idx.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Clear")
+
+	info, err = os.Stat(walPath)
+	require.NoError(t, err)
+	assert.Zero(t, info.Size(), "WAL should be truncated after Clear")
+
+	// Re-inserting after a full Clear may reuse ID 0 -- safe here because the
+	// entire collection was wiped alongside it, unlike a plain Delete.
+	_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	newID, err := idx.IDMapper.ToUint32ID("v3")
+	require.NoError(t, err)
+	assert.Equal(t, uint32(0), newID)
 }
 
 func TestLen(t *testing.T) {

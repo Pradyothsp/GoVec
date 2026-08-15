@@ -1134,6 +1134,46 @@ func (s *APITestSuite) TestFlushEndpoint() {
 	s.Assert().JSONEq(`{"success":true,"data":{"status":"flushed"}}`, w.Body.String())
 }
 
+func (s *APITestSuite) TestResetEndpoint() {
+	insertBody, _ := json.Marshal(map[string]interface{}{
+		"id":     "reset_v1",
+		"vector": []float32{1.0, 2.0, 3.0},
+	})
+	insertReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(insertBody))
+	insertReq.Header.Set("Content-Type", "application/json")
+	insertW := httptest.NewRecorder()
+	s.router.ServeHTTP(insertW, insertReq)
+	s.Require().Equal(http.StatusCreated, insertW.Code)
+
+	statsReq := httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	statsW := httptest.NewRecorder()
+	s.router.ServeHTTP(statsW, statsReq)
+	s.Assert().JSONEq(`{"success":true,"data":{"vector_count":1}}`, statsW.Body.String())
+
+	resetReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/reset", nil)
+	resetW := httptest.NewRecorder()
+	s.router.ServeHTTP(resetW, resetReq)
+	s.Assert().Equal(http.StatusOK, resetW.Code)
+	s.Assert().JSONEq(`{"success":true,"data":{"status":"reset"}}`, resetW.Body.String())
+
+	statsReq = httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	statsW = httptest.NewRecorder()
+	s.router.ServeHTTP(statsW, statsReq)
+	s.Assert().JSONEq(`{"success":true,"data":{"vector_count":0}}`, statsW.Body.String())
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/vectors/reset_v1", nil)
+	getW := httptest.NewRecorder()
+	s.router.ServeHTTP(getW, getReq)
+	s.Assert().Equal(http.StatusNotFound, getW.Code, "vector inserted before reset should no longer exist")
+
+	// The same string ID should be freely reusable after a full reset.
+	reinsertReq := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(insertBody))
+	reinsertReq.Header.Set("Content-Type", "application/json")
+	reinsertW := httptest.NewRecorder()
+	s.router.ServeHTTP(reinsertW, reinsertReq)
+	s.Assert().Equal(http.StatusCreated, reinsertW.Code, "re-inserting the same id after reset should succeed")
+}
+
 func TestAPITestSuite(t *testing.T) {
 	suite.Run(t, new(APITestSuite))
 }

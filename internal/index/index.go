@@ -342,7 +342,7 @@ func (idx *VectorIndex[T]) deleteInternal(id string) error {
 	return nil
 }
 
-// Clear removes all vectors from the index
+// Clear removes all vectors from the index, including ID mappings and the WAL.
 func (idx *VectorIndex[T]) Clear() {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -359,6 +359,16 @@ func (idx *VectorIndex[T]) Clear() {
 	if idx.vectorStore != nil {
 		if err := idx.vectorStore.Reset(); err != nil {
 			log.Error().Err(err).Msg("failed to reset mmap vector store")
+		}
+	}
+
+	if idx.IDMapper != nil {
+		idx.IDMapper.Clear()
+	}
+
+	if idx.wal != nil {
+		if err := idx.wal.Clear(); err != nil {
+			log.Error().Err(err).Msg("failed to clear WAL")
 		}
 	}
 }
