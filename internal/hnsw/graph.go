@@ -140,10 +140,18 @@ func (n *layerNode[K, V]) search(
 	visited[n.Key] = true
 
 	for candidates.Len() > 0 {
-		var (
-			current  = candidates.Pop().node // Get the closest node from candidates to explore
-			improved = false
-		)
+		// Canonical SEARCH-LAYER termination (Malkov & Yashunin, Algorithm 2):
+		// candidates is nearest-first, so once the closest remaining candidate
+		// is already farther than our worst kept result, nothing still queued
+		// can improve the result either — stop. This must be checked against
+		// the *next* candidate, not "did the last expansion help": the last
+		// expansion can be unproductive while an earlier, still-queued
+		// candidate remains genuinely promising.
+		if result.Len() >= k && candidates.Min().dist > result.Max().dist {
+			break
+		}
+
+		current := candidates.Pop().node // Get the closest node from candidates to explore
 
 		// Iterate through neighbors in a sorted, deterministic fashion for test consistency.
 		neighborKeys := maps.Keys(current.neighbors)
@@ -172,24 +180,12 @@ func (n *layerNode[K, V]) search(
 				}
 			}
 
-			// Check if this new neighbor improves the current worst kept result --
-			// that's the one eviction would target below, not the best-so-far
-			// (result.Min()), which would demand beating the single closest node
-			// ever seen just to keep searching.
-			// Guard result.Max() — result may be empty if all nodes so far were filtered.
-			improved = improved || result.Len() == 0 || dist < result.Max().dist
 			if result.Len() < k {
 				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
 			} else if dist < result.Max().dist { // If new node is better than the worst in result set
 				result.PopLast()                                               // Remove worst
 				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist}) // Add new best
 			}
-		}
-
-		// Termination condition: if no improvement was made and 'k' results are already found,
-		// further exploration might not yield significantly better results.
-		if !improved && result.Len() >= k {
-			break
 		}
 	}
 
