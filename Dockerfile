@@ -23,6 +23,9 @@ COPY --from=builder /app/config.yaml .
 
 EXPOSE 8000
 
+# nobody must own /app to write data_path/wal_path files there at runtime
+RUN chown -R nobody:nobody /app
+
 # Run as non-root user
 USER nobody:nobody
 
