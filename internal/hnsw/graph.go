@@ -292,6 +292,14 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	// the expense of memory.
 	EfSearch int
 
+	// EfConstruction is the number of nodes to consider when selecting neighbors
+	// for a new node during graph construction (Add). It is independent of
+	// EfSearch: a low EfConstruction produces a poorly-connected graph that no
+	// amount of EfSearch or M can fully compensate for at query time. 200 is
+	// hnswlib's default and a reasonable starting point; higher values build a
+	// higher-quality graph at the cost of slower inserts.
+	EfConstruction int
+
 	// layers is a slice of layers in the graph.
 	layers []*layer[K, V]
 }
@@ -311,10 +319,11 @@ func defaultRand() *rand.Rand {
 // V is the vector type (e.g., []float32, []int8).
 func NewGraph[K cmp.Ordered, V VectorType]() *Graph[K, V] {
 	return &Graph[K, V]{
-		M:        16,
-		Ml:       0.25,
-		EfSearch: 20,
-		Rng:      defaultRand(),
+		M:              16,
+		Ml:             0.25,
+		EfSearch:       20,
+		EfConstruction: 200,
+		Rng:            defaultRand(),
 	}
 }
 
@@ -473,7 +482,9 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 			}
 
 			// Find the 'M' nearest neighbors in the current layer's local neighborhood.
-			neighborhood := searchPoint.search(g.M, g.EfSearch, vec, g.Distance, nil)
+			// Uses EfConstruction (not EfSearch) -- a wider construction-time search
+			// builds a higher-quality graph, independent of query-time search cost.
+			neighborhood := searchPoint.search(g.M, g.EfConstruction, vec, g.Distance, nil)
 			if len(neighborhood) == 0 {
 				// This should ideally not happen as the searchPoint itself should be in the result set.
 				panic("search returned no nodes")

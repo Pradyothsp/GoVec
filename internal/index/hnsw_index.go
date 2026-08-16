@@ -37,14 +37,15 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	distanceMetric string
 	dimensions     int // 0 until first insert; set lazily under mu.Lock()
 
-	mu           sync.RWMutex
-	wal          *WAL
-	encodeFunc   func([]float32) T
-	distanceFunc func(T, T) (float32, error)
-	hnswDistFunc hnsw.DistanceFunc[T] // stored for Clear() graph reset
-	hnswM        int                  // stored for Clear() graph reset
-	hnswEfSearch int                  // stored for Clear() graph reset
-	vectorStore  *storage.MmapStore   // nil when mmap is disabled
+	mu                 sync.RWMutex
+	wal                *WAL
+	encodeFunc         func([]float32) T
+	distanceFunc       func(T, T) (float32, error)
+	hnswDistFunc       hnsw.DistanceFunc[T] // stored for Clear() graph reset
+	hnswM              int                  // stored for Clear() graph reset
+	hnswEfSearch       int                  // stored for Clear() graph reset
+	hnswEfConstruction int                  // stored for Clear() graph reset
+	vectorStore        *storage.MmapStore   // nil when mmap is disabled
 }
 
 // GetByID returns a vector by ID.
@@ -92,27 +93,30 @@ func NewHNSWIndex[T hnsw.VectorType](
 	hnswDistFunc hnsw.DistanceFunc[T],
 	m int,
 	efSearch int,
+	efConstruction int,
 	metaIndex *core.MetadataIndex,
 	vectorStore *storage.MmapStore,
 ) *HNSWIndex[T] {
 	g := hnsw.NewGraph[uint32, T]()
 	g.M = m
 	g.EfSearch = efSearch
+	g.EfConstruction = efConstruction
 	g.Distance = hnswDistFunc
 
 	return &HNSWIndex[T]{
-		graph:         g,
-		metadata:      make(map[uint32]*core.VectorNode[T]),
-		metaIndex:     metaIndex,
-		InvertedIndex: invertedIndex,
-		IDMapper:      idMapper,
-		wal:           wal,
-		encodeFunc:    encodeFunc,
-		distanceFunc:  distanceFunc,
-		hnswDistFunc:  hnswDistFunc,
-		hnswM:         m,
-		hnswEfSearch:  efSearch,
-		vectorStore:   vectorStore,
+		graph:              g,
+		metadata:           make(map[uint32]*core.VectorNode[T]),
+		metaIndex:          metaIndex,
+		InvertedIndex:      invertedIndex,
+		IDMapper:           idMapper,
+		wal:                wal,
+		encodeFunc:         encodeFunc,
+		distanceFunc:       distanceFunc,
+		hnswDistFunc:       hnswDistFunc,
+		hnswM:              m,
+		hnswEfSearch:       efSearch,
+		hnswEfConstruction: efConstruction,
+		vectorStore:        vectorStore,
 	}
 }
 
@@ -793,6 +797,7 @@ func (idx *HNSWIndex[T]) Clear() {
 	g := hnsw.NewGraph[uint32, T]()
 	g.M = idx.hnswM
 	g.EfSearch = idx.hnswEfSearch
+	g.EfConstruction = idx.hnswEfConstruction
 	g.Distance = idx.hnswDistFunc
 	idx.graph = g
 

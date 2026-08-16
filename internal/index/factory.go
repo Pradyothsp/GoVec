@@ -136,6 +136,11 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		efSearch = 20
 	}
 
+	efConstruction := cfg.HnswEfConstruction
+	if efConstruction <= 0 {
+		efConstruction = 200
+	}
+
 	if cfg.Quantization == config.QuantizationScalar {
 		if mathBlock.Int8Func == nil {
 			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
@@ -145,7 +150,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			return nil, err
 		}
 		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
-			core.QuantizeVector, mathBlock.Int8Func, graphDistanceFunc, m, efSearch, metaIndex, mmapStore)
+			core.QuantizeVector, mathBlock.Int8Func, graphDistanceFunc, m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.quantization = string(cfg.Quantization)
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)
@@ -160,7 +165,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		}
 		identityFunc := func(v []float32) []float32 { return v }
 		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
-			identityFunc, mathBlock.FloatFunc, graphDistanceFunc, m, efSearch, metaIndex, mmapStore)
+			identityFunc, mathBlock.FloatFunc, graphDistanceFunc, m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.quantization = string(cfg.Quantization)
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)
