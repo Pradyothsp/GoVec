@@ -117,6 +117,7 @@ engine:
 ### Planned
 - ⏳ Product & Binary quantization
 - ⏳ Metadata filtering in search
+- ⏳ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
 
 ## Testing & Workflow
 
