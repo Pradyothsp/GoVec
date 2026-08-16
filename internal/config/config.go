@@ -45,6 +45,7 @@ type EngineConfig struct {
 	EnableMetadataIndex bool           `yaml:"enable_metadata_index"`
 	HnswM               int            `yaml:"hnsw_m"`
 	HnswEfSearch        int            `yaml:"hnsw_ef_search"`
+	HnswEfConstruction  int            `yaml:"hnsw_ef_construction"`
 }
 
 // GRPCConfig holds gRPC server configuration.
@@ -119,6 +120,7 @@ func DefaultConfig() *Config {
 			EnableMetadataIndex: false,
 			HnswM:               16,
 			HnswEfSearch:        20,
+			HnswEfConstruction:  200,
 		},
 		GRPC: GRPCConfig{
 			Enabled:          false,

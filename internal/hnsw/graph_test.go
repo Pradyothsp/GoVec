@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"math/rand"
+	"sort"
 	"strconv"
 	"testing"
 
@@ -437,4 +438,88 @@ func TestGraph_Int8_DistanceAccuracy(t *testing.T) {
 	t.Logf("Float32 distance: %.6f", distFloat)
 	t.Logf("Int8 distance:    %.6f", distInt8)
 	t.Logf("Difference:       %.6f", distFloat-distInt8)
+}
+
+// TestGraph_EfConstruction_AffectsGraphQuality verifies EfConstruction (not EfSearch)
+// governs graph-build quality. Both graphs here share M and EfSearch — only
+// EfConstruction differs — so any recall difference must come from the construction
+// path using EfConstruction (graph.go's Add), not from query-time search breadth.
+func TestGraph_EfConstruction_AffectsGraphQuality(t *testing.T) {
+	const dim, n, k = 8, 500, 10
+
+	rng := rand.New(rand.NewSource(42))
+	vectors := make([][]float32, n)
+	for i := range vectors {
+		v := make([]float32, dim)
+		for d := range v {
+			v[d] = rng.Float32()
+		}
+		vectors[i] = v
+	}
+
+	buildGraph := func(efConstruction int) *Graph[int, []float32] {
+		g := NewGraph[int, []float32]()
+		g.M = 6 // deliberately low, so construction quality (not connection count) dominates recall
+		g.EfConstruction = efConstruction
+		g.EfSearch = 200 // held generous and constant across both graphs
+		g.Distance = CosineDistanceFloat32
+		g.Rng = rand.New(rand.NewSource(1)) // deterministic level assignment for a fair comparison
+
+		nodes := make([]Node[int, []float32], n)
+		for i, v := range vectors {
+			nodes[i] = MakeNode(i, v)
+		}
+		g.Add(nodes...)
+
+		return g
+	}
+
+	recallAtK := func(g *Graph[int, []float32]) float64 {
+		hits, total := 0, 0
+		for i, q := range vectors {
+			truth := bruteForceKNN(vectors, i, q, k)
+
+			found := 0
+			for _, r := range g.Search(q, k+1) { // +1 since the query vector itself may be returned
+				if r.Key != i && truth[r.Key] {
+					found++
+				}
+			}
+			hits += found
+			total += k
+		}
+
+		return float64(hits) / float64(total)
+	}
+
+	lowRecall := recallAtK(buildGraph(1))
+	highRecall := recallAtK(buildGraph(200))
+
+	assert.Greater(t, highRecall, lowRecall,
+		"a wider EfConstruction should build a measurably better graph, independent of EfSearch")
+	assert.Greater(t, highRecall, 0.6, "EfConstruction=200 should reach reasonably good recall at M=6")
+}
+
+// bruteForceKNN returns the set of the k nearest neighbor keys to q by exact
+// cosine distance, excluding the query's own index.
+func bruteForceKNN(vectors [][]float32, excludeIdx int, q []float32, k int) map[int]bool {
+	type cand struct {
+		id   int
+		dist float32
+	}
+	cands := make([]cand, 0, len(vectors)-1)
+	for j, v := range vectors {
+		if j == excludeIdx {
+			continue
+		}
+		cands = append(cands, cand{j, CosineDistanceFloat32(q, v)})
+	}
+	sort.Slice(cands, func(a, b int) bool { return cands[a].dist < cands[b].dist })
+
+	truth := make(map[int]bool, k)
+	for _, c := range cands[:k] {
+		truth[c.id] = true
+	}
+
+	return truth
 }

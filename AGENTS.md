@@ -107,7 +107,7 @@ engine:
 - ✅ Vector deletion (`DELETE /api/v1/vectors/:id`) and upsert-on-insert
 - ✅ Reset/clear all vectors (`POST /api/v1/admin/reset`) -- see `docs/architecture/ID_MAPPING.md` amendment
 - ✅ Generic Vector Engine (float32 & int8)
-- ✅ Approximate nearest neighbor search (HNSW, alongside brute-force linear scan) -- see `internal/hnsw`, `internal/index/factory.go`
+- ✅ Approximate nearest neighbor search (HNSW, alongside brute-force linear scan) -- see `internal/hnsw`, `internal/index/factory.go`, and `docs/architecture/HNSW_EF_CONSTRUCTION.md` for the `hnsw_ef_construction`/`hnsw_ef_search` split
 - ✅ Cosine and Euclidean distance metrics (`engine.distance_metric`), both index types -- see `docs/architecture/DISTANCE_METRICS.md`
 - ✅ Write-Ahead Log (WAL) & Crash Recovery
 - ✅ Atomic Persistence (GOB encoding)
