@@ -111,6 +111,40 @@ func (idx *VectorIndex[T]) Insert(ctx context.Context, id string, vec []float32,
 	return nil
 }
 
+// BatchInsert adds or updates multiple vectors with a single WAL fsync for the
+// whole batch. If writing the batch to the WAL fails, no item is applied and the
+// batch aborts entirely — see WAL.WriteEntries for the atomicity this relies on.
+func (idx *VectorIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertItem) ([]BatchInsertError, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	entries := make([]*WALEntry, len(items))
+	for i, item := range items {
+		entries[i] = &WALEntry{
+			Action: WALActionInsert,
+			ID:     item.ID,
+			Vector: item.Vector,
+			Sparse: item.Sparse,
+			Meta:   item.Meta,
+		}
+	}
+
+	if err := idx.wal.WriteEntries(ctx, entries); err != nil {
+		zerolog.Ctx(ctx).Error().Err(err).Int("count", len(items)).Msg("failed to write WAL batch")
+		return nil, err
+	}
+
+	var failures []BatchInsertError
+	for _, item := range items {
+		if err := idx.insertInternal(item.ID, item.Vector, item.Sparse, item.Meta); err != nil {
+			zerolog.Ctx(ctx).Error().Err(err).Str("id", item.ID).Msg("failed to apply batch insert item")
+			failures = append(failures, BatchInsertError{ID: item.ID, Err: err})
+		}
+	}
+
+	return failures, nil
+}
+
 // insertInternal performs the core insert logic without WAL writes.
 // PRECONDITION: idx.mu.Lock() must be held by caller.
 func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {

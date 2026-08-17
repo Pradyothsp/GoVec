@@ -2,6 +2,7 @@ package index
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,13 +60,43 @@ func (w *WAL) WriteEntry(_ context.Context, entry *WALEntry) error {
 	defer w.mu.Unlock()
 
 	// Encode to JSON
-	bytes, err := json.Marshal(entry)
+	encoded, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
 
 	// Add newline so we can read it line-by-line later
-	if _, err = w.file.Write(append(bytes, '\n')); err != nil {
+	if _, err = w.file.Write(append(encoded, '\n')); err != nil {
+		return err
+	}
+	return w.file.Sync()
+}
+
+// WriteEntries saves multiple operations to disk as a single durable unit: one
+// buffered write plus one fsync for the whole batch, instead of one fsync per
+// entry. All entries are marshaled into memory first, so a marshal failure on
+// any entry aborts before anything touches the file — the WAL is left exactly
+// as it was, never containing a partial batch.
+// ctx is accepted for API consistency and future use (e.g. deadline-aware writes).
+func (w *WAL) WriteEntries(_ context.Context, entries []*WALEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	for _, entry := range entries {
+		b, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if _, err := w.file.Write(buf.Bytes()); err != nil {
 		return err
 	}
 	return w.file.Sync()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -156,6 +157,97 @@ func TestWriteEntry_MultipleEntries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"id":"v1"`)
 	assert.Contains(t, string(data), `"id":"v2"`)
+}
+
+func TestWAL_WriteEntries_WritesAllEntriesInOneSync(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+	defer wal.Close() //nolint:errcheck // test cleanup
+
+	entries := []*WALEntry{
+		{Action: WALActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple},
+		{Action: WALActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
+		{Action: WALActionDelete, ID: "v1"},
+	}
+
+	err = wal.WriteEntries(context.Background(), entries)
+	require.NoError(t, err)
+
+	// No extra fsync needed to observe the data -- WriteEntries syncs internally,
+	// so it should already be on disk without a Close().
+	data, err := os.ReadFile(walPath)
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	require.Len(t, lines, 3, "each entry should be its own line, in order")
+	assert.Contains(t, lines[0], `"id":"v1"`)
+	assert.Contains(t, lines[0], `"action":"INSERT"`)
+	assert.Contains(t, lines[1], `"id":"v2"`)
+	assert.Contains(t, lines[2], `"id":"v1"`)
+	assert.Contains(t, lines[2], `"action":"DELETE"`)
+}
+
+func TestWAL_WriteEntries_EmptySliceIsNoop(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+	defer wal.Close() //nolint:errcheck // test cleanup
+
+	err = wal.WriteEntries(context.Background(), nil)
+	require.NoError(t, err)
+
+	info, err := os.Stat(walPath)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), info.Size())
+}
+
+// TestWAL_WriteEntries_MarshalErrorLeavesFileUntouched verifies the batch is
+// all-or-nothing at the marshaling stage too: if any entry in the batch can't
+// be JSON-encoded, nothing from that batch -- not even the entries before the
+// bad one -- should reach disk.
+func TestWAL_WriteEntries_MarshalErrorLeavesFileUntouched(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+	defer wal.Close() //nolint:errcheck // test cleanup
+
+	entries := []*WALEntry{
+		{Action: WALActionInsert, ID: "good-entry-before", Vector: fixtures.Vec3dSimple},
+		{Action: WALActionInsert, ID: "bad-entry", Meta: map[string]any{"unmarshalable": make(chan int)}},
+	}
+
+	err = wal.WriteEntries(context.Background(), entries)
+	require.Error(t, err)
+
+	info, err := os.Stat(walPath)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), info.Size(), "a marshal failure anywhere in the batch must not leak earlier entries to disk")
+}
+
+// TestWAL_WriteEntries_WriteErrorIsAllOrNothing verifies that if the underlying
+// file write fails, no partial batch is left behind -- the whole batch is one
+// Write() call, so there's no torn-entry state to worry about, only "wrote
+// everything" or "wrote nothing."
+func TestWAL_WriteEntries_WriteErrorIsAllOrNothing(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := NewWAL(walPath)
+	require.NoError(t, err)
+
+	// Close the underlying file out from under the WAL to force the write to fail.
+	require.NoError(t, wal.file.Close())
+
+	entries := []*WALEntry{
+		{Action: WALActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple},
+		{Action: WALActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
+	}
+
+	err = wal.WriteEntries(context.Background(), entries)
+	require.Error(t, err)
+
+	data, readErr := os.ReadFile(walPath)
+	require.NoError(t, readErr)
+	assert.Empty(t, data, "a failed batch write must not leave a partial batch on disk")
 }
 
 func TestWAL_Clear(t *testing.T) {
