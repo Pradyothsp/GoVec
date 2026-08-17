@@ -122,12 +122,13 @@ engine:
 - ✅ Atomic Persistence (GOB encoding)
 - ✅ CI/CD with GitHub Actions (lint, test, vuln)
 - ✅ Docker support (multi-stage)
+- ✅ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- closed the recall@1 gap (75.0%→96.0%, matching Chroma exactly); also fixed two other real bugs found along the way (base layer needs 2×M capacity, not M; query-time search was exploring at breadth `k` instead of `max(k, ef_search)`). Real cost: insert and high-k query latency regressed, and RAM usage roughly doubled -- not yet recovered, see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
 
 ### Planned
-- 🔜 HNSW dense ID-indexed storage, prioritized next (replace `HNSWIndex.metadata` and `layer[0].nodes` maps with arrays indexed by the existing dense internal ID -- upper layers and neighbor-pointer-to-ID stay maps/pointers for now, see the doc's refined risk breakdown) -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
+- ⏳ Recover insert/query/memory cost from the heuristic neighbor selection work above -- `EfConstruction`/`EfSearch` are now the dominant cost drivers (not `M`), unexplored so far -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
 - ⏳ Product & Binary quantization
 - ⏳ Metadata filtering in search
-- ⏳ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`), deprioritized behind dense storage above -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
+- ❌ HNSW dense ID-indexed storage -- evaluated with real numbers (~11MB combined at 100k vectors, using the per-entry map-overhead constant measured in the neighbor-slice fix) and declined; not worth the implementation cost -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
 - ⏳ Concurrent-safe HNSW graph insertion (parallelize `BatchInsert` across goroutines) -- measured ceiling vs Chroma is only ~1.04x (see `govec-bench/STATUS.md` §19), low priority -- see `docs/architecture/HNSW_CONCURRENT_INSERT.md`
 
 ## Testing & Workflow
