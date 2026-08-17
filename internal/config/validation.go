@@ -114,5 +114,16 @@ func ValidateEngineConfig(cfg EngineConfig) error {
 		return fmt.Errorf("invalid distance metric: '%s', must be 'cosine' or 'euclidean'", cfg.DistanceMetric)
 	}
 
+	// hnsw_ef_construction must be at least hnsw_m: the construction-time search
+	// (bounded by ef_construction) supplies the candidate pool that neighbor
+	// selection picks M connections from. A smaller pool silently under-connects
+	// every new node to fewer than M neighbors, with no error -- just a quietly
+	// worse-connected graph. Only checked when both are explicitly set (non-zero);
+	// 0 means "use the built-in default" and factory.go's defaults (16 and 200)
+	// already satisfy this.
+	if indexType == IndexTypeHNSW && cfg.HnswM > 0 && cfg.HnswEfConstruction > 0 && cfg.HnswEfConstruction < cfg.HnswM {
+		return fmt.Errorf("hnsw_ef_construction (%d) must be >= hnsw_m (%d)", cfg.HnswEfConstruction, cfg.HnswM)
+	}
+
 	return nil
 }

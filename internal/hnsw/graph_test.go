@@ -75,18 +75,21 @@ func Test_layerNode_search(t *testing.T) {
 
 	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32, nil)
 
-	require.Equal(t, 4, best[0].node.Key)
-	require.Equal(t, 3, best[1].node.Key)
+	// Node 3 (value 3) and node 5 (value 5) are both exactly distance 1 from
+	// the target (4) -- a genuine tie, so either is a valid second-nearest.
 	require.Len(t, best, 2)
+	require.Equal(t, 4, best[0].node.Key, "exact match (distance 0) must be first")
+	require.Contains(t, []int{3, 5}, best[1].node.Key, "second slot is a tie between nodes 3 and 5 (both distance 1 from the target)")
 }
 
 func newTestGraph[K cmp.Ordered]() *Graph[K, []float32] {
 	return &Graph[K, []float32]{
-		M:        6,
-		Distance: EuclideanDistanceFloat32,
-		Ml:       0.5,
-		EfSearch: 20,
-		Rng:      rand.New(rand.NewSource(0)),
+		M:              6,
+		Distance:       EuclideanDistanceFloat32,
+		Ml:             0.5,
+		EfSearch:       20,
+		EfConstruction: 200,
+		Rng:            rand.New(rand.NewSource(0)),
 	}
 }
 
@@ -126,9 +129,12 @@ func TestGraph_AddSearch(t *testing.T) {
 
 	// True nearest 4 to 64.5 by distance: 64 (0.5), 65 (0.5), then a tie
 	// between 63 and 66 (both 1.5). 62 (2.5) is farther than both and must
-	// not appear.
+	// not appear. Order among these isn't a documented guarantee of Search --
+	// layerNode.search returns a bounded max-heap's raw backing array, sorted
+	// only at index 0 (the heap root) -- so this checks set membership, not
+	// a specific order.
 	require.Len(t, nearest, 4)
-	require.EqualValues(
+	require.ElementsMatch(
 		t,
 		[]Node[int, []float32]{
 			{64, []float32{64}},
@@ -166,16 +172,81 @@ func TestGraph_AddDelete(t *testing.T) {
 
 	postDeleteConnectivity := an.Connectivity()
 
-	// Connectivity should be the same for the lowest layer.
-	require.Equal(
+	// Connectivity should stay roughly the same for the lowest layer after
+	// delete-and-repair -- not exactly equal. With heuristic neighbor
+	// selection, connectivity is content-dependent (redundant same-direction
+	// candidates get pruned, so it's no longer always "fill to M"), so
+	// repairing after a mass delete lands close to but not bit-for-bit at the
+	// pre-delete figure.
+	require.InDelta(
 		t, preDeleteConnectivity[0],
 		postDeleteConnectivity[0],
+		0.5,
 	)
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		ok := g.Delete(-1)
 		require.False(t, ok)
 	})
+}
+
+// candidate is a small test helper to build a searchCandidate without going
+// through a real search -- selectNeighborsHeuristic only depends on the
+// (node, dist-to-query) pairing, not how it was produced.
+func candidate(key int, vec []float32, distToQuery float32) searchCandidate[int, []float32] {
+	return searchCandidate[int, []float32]{
+		node: &layerNode[int, []float32]{Node: Node[int, []float32]{Key: key, Value: vec}},
+		dist: distToQuery,
+	}
+}
+
+func Test_selectNeighborsHeuristic_PrefersDiversityOverRawDistance(t *testing.T) {
+	t.Parallel()
+
+	// Query at origin. A and B sit on the same line from the query, very
+	// close to each other (B is redundant given A: A is much closer to B
+	// than B is to the query). C is farther from the query than both, but in
+	// a different direction, so it isn't redundant relative to A.
+	//
+	// Raw "M closest by distance" would pick {A, B} (distances 1, 1.1) over
+	// C (distance 2). The heuristic should instead pick {A, C}, since B adds
+	// nothing A doesn't already cover.
+	a := candidate(1, []float32{1, 0}, 1.0)
+	b := candidate(2, []float32{1.1, 0}, 1.1)
+	c := candidate(3, []float32{0, 2}, 2.0)
+
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{b, a, c}, 2, EuclideanDistanceFloat32)
+
+	require.Len(t, selected, 2)
+	assert.Equal(t, 1, selected[0].Key, "nearest candidate (A) should always be selected first")
+	assert.Equal(t, 3, selected[1].Key, "diverse-but-farther C should be preferred over redundant-but-closer B")
+}
+
+func Test_selectNeighborsHeuristic_NoBackfillWhenCandidatesAreRedundant(t *testing.T) {
+	t.Parallel()
+
+	// Same redundant pair as above, but with nothing diverse available.
+	// hnswlib's getNeighborsByHeuristic2 has no backfill step, so this must
+	// return fewer than m rather than padding back up with the rejected
+	// redundant candidate.
+	a := candidate(1, []float32{1, 0}, 1.0)
+	b := candidate(2, []float32{1.1, 0}, 1.1)
+
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 2, EuclideanDistanceFloat32)
+
+	require.Len(t, selected, 1, "B is redundant given A, and there's no third candidate to backfill with")
+	assert.Equal(t, 1, selected[0].Key)
+}
+
+func Test_selectNeighborsHeuristic_FewerCandidatesThanMReturnsAllUnpruned(t *testing.T) {
+	t.Parallel()
+
+	a := candidate(1, []float32{1, 0}, 1.0)
+	b := candidate(2, []float32{1.1, 0}, 1.1) // would be pruned as redundant if the pool were large enough to prune
+
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 5, EuclideanDistanceFloat32)
+
+	require.Len(t, selected, 2, "fewer candidates than m means nothing to prune, matching hnswlib's size() < M early return")
 }
 
 func Benchmark_HSNW(b *testing.B) {

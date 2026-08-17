@@ -68,10 +68,12 @@ func (n *layerNode[K, V]) removeNeighbor(key K) {
 }
 
 // addNeighbor attempts to add a new node as a neighbor to the current layerNode.
-// If the current node already has 'm' neighbors (its maximum capacity), it identifies
-// the existing neighbor with the "worst" (largest) distance to the current node
-// and replaces it with the newNode. This ensures the neighborhood always contains
-// the 'm' closest nodes in that layer.
+// If the current node already has 'm' neighbors (its maximum capacity), the full
+// candidate set (existing neighbors + newNode) is re-evaluated with
+// selectNeighborsHeuristic, which prefers diverse connections over simply the
+// 'm' closest by raw distance -- see selectNeighborsHeuristic's doc comment.
+// This can drop more than one existing neighbor, or newNode itself, though in
+// practice it's usually exactly one (m+1 candidates in, up to m selected).
 // 'dist' is the distance function used to compare vectors.
 func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist DistanceFunc[V]) {
 	// If newNode is already a neighbor, just update it in place -- matches
@@ -89,29 +91,34 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist Dist
 		return
 	}
 
-	// Find the neighbor with the worst distance to replace.
-	var (
-		worstDist = float32(math.Inf(-1)) // Initialize with negative infinity to find the true max distance
-		worstIdx  = -1
-	)
+	// Over capacity: re-run selection over the full candidate set, with
+	// distances computed relative to n itself (not whatever query the new
+	// node was originally inserted for).
+	candidates := make([]searchCandidate[K, V], len(n.neighbors))
 	for i, neighbor := range n.neighbors {
-		d := dist(neighbor.Value, n.Value)
-		// Compare current neighbor's distance to 'worstDist'. Also handle cases
-		// where 'worstIdx' is unset (first iteration) or NaN results from distance function.
-		if d > worstDist || worstIdx == -1 {
-			worstDist = d
-			worstIdx = i
+		candidates[i] = searchCandidate[K, V]{node: neighbor, dist: dist(neighbor.Value, n.Value)}
+	}
+	selected := selectNeighborsHeuristic(candidates, m, dist)
+
+	// Diff against the pre-selection set to find who got dropped.
+	keep := make(map[K]struct{}, len(selected))
+	for _, s := range selected {
+		keep[s.Key] = struct{}{}
+	}
+	var dropped []*layerNode[K, V]
+	for _, neighbor := range n.neighbors {
+		if _, ok := keep[neighbor.Key]; !ok {
+			dropped = append(dropped, neighbor)
 		}
 	}
-	worst := n.neighbors[worstIdx]
 
-	// Remove the worst neighbor and its backlink.
-	n.neighbors[worstIdx] = n.neighbors[len(n.neighbors)-1]
-	n.neighbors = n.neighbors[:len(n.neighbors)-1]
-	worst.removeNeighbor(n.Key)
-	// Attempt to find a new best neighbor for the disconnected 'worst' node,
-	// though this specific call usually leads to no-op if 'worst' was truly the furthest.
-	worst.replenish(m, dist)
+	n.neighbors = selected
+	for _, d := range dropped {
+		// Remove the backlink and try to find the disconnected node a
+		// replacement connection -- no-op if d is truly redundant everywhere.
+		d.removeNeighbor(n.Key)
+		d.replenish(m, dist)
+	}
 }
 
 // searchCandidate represents a node considered during the HNSW search process,
@@ -125,6 +132,64 @@ type searchCandidate[K cmp.Ordered, V VectorType] struct {
 // Lower distance means higher priority in the min-heap.
 func (s searchCandidate[K, V]) Less(o searchCandidate[K, V]) bool {
 	return s.dist < o.dist
+}
+
+// selectNeighborsHeuristic picks up to m diverse candidates from a pool whose
+// distances are already computed relative to a common query point (the new
+// node being inserted, or an existing node being re-evaluated -- see the two
+// call sites in Add and addNeighbor). This is SELECT-NEIGHBORS-HEURISTIC from
+// Malkov & Yashunin, matching hnswlib's actual getNeighborsByHeuristic2
+// exactly: no extendCandidates (no pulling in candidates' own neighbors to
+// widen the pool) and no keepPrunedConnections (rejected candidates are not
+// backfilled if fewer than m survive) -- hnswlib's production implementation
+// doesn't use either, despite both appearing in the original paper.
+//
+// Candidates are visited nearest-to-query first. A candidate is accepted only
+// if it is closer to the query than it is to every already-accepted
+// candidate; otherwise it's considered redundant (already well-represented by
+// a closer, already-selected neighbor) and dropped. This favors connections
+// that reach new, useful regions of the graph over several connections
+// clustered in the same direction, which raw "m closest by distance"
+// selection (this function's caller before this change) is prone to.
+//
+// If there are fewer than m candidates, all of them are returned unpruned --
+// nothing to select from. Note this can still return fewer than m even when
+// there are m or more candidates: the heuristic has no backfill step, so
+// highly redundant candidate sets can legitimately prune below m.
+func selectNeighborsHeuristic[K cmp.Ordered, V VectorType](candidates []searchCandidate[K, V], m int, dist DistanceFunc[V]) []*layerNode[K, V] {
+	if len(candidates) < m {
+		selected := make([]*layerNode[K, V], len(candidates))
+		for i, c := range candidates {
+			selected[i] = c.node
+		}
+		return selected
+	}
+
+	sorted := slices.Clone(candidates)
+	slices.SortFunc(sorted, func(a, b searchCandidate[K, V]) int {
+		if c := cmp.Compare(a.dist, b.dist); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.node.Key, b.node.Key) // deterministic tie-break
+	})
+
+	selected := make([]*layerNode[K, V], 0, m)
+	for _, candidate := range sorted {
+		if len(selected) >= m {
+			break
+		}
+		good := true
+		for _, kept := range selected {
+			if dist(kept.Value, candidate.node.Value) < candidate.dist {
+				good = false
+				break
+			}
+		}
+		if good {
+			selected = append(selected, candidate.node)
+		}
+	}
+	return selected
 }
 
 // search performs a greedy search within the current layer to find the 'k' closest
@@ -144,9 +209,28 @@ func (n *layerNode[K, V]) search(
 	// Non-matching nodes are still explored for graph connectivity.
 	allowlist map[K]struct{},
 ) []searchCandidate[K, V] {
-	// candidates is a min-heap storing nodes to visit, prioritized by their distance to the target.
+	// resultCap is the breadth exploration actually operates at -- matches
+	// hnswlib's searchBaseLayerST exactly: the result/frontier are bounded by
+	// ef (here, efSearch), not k, for the entire search; only the very end
+	// trims down to the k the caller actually asked for. Using k directly as
+	// the exploration bound (the previous behavior) made the "is this
+	// candidate worth exploring further" cutoff far too narrow for small k --
+	// k=1 (recall@1) was badly hurt by this, since a single found candidate
+	// would immediately close off further exploration; k=50 was barely
+	// affected since it already exceeded the configured efSearch anyway.
+	resultCap := k
+	if efSearch > resultCap {
+		resultCap = efSearch
+	}
+
+	// candidates is a min-heap of nodes to visit, prioritized by distance to the target.
+	// Deliberately unbounded in size -- matches hnswlib's candidate_set, which
+	// has no size cap at all, only a relevance filter on what gets pushed (see
+	// below). Capping it by raw size (the previous behavior) discarded
+	// genuinely useful not-yet-explored candidates purely because the
+	// frontier got crowded, independent of whether they were worth visiting.
 	candidates := heap.Heap[searchCandidate[K, V]]{}
-	candidates.Init(make([]searchCandidate[K, V], 0, efSearch))
+	candidates.Init(make([]searchCandidate[K, V], 0, resultCap))
 	candidates.Push(
 		searchCandidate[K, V]{
 			node: n,
@@ -154,12 +238,12 @@ func (n *layerNode[K, V]) search(
 		},
 	)
 	var (
-		// result is a max-heap storing the 'k' best (closest) found nodes so far.
+		// result is a max-heap storing the resultCap best (closest) found nodes so far.
 		result = heap.Heap[searchCandidate[K, V]]{}
 		// visited tracks nodes already processed to avoid redundant work and loops.
 		visited = make(map[K]bool)
 	)
-	result.Init(make([]searchCandidate[K, V], 0, k))
+	result.Init(make([]searchCandidate[K, V], 0, resultCap))
 
 	// Start with the initial node in the result set only if it passes the allowlist.
 	// It is always in candidates so its neighbors are explored regardless.
@@ -178,7 +262,7 @@ func (n *layerNode[K, V]) search(
 		// the *next* candidate, not "did the last expansion help": the last
 		// expansion can be unproductive while an earlier, still-queued
 		// candidate remains genuinely promising.
-		if result.Len() >= k && candidates.Min().dist > result.Max().dist {
+		if result.Len() >= resultCap && candidates.Min().dist > result.Max().dist {
 			break
 		}
 
@@ -196,12 +280,14 @@ func (n *layerNode[K, V]) search(
 
 			dist := distance(neighbor.Value, target)
 
-			// Always push to candidates — non-matching nodes still serve as stepping
-			// stones for graph connectivity, ensuring reachability of distant matching nodes.
-			candidates.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
-			// Maintain 'candidates' size up to 'efSearch'. If it exceeds, remove the furthest.
-			if candidates.Len() > efSearch {
-				candidates.PopLast()
+			// Only worth exploring further if it could plausibly improve the
+			// result, or the result isn't full yet -- matches hnswlib's
+			// searchBaseLayer/ST filter exactly. Skipped when an allowlist is
+			// active: a non-matching node can still be a necessary stepping
+			// stone to reach a distant matching one, so its own raw distance
+			// isn't a safe filter for whether to keep exploring past it.
+			if allowlist != nil || result.Len() < resultCap || dist < result.Max().dist {
+				candidates.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
 			}
 
 			// Only add to result if this node passes the allowlist filter.
@@ -211,7 +297,7 @@ func (n *layerNode[K, V]) search(
 				}
 			}
 
-			if result.Len() < k {
+			if result.Len() < resultCap {
 				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
 			} else if dist < result.Max().dist { // If new node is better than the worst in result set
 				result.PopLast()                                               // Remove worst
@@ -220,33 +306,71 @@ func (n *layerNode[K, V]) search(
 		}
 	}
 
+	// Trim down from resultCap (the exploration breadth) to the k results the
+	// caller actually asked for -- matches hnswlib's post-search truncation.
+	for result.Len() > k {
+		result.PopLast()
+	}
+
 	return result.Slice()
 }
 
 // replenish attempts to restore connectivity for a node that might have lost neighbors,
-// for instance, after a neighbor deletion. It looks at the node's existing neighbors
-// and their neighbors to find suitable candidates to fill empty neighbor slots up to 'm'.
-// This is a naive implementation and could be optimized.
+// for instance, after a neighbor deletion. It gathers 2-hop candidates (its
+// current neighbors' neighbors) and adds them back nearest-first, up to 'm' --
+// not the first candidates encountered in traversal order. This matters more
+// than it might look: replenish's candidates compete with the heuristic's own
+// carefully-chosen diverse connections, so adding low-quality (merely "first
+// found") candidates measurably diluted graph quality in practice.
 func (n *layerNode[K, V]) replenish(m int, dist DistanceFunc[V]) {
 	if len(n.neighbors) >= m {
 		return
 	}
 
-	// Iterate through current neighbors' neighbors to find new candidates.
+	seen := make(map[K]struct{}, len(n.neighbors))
+	for _, neighbor := range n.neighbors {
+		seen[neighbor.Key] = struct{}{}
+	}
+	seen[n.Key] = struct{}{}
+
+	// Cap how many 2-hop candidates get gathered (and therefore sorted) --
+	// at high M (e.g. the base layer's 2*M), a node's neighbors' neighbors
+	// can number in the thousands, and this is a linear-scan/no-index repair
+	// path, not a real graph search. A handful of candidates over the actual
+	// shortfall is plenty to pick a good nearest one from; unbounded
+	// gathering makes replenish (called on every over-capacity eviction, not
+	// just deletes) the dominant construction cost at scale.
+	need := m - len(n.neighbors)
+	maxCandidates := 4 * need
+	if maxCandidates < 16 {
+		maxCandidates = 16
+	}
+
+	var candidates []searchCandidate[K, V]
 	for _, neighbor := range n.neighbors {
 		for _, candidate := range neighbor.neighbors {
-			if n.indexOfNeighbor(candidate.Key) >= 0 {
-				// Avoid adding duplicates
+			if len(candidates) >= maxCandidates {
+				break
+			}
+			if _, dup := seen[candidate.Key]; dup {
 				continue
 			}
-			if candidate == n {
-				// Avoid adding itself as a neighbor
-				continue
-			}
-			n.addNeighbor(candidate, m, dist)
-			if len(n.neighbors) >= m {
-				return // Stop once 'm' neighbors are restored
-			}
+			seen[candidate.Key] = struct{}{}
+			candidates = append(candidates, searchCandidate[K, V]{node: candidate, dist: dist(candidate.Value, n.Value)})
+		}
+		if len(candidates) >= maxCandidates {
+			break
+		}
+	}
+
+	slices.SortFunc(candidates, func(a, b searchCandidate[K, V]) int {
+		return cmp.Compare(a.dist, b.dist)
+	})
+
+	for _, c := range candidates {
+		n.addNeighbor(c.node, m, dist)
+		if len(n.neighbors) >= m {
+			return
 		}
 	}
 }
@@ -465,6 +589,18 @@ func ptr[T any](v T) *T {
 // The method ensures that the dimensionality of the incoming vectors matches existing
 // vectors in the graph, panicking on a mismatch.
 func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
+	// Defensive floor, mirroring hnswlib's own ef_construction_ = max(ef_construction, M_):
+	// selectNeighborsHeuristic needs a candidate pool at least as large as what
+	// it's selecting from. Config-level validation (internal/config/validation.go)
+	// catches this for the normal YAML-configured path, but a Graph constructed
+	// directly (tests, or any future caller bypassing config) has no such guard --
+	// an unset or too-small EfConstruction would otherwise silently starve every
+	// insert's candidate pool instead of erroring.
+	efConstruction := g.EfConstruction
+	if efConstruction < g.M {
+		efConstruction = g.M
+	}
+
 	for _, node := range nodes {
 		key := node.Key
 		vec := node.Value
@@ -512,17 +648,17 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				panic("(*Graph).Distance must be set before adding nodes")
 			}
 
-			// Find the 'M' nearest neighbors in the current layer's local neighborhood.
-			// Uses EfConstruction (not EfSearch) -- a wider construction-time search
-			// builds a higher-quality graph, independent of query-time search cost.
-			neighborhood := searchPoint.search(g.M, g.EfConstruction, vec, g.Distance, nil)
-			if len(neighborhood) == 0 {
+			// Find a candidate pool for this layer, bounded by EfConstruction (not
+			// M) -- selectNeighborsHeuristic below needs a wide pool to choose
+			// diverse connections from, not just the M closest.
+			candidatePool := searchPoint.search(efConstruction, efConstruction, vec, g.Distance, nil)
+			if len(candidatePool) == 0 {
 				// This should ideally not happen as the searchPoint itself should be in the result set.
 				panic("search returned no nodes")
 			}
 
 			// Update the 'elevator' node for the next lower layer. It will be the closest node found.
-			elevator = ptr(neighborhood[0].node.Key)
+			elevator = ptr(candidatePool[0].node.Key)
 
 			// If the current layer is at or below the node's insertLevel, add the node.
 			if insertLevel >= i {
@@ -532,10 +668,24 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				}
 
 				currentLayer.nodes[key] = newNode
-				// Create bi-directional connections between the new node and its neighbors in this layer.
-				for _, neighborResult := range neighborhood {
-					neighborNode := neighborResult.node
-					neighborNode.addNeighbor(newNode, g.M, g.Distance)
+				// Select up to M diverse neighbors from the candidate pool, then
+				// create bi-directional connections between the new node and each.
+				// The new node's own outgoing connections are always capped at M,
+				// uniformly across every layer (matches hnswlib: getNeighborsByHeuristic2
+				// is always called with M_, never Mcurmax). But an existing neighbor's
+				// own capacity (mCurMax below) is layer-dependent: hnswlib caps the base
+				// layer at 2*M (maxM0_ = M_*2) and every other layer at M (maxM_ = M_) --
+				// the base layer holds ~every node and does the most work at query time,
+				// so it's allowed to grow denser. Using a uniform M everywhere (the
+				// original bug here) silently starved the base layer to half the
+				// connectivity a correctly-configured graph should have.
+				mCurMax := g.M
+				if i == 0 {
+					mCurMax = 2 * g.M
+				}
+				selectedNeighbors := selectNeighborsHeuristic(candidatePool, g.M, g.Distance)
+				for _, neighborNode := range selectedNeighbors {
+					neighborNode.addNeighbor(newNode, mCurMax, g.Distance)
 					newNode.addNeighbor(neighborNode, g.M, g.Distance)
 				}
 			}
@@ -664,7 +814,11 @@ func (h *Graph[K, V]) Delete(key K) bool {
 		if len(layer.nodes) == 0 {
 			deleteLayer[i] = struct{}{} // Mark layer as empty.
 		}
-		node.isolate(h.M, h.Distance) // Disconnect the node and replenish its former neighbors.
+		mCurMax := h.M
+		if i == 0 {
+			mCurMax = 2 * h.M // base layer allows up to 2*M connections -- see Add's comment
+		}
+		node.isolate(mCurMax, h.Distance) // Disconnect the node and replenish its former neighbors.
 		deleted = true
 	}
 
