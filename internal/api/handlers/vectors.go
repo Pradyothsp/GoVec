@@ -92,7 +92,7 @@ func (h *VectorHandler) BatchInsert(c *gin.Context) {
 	}
 
 	var errs []BatchInsertResult
-	inserted := 0
+	items := make([]index.BatchInsertItem, 0, len(req.Vectors))
 
 	for _, v := range req.Vectors {
 		if v.SparseVector != nil && !v.SparseVector.IsValid() {
@@ -108,11 +108,26 @@ func (h *VectorHandler) BatchInsert(c *gin.Context) {
 			sparse = *v.SparseVector
 		}
 
-		if err := h.Engine.Insert(c.Request.Context(), v.ID, v.Vector, sparse, v.Metadata); err != nil {
-			errs = append(errs, BatchInsertResult{ID: v.ID, Error: err.Error()})
-			continue
+		items = append(items, index.BatchInsertItem{
+			ID:     v.ID,
+			Vector: v.Vector,
+			Sparse: sparse,
+			Meta:   v.Metadata,
+		})
+	}
+
+	inserted := 0
+	if len(items) > 0 {
+		failures, err := h.Engine.BatchInsert(c.Request.Context(), items)
+		if err != nil {
+			response.Fail(c, http.StatusInternalServerError, err.Error())
+			return
 		}
-		inserted++
+
+		for _, f := range failures {
+			errs = append(errs, BatchInsertResult{ID: f.ID, Error: f.Err.Error()})
+		}
+		inserted = len(items) - len(failures)
 	}
 
 	response.OK(c, http.StatusOK, BatchInsertResponse{

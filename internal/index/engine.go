@@ -22,6 +22,13 @@ type Engine interface {
 	// Insert adds or updates a vector with the given ID, optional sparse vector, and metadata
 	Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]interface{}) error
 
+	// BatchInsert adds or updates multiple vectors as a single durable unit: one
+	// WAL fsync for the whole batch rather than one per vector. A failure writing
+	// the batch to the WAL aborts the entire batch (nothing is applied); once the
+	// WAL write succeeds, per-item application errors are returned individually
+	// without aborting the rest of the batch.
+	BatchInsert(ctx context.Context, items []BatchInsertItem) ([]BatchInsertError, error)
+
 	// GetByID retrieves the full record for a vector by ID
 	GetByID(ctx context.Context, id string) (*VectorRecord, error)
 
@@ -48,6 +55,20 @@ type Engine interface {
 
 	// Info returns engine configuration and runtime statistics
 	Info() EngineInfo
+}
+
+// BatchInsertItem is a single vector to insert as part of a BatchInsert call.
+type BatchInsertItem struct {
+	ID     string
+	Vector []float32
+	Sparse core.SparseVector
+	Meta   map[string]interface{}
+}
+
+// BatchInsertError pairs a batch item's ID with the error that occurred applying it.
+type BatchInsertError struct {
+	ID  string
+	Err error
 }
 
 // VectorRecord holds the full stored data for a vector, returned by GetByID.

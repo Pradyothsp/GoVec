@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -399,4 +401,136 @@ func TestMalformedJSON(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 		})
 	}
+}
+
+// =============================================================================
+// BatchInsert
+// =============================================================================
+
+func TestBatchInsert_EmptyArray(t *testing.T) {
+	index := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(index)
+
+	router := gin.New()
+	router.POST("/vectors/batch", handler.BatchInsert)
+
+	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(`{"vectors": []}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestBatchInsert_Success(t *testing.T) {
+	idx := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(idx)
+
+	router := gin.New()
+	router.POST("/vectors/batch", handler.BatchInsert)
+
+	body := `{"vectors": [
+		{"id": "v1", "vector": [1.0, 2.0, 3.0]},
+		{"id": "v2", "vector": [4.0, 5.0, 6.0]},
+		{"id": "v3", "vector": [7.0, 8.0, 9.0]}
+	]}`
+	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.True(t, resp["success"].(bool))
+
+	data, ok := resp["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(3), data["inserted_count"])
+	assert.NotContains(t, data, "errors")
+	assert.Equal(t, 3, idx.Len())
+}
+
+// TestBatchInsert_InvalidItemsDontBlockValidOnes verifies the existing per-item
+// validation (invalid sparse_vector) still short-circuits before an item ever
+// reaches the engine, and that the valid items in the same request still get
+// batched and inserted -- one bad item shouldn't sink the whole request.
+func TestBatchInsert_InvalidItemsDontBlockValidOnes(t *testing.T) {
+	idx := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(idx)
+
+	router := gin.New()
+	router.POST("/vectors/batch", handler.BatchInsert)
+
+	body := `{"vectors": [
+		{"id": "good1", "vector": [1.0, 2.0, 3.0]},
+		{"id": "bad1", "vector": [1.0, 2.0, 3.0], "sparse_vector": {"indices": [0, 1], "values": [0.5]}},
+		{"id": "good2", "vector": [4.0, 5.0, 6.0]}
+	]}`
+	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	data, ok := resp["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(2), data["inserted_count"])
+
+	errs, ok := data["errors"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, errs, 1)
+	firstErr, ok := errs[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "bad1", firstErr["id"])
+
+	assert.Equal(t, 2, idx.Len())
+}
+
+// TestBatchInsert_WALFailureReturns500AndInsertsNothing exercises the batch's
+// all-or-nothing durability contract from the HTTP layer down: if the engine
+// can't make the batch durable (WAL write fails), the handler must surface a
+// server error rather than reporting a misleading partial success, and none of
+// the batch's vectors should be queryable afterward.
+func TestBatchInsert_WALFailureReturns500AndInsertsNothing(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := index.NewWAL(walPath)
+	require.NoError(t, err)
+
+	idMapper := core.NewIDMapper()
+	identityFunc := func(v []float32) []float32 { return v }
+	idx := index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
+
+	// Force the WAL write the handler triggers to fail.
+	require.NoError(t, wal.Close())
+
+	handler := NewVectorHandler(idx)
+	router := gin.New()
+	router.POST("/vectors/batch", handler.BatchInsert)
+
+	body := `{"vectors": [
+		{"id": "v1", "vector": [1.0, 2.0, 3.0]},
+		{"id": "v2", "vector": [4.0, 5.0, 6.0]}
+	]}`
+	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.False(t, resp["success"].(bool))
+
+	assert.Equal(t, 0, idx.Len(), "no vector from the failed batch should have been applied")
 }
