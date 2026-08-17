@@ -124,10 +124,11 @@ engine:
 - ✅ Docker support (multi-stage)
 
 ### Planned
+- 🔜 HNSW dense ID-indexed storage, prioritized next (replace `HNSWIndex.metadata` and `layer[0].nodes` maps with arrays indexed by the existing dense internal ID -- upper layers and neighbor-pointer-to-ID stay maps/pointers for now, see the doc's refined risk breakdown) -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
 - ⏳ Product & Binary quantization
 - ⏳ Metadata filtering in search
-- ⏳ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
-- ⏳ HNSW dense ID-indexed storage (replace `layer.nodes`/`metadata` maps and neighbor-list pointers with arrays indexed by the existing dense internal ID) -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
+- ⏳ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`), deprioritized behind dense storage above -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
+- ⏳ Concurrent-safe HNSW graph insertion (parallelize `BatchInsert` across goroutines) -- measured ceiling vs Chroma is only ~1.04x (see `govec-bench/STATUS.md` §19), low priority -- see `docs/architecture/HNSW_CONCURRENT_INSERT.md`
 
 ## Testing & Workflow
 
