@@ -8,8 +8,6 @@ import (
 	"slices"
 	"time"
 
-	"golang.org/x/exp/maps"
-
 	"github.com/Pradyothsp/govec/internal/hnsw/heap"
 )
 
@@ -34,14 +32,39 @@ func MakeNode[K cmp.Ordered, V VectorType](key K, vec V) Node[K, V] {
 }
 
 // layerNode is an internal representation of a node within a specific layer of the HNSW graph.
-// It embeds a Node, adding layer-specific details like a map of neighbors.
+// It embeds a Node, adding layer-specific details like its neighbor list.
 type layerNode[K cmp.Ordered, V VectorType] struct {
 	Node[K, V]
 
-	// neighbors stores the direct neighbors of this node within the same layer.
-	// It's a map for efficient neighbor lookup and deletion, especially useful
-	// when the maximum number of neighbors (M) is high.
-	neighbors map[K]*layerNode[K, V]
+	// neighbors stores the direct neighbors of this node within the same layer,
+	// up to a bounded capacity (M). A flat slice, not a map: M is small (tens
+	// of entries), and a Go map's per-entry bucket overhead dominates memory
+	// at HNSW's scale (one map per node, times every node in the graph) far
+	// more than a linear scan over a handful of pointers costs in CPU --
+	// confirmed via heap profile, see govec-bench STATUS.md.
+	neighbors []*layerNode[K, V]
+}
+
+// indexOfNeighbor returns the index of the neighbor with the given key in
+// n.neighbors, or -1 if not present.
+func (n *layerNode[K, V]) indexOfNeighbor(key K) int {
+	for i, nb := range n.neighbors {
+		if nb.Key == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// removeNeighbor removes the neighbor with the given key, if present.
+// No-op if the key isn't found. Order among remaining neighbors is not
+// preserved (swap-with-last) -- nothing depends on neighbor slice order,
+// search() explicitly sorts by key before iterating for determinism.
+func (n *layerNode[K, V]) removeNeighbor(key K) {
+	if i := n.indexOfNeighbor(key); i >= 0 {
+		n.neighbors[i] = n.neighbors[len(n.neighbors)-1]
+		n.neighbors = n.neighbors[:len(n.neighbors)-1]
+	}
 }
 
 // addNeighbor attempts to add a new node as a neighbor to the current layerNode.
@@ -51,11 +74,17 @@ type layerNode[K cmp.Ordered, V VectorType] struct {
 // the 'm' closest nodes in that layer.
 // 'dist' is the distance function used to compare vectors.
 func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist DistanceFunc[V]) {
-	if n.neighbors == nil {
-		n.neighbors = make(map[K]*layerNode[K, V], m)
+	// If newNode is already a neighbor, just update it in place -- matches
+	// the map version's overwrite-on-existing-key semantics.
+	if i := n.indexOfNeighbor(newNode.Key); i >= 0 {
+		n.neighbors[i] = newNode
+		return
 	}
 
-	n.neighbors[newNode.Key] = newNode
+	if n.neighbors == nil {
+		n.neighbors = make([]*layerNode[K, V], 0, m)
+	}
+	n.neighbors = append(n.neighbors, newNode)
 	if len(n.neighbors) <= m {
 		return
 	}
@@ -63,21 +92,23 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist Dist
 	// Find the neighbor with the worst distance to replace.
 	var (
 		worstDist = float32(math.Inf(-1)) // Initialize with negative infinity to find the true max distance
-		worst     *layerNode[K, V]
+		worstIdx  = -1
 	)
-	for _, neighbor := range n.neighbors {
+	for i, neighbor := range n.neighbors {
 		d := dist(neighbor.Value, n.Value)
 		// Compare current neighbor's distance to 'worstDist'. Also handle cases
-		// where 'worst' is nil (first iteration) or NaN results from distance function.
-		if d > worstDist || worst == nil {
+		// where 'worstIdx' is unset (first iteration) or NaN results from distance function.
+		if d > worstDist || worstIdx == -1 {
 			worstDist = d
-			worst = neighbor
+			worstIdx = i
 		}
 	}
+	worst := n.neighbors[worstIdx]
 
 	// Remove the worst neighbor and its backlink.
-	delete(n.neighbors, worst.Key)
-	delete(worst.neighbors, n.Key)
+	n.neighbors[worstIdx] = n.neighbors[len(n.neighbors)-1]
+	n.neighbors = n.neighbors[:len(n.neighbors)-1]
+	worst.removeNeighbor(n.Key)
 	// Attempt to find a new best neighbor for the disconnected 'worst' node,
 	// though this specific call usually leads to no-op if 'worst' was truly the furthest.
 	worst.replenish(m, dist)
@@ -154,10 +185,10 @@ func (n *layerNode[K, V]) search(
 		current := candidates.Pop().node // Get the closest node from candidates to explore
 
 		// Iterate through neighbors in a sorted, deterministic fashion for test consistency.
-		neighborKeys := maps.Keys(current.neighbors)
-		slices.Sort(neighborKeys)
-		for _, neighborID := range neighborKeys {
-			neighbor := current.neighbors[neighborID]
+		neighbors := slices.Clone(current.neighbors)
+		slices.SortFunc(neighbors, func(a, b *layerNode[K, V]) int { return cmp.Compare(a.Key, b.Key) })
+		for _, neighbor := range neighbors {
+			neighborID := neighbor.Key
 			if visited[neighborID] {
 				continue
 			}
@@ -203,8 +234,8 @@ func (n *layerNode[K, V]) replenish(m int, dist DistanceFunc[V]) {
 
 	// Iterate through current neighbors' neighbors to find new candidates.
 	for _, neighbor := range n.neighbors {
-		for key, candidate := range neighbor.neighbors {
-			if _, ok := n.neighbors[key]; ok {
+		for _, candidate := range neighbor.neighbors {
+			if n.indexOfNeighbor(candidate.Key) >= 0 {
 				// Avoid adding duplicates
 				continue
 			}
@@ -225,7 +256,7 @@ func (n *layerNode[K, V]) replenish(m int, dist DistanceFunc[V]) {
 func (n *layerNode[K, V]) isolate(m int, dist DistanceFunc[V]) {
 	// Remove backlinks from its current neighbors.
 	for _, neighbor := range n.neighbors {
-		delete(neighbor.neighbors, n.Key)
+		neighbor.removeNeighbor(n.Key)
 	}
 
 	// After removing 'n', its former neighbors might have lost a connection.

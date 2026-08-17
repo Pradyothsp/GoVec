@@ -223,10 +223,10 @@ func (h *Graph[K, V]) Export(w io.Writer) error {
 			}
 
 			// Encode keys of all neighbors.
-			for neighbor := range node.neighbors {
-				_, err = binaryWrite(w, neighbor)
+			for _, neighbor := range node.neighbors {
+				_, err = binaryWrite(w, neighbor.Key)
 				if err != nil {
-					return fmt.Errorf("encode neighbor key %v for node %v: %w", neighbor, node.Key, err)
+					return fmt.Errorf("encode neighbor key %v for node %v: %w", neighbor.Key, node.Key, err)
 				}
 			}
 		}
@@ -308,6 +308,7 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 		}
 
 		nodes := make(map[K]*layerNode[K, V], nNodes)
+		neighborKeysByNode := make(map[K][]K, nNodes)
 		// Read each node's data.
 		for j := 0; j < nNodes; j++ {
 			var key K
@@ -318,41 +319,38 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 				return fmt.Errorf("decode node %d in layer %d: %w", j, i, err)
 			}
 
-			// Read neighbor keys (pointers will be filled in later).
-			neighbors := make([]K, nNeighbors)
+			// Read neighbor keys (pointers resolved in a second pass below,
+			// once every node in the layer has been read).
+			neighborKeys := make([]K, nNeighbors)
 			for k := 0; k < nNeighbors; k++ {
 				var neighbor K
 				_, err = binaryRead(r, &neighbor)
 				if err != nil {
 					return fmt.Errorf("decode neighbor %d for node %v in layer %d: %w", k, key, i, err)
 				}
-				neighbors[k] = neighbor
+				neighborKeys[k] = neighbor
 			}
 
-			node := &layerNode[K, V]{
+			nodes[key] = &layerNode[K, V]{
 				Node: Node[K, V]{
 					Key:   key,
 					Value: vec,
 				},
-				neighbors: make(map[K]*layerNode[K, V]),
 			}
-
-			nodes[key] = node
-			// Temporarily store neighbor keys, will resolve pointers after all nodes are read.
-			for _, neighborKey := range neighbors {
-				node.neighbors[neighborKey] = nil
-			}
+			neighborKeysByNode[key] = neighborKeys
 		}
 
-		// After all nodes in the layer are read, fill in the actual neighbor pointers.
-		for _, node := range nodes {
-			for key := range node.neighbors {
-				if neighborNode, found := nodes[key]; found {
-					node.neighbors[key] = neighborNode
-				} else {
+		// After all nodes in the layer are read, resolve neighbor keys to pointers.
+		for key, neighborKeys := range neighborKeysByNode {
+			node := nodes[key]
+			node.neighbors = make([]*layerNode[K, V], 0, len(neighborKeys))
+			for _, neighborKey := range neighborKeys {
+				neighborNode, found := nodes[neighborKey]
+				if !found {
 					// This indicates data corruption or an invalid neighbor key.
-					return fmt.Errorf("failed to resolve neighbor %v for node %v in layer %d", key, node.Key, i)
+					return fmt.Errorf("failed to resolve neighbor %v for node %v in layer %d", neighborKey, node.Key, i)
 				}
+				node.neighbors = append(node.neighbors, neighborNode)
 			}
 		}
 		h.layers[i] = &layer[K, V]{nodes: nodes}
@@ -405,10 +403,10 @@ func (h *Graph[K, V]) ExportTopology(w io.Writer) error {
 			if err != nil {
 				return fmt.Errorf("encode topology node key %v: %w", node.Key, err)
 			}
-			for neighbor := range node.neighbors {
-				_, err = binaryWrite(w, neighbor)
+			for _, neighbor := range node.neighbors {
+				_, err = binaryWrite(w, neighbor.Key)
 				if err != nil {
-					return fmt.Errorf("encode topology neighbor %v of node %v: %w", neighbor, node.Key, err)
+					return fmt.Errorf("encode topology neighbor %v of node %v: %w", neighbor.Key, node.Key, err)
 				}
 			}
 		}
@@ -478,6 +476,7 @@ func (h *Graph[K, V]) ImportTopology(r io.Reader, lookupVec func(K) (V, bool)) e
 		}
 
 		nodes := make(map[K]*layerNode[K, V], nNodes)
+		neighborKeysByNode := make(map[K][]K, nNodes)
 		for j := 0; j < nNodes; j++ {
 			var key K
 			var nNeighbors int
@@ -491,34 +490,32 @@ func (h *Graph[K, V]) ImportTopology(r io.Reader, lookupVec func(K) (V, bool)) e
 				return fmt.Errorf("topology import: no vector found for key %v", key)
 			}
 
-			neighbors := make([]K, nNeighbors)
+			neighborKeys := make([]K, nNeighbors)
 			for k := 0; k < nNeighbors; k++ {
 				var neighbor K
 				_, err = binaryRead(r, &neighbor)
 				if err != nil {
 					return fmt.Errorf("decode topology neighbor %d of node %v in layer %d: %w", k, key, i, err)
 				}
-				neighbors[k] = neighbor
+				neighborKeys[k] = neighbor
 			}
 
-			node := &layerNode[K, V]{
-				Node:      Node[K, V]{Key: key, Value: vec},
-				neighbors: make(map[K]*layerNode[K, V]),
+			nodes[key] = &layerNode[K, V]{
+				Node: Node[K, V]{Key: key, Value: vec},
 			}
-			nodes[key] = node
-			for _, nk := range neighbors {
-				node.neighbors[nk] = nil
-			}
+			neighborKeysByNode[key] = neighborKeys
 		}
 
-		// Resolve neighbor pointers.
-		for _, node := range nodes {
-			for k := range node.neighbors {
-				if nbNode, found := nodes[k]; found {
-					node.neighbors[k] = nbNode
-				} else {
-					return fmt.Errorf("topology import: failed to resolve neighbor %v for node %v in layer %d", k, node.Key, i)
+		// Resolve neighbor keys to pointers.
+		for key, neighborKeys := range neighborKeysByNode {
+			node := nodes[key]
+			node.neighbors = make([]*layerNode[K, V], 0, len(neighborKeys))
+			for _, nk := range neighborKeys {
+				nbNode, found := nodes[nk]
+				if !found {
+					return fmt.Errorf("topology import: failed to resolve neighbor %v for node %v in layer %d", nk, node.Key, i)
 				}
+				node.neighbors = append(node.neighbors, nbNode)
 			}
 		}
 		h.layers[i] = &layer[K, V]{nodes: nodes}

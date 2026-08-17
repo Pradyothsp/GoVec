@@ -52,19 +52,12 @@ func Test_binaryWrite_string(t *testing.T) {
 func verifyGraphNodes[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) {
 	for _, layer := range g.layers {
 		for _, node := range layer.nodes {
-			for neighborKey, neighbor := range node.neighbors {
+			for _, neighbor := range node.neighbors {
 				_, ok := layer.nodes[neighbor.Key]
 				if !ok {
 					t.Errorf(
 						"node %v has neighbor %v, but neighbor does not exist",
 						node.Key, neighbor.Key,
-					)
-				}
-
-				if neighborKey != neighbor.Key {
-					t.Errorf("node %v has neighbor %v, but neighbor key is %v", node.Key,
-						neighbor.Key,
-						neighborKey,
 					)
 				}
 			}
