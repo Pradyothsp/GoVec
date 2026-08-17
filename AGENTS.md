@@ -6,6 +6,15 @@ This file provides guidance to agents (Claude, Gemini) and developers working on
 
 GoVec is a high-performance vector database implemented in Go. It provides a REST API for storing and managing vector embeddings with associated metadata, supporting both float32 and int8 scalar quantization.
 
+## Scope & Non-Goals
+
+GoVec started life as a planning doc for "go-vector-lite," with an explicit positioning: a **compact, high-performance vector similarity search engine** — inspired by Pinecone, Weaviate, and Qdrant, but deliberately smaller, easier to run, and aimed at ML apps, prototyping, and local semantic search, not at matching production-scale platforms feature-for-feature. The original goal was portfolio-grade, production-quality Go code demonstrating good engineering at small scale, not a Pinecone competitor.
+
+That framing sets real boundaries, not just aspirational ones:
+- **Single-node, in-memory-first.** Sharding and replication were scoped as "future scaling" from the start — never core.
+- **Small feature surface by design.** REST (+ optional gRPC), snapshot + WAL persistence, optional metadata filtering — not a query language, multi-tenancy, or a plugin ecosystem.
+- **"Lite" is the point, not a placeholder.** When comparing against Chroma/Pinecone-class systems (see the `govec-bench` sibling repo), read the results against this framing — closing every gap to those systems was never the goal, and some gaps (e.g. `SELECT-NEIGHBORS-HEURISTIC`, dense ID-indexed storage) are deliberately deferred rather than missed.
+
 ## Getting Started
 
 ### Prerequisites
