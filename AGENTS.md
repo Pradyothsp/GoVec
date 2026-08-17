@@ -118,6 +118,7 @@ engine:
 - ⏳ Product & Binary quantization
 - ⏳ Metadata filtering in search
 - ⏳ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
+- ⏳ HNSW dense ID-indexed storage (replace `layer.nodes`/`metadata` maps and neighbor-list pointers with arrays indexed by the existing dense internal ID) -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
 
 ## Testing & Workflow
 
