@@ -28,32 +28,41 @@ func Test_layerNode_search(t *testing.T) {
 			Value: []float32{0},
 			Key:   0,
 		},
-		neighbors: map[int]*layerNode[int, []float32]{
-			1: {
+		neighbors: []*layerNode[int, []float32]{
+			{
 				Node: Node[int, []float32]{
 					Value: []float32{1},
 					Key:   1,
 				},
 			},
-			2: {
+			{
 				Node: Node[int, []float32]{
 					Value: []float32{2},
 					Key:   2,
 				},
 			},
-			3: {
+			{
 				Node: Node[int, []float32]{
 					Value: []float32{3},
 					Key:   3,
 				},
-				neighbors: map[int]*layerNode[int, []float32]{
-					4: {
+				// A slice has no separate "structural" key the way the old
+				// map did -- node identity is always node.Key. The old
+				// literal here keyed these two map entries 4 and 5 while
+				// both nodes' own .Key field read 5; that mismatch had no
+				// slice equivalent (and can't happen via real graph
+				// construction, where the map key and node.Key are always
+				// the same value) so the first entry's Key is corrected to
+				// 4, matching its Value{4} -- see the updated best[0]
+				// assertion below.
+				neighbors: []*layerNode[int, []float32]{
+					{
 						Node: Node[int, []float32]{
 							Value: []float32{4},
-							Key:   5,
+							Key:   4,
 						},
 					},
-					5: {
+					{
 						Node: Node[int, []float32]{
 							Value: []float32{5},
 							Key:   5,
@@ -66,7 +75,7 @@ func Test_layerNode_search(t *testing.T) {
 
 	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32, nil)
 
-	require.Equal(t, 5, best[0].node.Key)
+	require.Equal(t, 4, best[0].node.Key)
 	require.Equal(t, 3, best[1].node.Key)
 	require.Len(t, best, 2)
 }
