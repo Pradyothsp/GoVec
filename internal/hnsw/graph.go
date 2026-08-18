@@ -208,6 +208,16 @@ func (n *layerNode[K, V]) search(
 	// nil means no filter (all nodes qualify). An empty map means no nodes qualify.
 	// Non-matching nodes are still explored for graph connectivity.
 	allowlist map[K]struct{},
+	// visited is a caller-supplied, pre-cleared scratch map for dedup-tracking
+	// nodes seen during this call. nil means "allocate a private one internally"
+	// -- required for Graph.search() (the query path), where concurrent calls
+	// share the graph under an RLock and can't safely share a map. Graph.Add()
+	// (the insert path, always under an exclusive Lock, never concurrent with
+	// itself) instead passes a single reused-and-cleared map across every
+	// layer/node it processes, avoiding a fresh map allocation + incremental
+	// bucket growth on every call -- the actual cost this parameter exists to
+	// remove.
+	visited map[K]bool,
 ) []searchCandidate[K, V] {
 	// resultCap is the breadth exploration actually operates at -- matches
 	// hnswlib's searchBaseLayerST exactly: the result/frontier are bounded by
@@ -237,15 +247,18 @@ func (n *layerNode[K, V]) search(
 			dist: distance(n.Value, target),
 		},
 	)
-	var (
-		// result is a max-heap storing the resultCap best (closest) found nodes so far.
-		// The worst-kept candidate sits at the root, so checking/evicting it (the hot
-		// path below) is O(1)/O(log n) instead of the O(n) scan a min-heap would need.
-		result = heap.MaxHeap[searchCandidate[K, V]]{}
-		// visited tracks nodes already processed to avoid redundant work and loops.
-		visited = make(map[K]bool)
-	)
+	// result is a max-heap storing the resultCap best (closest) found nodes so far.
+	// The worst-kept candidate sits at the root, so checking/evicting it (the hot
+	// path below) is O(1)/O(log n) instead of the O(n) scan a min-heap would need.
+	result := heap.MaxHeap[searchCandidate[K, V]]{}
 	result.Init(make([]searchCandidate[K, V], 0, resultCap))
+
+	// visited tracks nodes already processed to avoid redundant work and loops.
+	// nil means the caller didn't supply a reusable scratch map -- allocate a
+	// private one (see the visited parameter's doc comment above).
+	if visited == nil {
+		visited = make(map[K]bool)
+	}
 
 	// Start with the initial node in the result set only if it passes the allowlist.
 	// It is always in candidates so its neighbors are explored regardless.
@@ -473,6 +486,32 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 
 	// layers is a slice of layers in the graph.
 	layers []*layer[K, V]
+
+	// insertVisited is a reused scratch map for layerNode.search()'s visited
+	// tracking during Add(), cleared and passed down instead of letting
+	// search() allocate a fresh map on every layer/node it processes. Safe to
+	// share across calls (unlike a per-node tag) because Add() always runs
+	// under the caller's exclusive lock -- never concurrently with itself or
+	// with a Search(). Left nil until Add()'s first call; Search() never
+	// touches this field, since concurrent Search() calls (an RLock-permitted
+	// pattern) can't safely share one map -- see visitedScratch's doc comment.
+	insertVisited map[K]bool
+}
+
+// visitedScratch returns g.insertVisited, lazily allocating it on first use
+// and clearing it (not reallocating) on every later call -- the map's
+// backing bucket array is grown once and then reused for the graph's whole
+// lifetime, which is the actual allocation/rehashing cost this exists to
+// remove from Add()'s hot path. Only call this from Add() or its helpers,
+// which run under an exclusive lock; never from Graph.search() (the query
+// path), which must remain safe under concurrent RLock-held calls.
+func (g *Graph[K, V]) visitedScratch() map[K]bool {
+	if g.insertVisited == nil {
+		g.insertVisited = make(map[K]bool)
+		return g.insertVisited
+	}
+	clear(g.insertVisited)
+	return g.insertVisited
 }
 
 // Default HNSW parameters, used by NewGraph() and mirrored by
@@ -689,7 +728,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 			// EfConstruction (not M) -- selectNeighborsHeuristic below needs a wide
 			// pool to choose diverse connections from, not just the M closest.
 			if insertLevel >= i {
-				candidatePool := searchPoint.search(efConstruction, efConstruction, vec, g.Distance, nil)
+				candidatePool := searchPoint.search(efConstruction, efConstruction, vec, g.Distance, nil, g.visitedScratch())
 				if len(candidatePool) == 0 {
 					// This should ideally not happen as the searchPoint itself should be in the result set.
 					panic("search returned no nodes")
@@ -734,7 +773,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				// code ran the full EfConstruction-breadth candidate search on
 				// every pass-through layer too -- pure wasted insert cost, worse
 				// the higher EfConstruction or the taller the graph.
-				nodes := searchPoint.search(1, 1, vec, g.Distance, nil)
+				nodes := searchPoint.search(1, 1, vec, g.Distance, nil, g.visitedScratch())
 				if len(nodes) == 0 {
 					elevator = ptr(searchPoint.Key)
 				} else {
@@ -808,7 +847,7 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		// For layers above the base layer, perform a limited search (k=1) to find the best
 		// entry point for the layer below.
 		if layerIdx > 0 {
-			nodes := searchPoint.search(1, efSearch, near, h.Distance, nil)
+			nodes := searchPoint.search(1, efSearch, near, h.Distance, nil, nil)
 			if len(nodes) == 0 {
 				// This implies an issue in graph construction or an empty layer.
 				// For robustness, if no nodes found, try to use the current searchPoint as elevator.
@@ -820,7 +859,7 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		}
 
 		// At the base layer (layerIdx == 0), perform the full search for 'k' nearest neighbors.
-		nodes := searchPoint.search(k, efSearch, near, h.Distance, allowlist)
+		nodes := searchPoint.search(k, efSearch, near, h.Distance, allowlist, nil)
 		out := make([]SearchResult[K, V], 0, len(nodes))
 
 		for _, node := range nodes {
