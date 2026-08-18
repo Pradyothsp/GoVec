@@ -122,10 +122,9 @@ engine:
 - ✅ Atomic Persistence (GOB encoding)
 - ✅ CI/CD with GitHub Actions (lint, test, vuln)
 - ✅ Docker support (multi-stage)
-- ✅ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- closed the recall@1 gap (75.0%→97.0%, within a point of Chroma); also fixed two other real bugs found along the way (base layer needs 2×M capacity, not M; query-time search was exploring at breadth `k` instead of `max(k, ef_search)`). Real cost: insert and high-k query latency regressed, and RAM usage roughly doubled -- insert latency has since been recovered (skip full-breadth search in upper "pass-through" layers during `Add`, −23% single/−24% batch, now faster than the pre-heuristic baseline); high-k query latency and RAM are not yet recovered, see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
+- ✅ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- closed the recall@1 gap (75.0%→98.0%, now beating Chroma's 97.0%); also fixed two other real bugs found along the way (base layer needs 2×M capacity, not M; query-time search was exploring at breadth `k` instead of `max(k, ef_search)`). Real cost regressions the fix introduced (insert latency, high-k query p99, RAM) have since been recovered by retuning `M`/`EfConstruction`/`EfSearch` together (M=24/300/20 → M=16/200/50) -- govec now wins or ties Chroma on insert, query (including the p99 tail that hit 88ms at its worst, now 2.84ms), and cold start; RAM remains the one real gap (~5.5x Chroma, down from ~6.9x) -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
 
 ### Planned
-- ⏳ Recover high-k query latency and memory cost from the heuristic neighbor selection work above -- `EfConstruction`/`EfSearch` are the remaining dominant cost drivers (not `M`); Chroma's own defaults (`M=16, ef_construction=100, ef_search=100`) pay for recall mostly at query time where govec currently pays mostly at construction time -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md`
 - ⏳ Product & Binary quantization
 - ⏳ Metadata filtering in search
 - ❌ HNSW dense ID-indexed storage -- evaluated with real numbers (~11MB combined at 100k vectors, using the per-entry map-overhead constant measured in the neighbor-slice fix) and declined; not worth the implementation cost -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
