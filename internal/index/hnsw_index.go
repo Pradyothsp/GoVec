@@ -202,7 +202,11 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 		idx.dimensions = len(vec)
 	}
 
-	encoded := idx.encodeFunc(vec)
+	encodeInput, err := prepareForEncode(vec, idx.quantization, idx.distanceMetric)
+	if err != nil {
+		return err
+	}
+	encoded := idx.encodeFunc(encodeInput)
 
 	// When mmap is enabled, persist the encoded bytes and replace encoded with
 	// the mmap-backed slice.  Both the graph node (Node.Value) and the metadata
@@ -253,7 +257,11 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 		return nil, nil
 	}
 
-	encodedQuery := idx.encodeFunc(query)
+	encodeInput, err := prepareForEncode(query, idx.quantization, idx.distanceMetric)
+	if err != nil {
+		return nil, err
+	}
+	encodedQuery := idx.encodeFunc(encodeInput)
 
 	useHybridSearch := idx.InvertedIndex != nil && !sparseQuery.IsEmpty()
 	const alpha = 0.7
