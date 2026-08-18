@@ -173,7 +173,11 @@ func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.
 
 	// 4. Encode vector; if mmap is enabled, write to the mmap store and store the
 	//    mmap-backed slice — no heap copy is retained after this point.
-	encoded := idx.encodeFunc(vec)
+	encodeInput, err := prepareForEncode(vec, idx.quantization, idx.distanceMetric)
+	if err != nil {
+		return err
+	}
+	encoded := idx.encodeFunc(encodeInput)
 	if idx.vectorStore != nil {
 		mmapVec, err := putToMmapStore(idx.vectorStore, internalID, encoded)
 		if err != nil {
@@ -215,7 +219,11 @@ func (idx *VectorIndex[T]) Search(_ context.Context, query []float32, sparseQuer
 	}
 
 	// Encode query to storage format
-	encodedQuery := idx.encodeFunc(query)
+	encodeInput, err := prepareForEncode(query, idx.quantization, idx.distanceMetric)
+	if err != nil {
+		return nil, err
+	}
+	encodedQuery := idx.encodeFunc(encodeInput)
 
 	// Determine if we're doing hybrid search
 	useHybridSearch := idx.InvertedIndex != nil && !sparseQuery.IsEmpty()
