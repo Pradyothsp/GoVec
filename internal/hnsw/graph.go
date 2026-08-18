@@ -443,8 +443,12 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	Ml float64
 
 	// EfSearch is the number of nodes to consider in the search phase.
-	// 20 is a reasonable default. Higher values improve search accuracy at
-	// the expense of memory.
+	// 50 is a reasonable default -- see docs/architecture/HNSW_NEIGHBOR_SELECTION.md's
+	// EfConstruction/EfSearch sweep for why (recall@1/5 plateau at 50; below
+	// that, recall drops with no latency benefit since resultCap = max(k,
+	// EfSearch) already floors at k for k > EfSearch). Higher values improve
+	// search accuracy (particularly at k > EfSearch) at the expense of latency
+	// on every query, including cheap low-k ones.
 	EfSearch int
 
 	// EfConstruction is the number of nodes to consider when selecting neighbors
@@ -476,7 +480,7 @@ func NewGraph[K cmp.Ordered, V VectorType]() *Graph[K, V] {
 	return &Graph[K, V]{
 		M:              16,
 		Ml:             0.25,
-		EfSearch:       20,
+		EfSearch:       50,
 		EfConstruction: 200,
 		Rng:            defaultRand(),
 	}

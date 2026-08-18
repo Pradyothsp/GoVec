@@ -119,7 +119,7 @@ func DefaultConfig() *Config {
 			EnableHybridSearch:  false,
 			EnableMetadataIndex: false,
 			HnswM:               16,
-			HnswEfSearch:        20,
+			HnswEfSearch:        50,
 			HnswEfConstruction:  200,
 		},
 		GRPC: GRPCConfig{
