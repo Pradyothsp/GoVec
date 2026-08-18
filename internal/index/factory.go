@@ -133,7 +133,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 
 	efSearch := cfg.HnswEfSearch
 	if efSearch <= 0 {
-		efSearch = 20
+		efSearch = 50
 	}
 
 	efConstruction := cfg.HnswEfConstruction
