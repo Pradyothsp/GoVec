@@ -648,20 +648,20 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				panic("(*Graph).Distance must be set before adding nodes")
 			}
 
-			// Find a candidate pool for this layer, bounded by EfConstruction (not
-			// M) -- selectNeighborsHeuristic below needs a wide pool to choose
-			// diverse connections from, not just the M closest.
-			candidatePool := searchPoint.search(efConstruction, efConstruction, vec, g.Distance, nil)
-			if len(candidatePool) == 0 {
-				// This should ideally not happen as the searchPoint itself should be in the result set.
-				panic("search returned no nodes")
-			}
-
-			// Update the 'elevator' node for the next lower layer. It will be the closest node found.
-			elevator = ptr(candidatePool[0].node.Key)
-
-			// If the current layer is at or below the node's insertLevel, add the node.
+			// If the current layer is at or below the node's insertLevel, the node
+			// actually connects here: find a real candidate pool, bounded by
+			// EfConstruction (not M) -- selectNeighborsHeuristic below needs a wide
+			// pool to choose diverse connections from, not just the M closest.
 			if insertLevel >= i {
+				candidatePool := searchPoint.search(efConstruction, efConstruction, vec, g.Distance, nil)
+				if len(candidatePool) == 0 {
+					// This should ideally not happen as the searchPoint itself should be in the result set.
+					panic("search returned no nodes")
+				}
+
+				// Update the 'elevator' node for the next lower layer. It will be the closest node found.
+				elevator = ptr(candidatePool[0].node.Key)
+
 				// If the node already exists at this key, delete it first to update its position and connections.
 				if _, ok := currentLayer.nodes[key]; ok {
 					g.Delete(key) // This handles isolating the old node.
@@ -687,6 +687,22 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				for _, neighborNode := range selectedNeighbors {
 					neighborNode.addNeighbor(newNode, mCurMax, g.Distance)
 					newNode.addNeighbor(neighborNode, g.M, g.Distance)
+				}
+			} else {
+				// Pass-through layer: this node's insertLevel is below i, so it
+				// never connects here -- this layer only exists to hand off a good
+				// entry point to the layer below. A true ef=1 greedy descent (the
+				// paper's INSERT algorithm, and what hnswlib's addPoint does for
+				// exactly this case) is enough: no wider search here ever changes
+				// recall, since nothing found gets kept or connected to. The old
+				// code ran the full EfConstruction-breadth candidate search on
+				// every pass-through layer too -- pure wasted insert cost, worse
+				// the higher EfConstruction or the taller the graph.
+				nodes := searchPoint.search(1, 1, vec, g.Distance, nil)
+				if len(nodes) == 0 {
+					elevator = ptr(searchPoint.Key)
+				} else {
+					elevator = ptr(nodes[0].node.Key)
 				}
 			}
 		}
