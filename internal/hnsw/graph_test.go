@@ -73,7 +73,7 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32, nil)
+	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32, nil, nil)
 
 	// Node 3 (value 3) and node 5 (value 5) are both exactly distance 1 from
 	// the target (4) -- a genuine tie, so either is a valid second-nearest.
