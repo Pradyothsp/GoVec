@@ -118,9 +118,14 @@ func DefaultConfig() *Config {
 			Dimensions:          0, // 0 = no upfront enforcement; must be >0 when EnableMmap: true
 			EnableHybridSearch:  false,
 			EnableMetadataIndex: false,
-			HnswM:               16,
-			HnswEfSearch:        50,
-			HnswEfConstruction:  200,
+			// Must match internal/hnsw's DefaultM/DefaultEfSearch/DefaultEfConstruction
+			// (see that package's doc comments for the reasoning behind each value).
+			// Kept as separate literals rather than importing internal/hnsw here --
+			// this package is meant to stay independent of any specific index
+			// implementation -- so keep them in sync by hand if either changes.
+			HnswM:              16,
+			HnswEfSearch:       50,
+			HnswEfConstruction: 200,
 		},
 		GRPC: GRPCConfig{
 			Enabled:          false,

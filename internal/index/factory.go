@@ -126,19 +126,21 @@ func hnswDistanceFuncInt8(metric config.DistanceMetric) (hnsw.DistanceFunc[[]int
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
 func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mathBlock core.MathBlock, mmapStore *storage.MmapStore) (Engine, error) {
+	// Falls back to hnsw's own defaults (not a separate hand-copied literal)
+	// so this and NewGraph()'s standalone-library default can't drift apart.
 	m := cfg.HnswM
 	if m <= 0 {
-		m = 16
+		m = hnsw.DefaultM
 	}
 
 	efSearch := cfg.HnswEfSearch
 	if efSearch <= 0 {
-		efSearch = 50
+		efSearch = hnsw.DefaultEfSearch
 	}
 
 	efConstruction := cfg.HnswEfConstruction
 	if efConstruction <= 0 {
-		efConstruction = 200
+		efConstruction = hnsw.DefaultEfConstruction
 	}
 
 	if cfg.Quantization == config.QuantizationScalar {

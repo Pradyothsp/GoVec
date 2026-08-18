@@ -435,7 +435,7 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	Rng *rand.Rand
 
 	// M is the maximum number of neighbors to keep for each node.
-	// A good default for OpenAI embeddings is 16.
+	// See DefaultM's doc comment for the reasoning behind its value.
 	M int
 
 	// Ml is the level generation factor.
@@ -443,25 +443,42 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	Ml float64
 
 	// EfSearch is the number of nodes to consider in the search phase.
-	// 50 is a reasonable default -- see docs/architecture/HNSW_NEIGHBOR_SELECTION.md's
-	// EfConstruction/EfSearch sweep for why (recall@1/5 plateau at 50; below
-	// that, recall drops with no latency benefit since resultCap = max(k,
-	// EfSearch) already floors at k for k > EfSearch). Higher values improve
-	// search accuracy (particularly at k > EfSearch) at the expense of latency
-	// on every query, including cheap low-k ones.
+	// See DefaultEfSearch's doc comment for the reasoning behind its value.
+	// Higher values improve search accuracy (particularly at k > EfSearch) at
+	// the expense of latency on every query, including cheap low-k ones.
 	EfSearch int
 
 	// EfConstruction is the number of nodes to consider when selecting neighbors
 	// for a new node during graph construction (Add). It is independent of
 	// EfSearch: a low EfConstruction produces a poorly-connected graph that no
-	// amount of EfSearch or M can fully compensate for at query time. 200 is
-	// hnswlib's default and a reasonable starting point; higher values build a
-	// higher-quality graph at the cost of slower inserts.
+	// amount of EfSearch or M can fully compensate for at query time. See
+	// DefaultEfConstruction's doc comment for the reasoning behind its value;
+	// higher values build a higher-quality graph at the cost of slower inserts.
 	EfConstruction int
 
 	// layers is a slice of layers in the graph.
 	layers []*layer[K, V]
 }
+
+// Default HNSW parameters, used by NewGraph() and mirrored by
+// internal/index/factory.go's server-config fallback defaults so the
+// standalone-library and server-config paths agree without hand-copying
+// literals in two places. internal/config/config.go's DefaultConfig() keeps
+// its own literal instead of importing this package -- config is meant to
+// stay independent of any specific index implementation -- but its values
+// are expected to match these; keep them in sync by hand if either changes.
+const (
+	// DefaultM is a good default for OpenAI-style embeddings.
+	DefaultM = 16
+	// DefaultEfSearch: see docs/architecture/HNSW_NEIGHBOR_SELECTION.md's
+	// EfConstruction/EfSearch sweep for why 50 -- recall@1/5 plateau there;
+	// below it, recall drops with no latency benefit, since resultCap =
+	// max(k, EfSearch) already floors at k for k > EfSearch anyway.
+	DefaultEfSearch = 50
+	// DefaultEfConstruction of 200 is hnswlib's own default and a reasonable
+	// starting point -- see docs/architecture/HNSW_EF_CONSTRUCTION.md.
+	DefaultEfConstruction = 200
+)
 
 // defaultRand returns a new pseudo-random number generator initialized with the current time.
 // It is used for probabilistic layer assignment during graph construction.
@@ -478,10 +495,10 @@ func defaultRand() *rand.Rand {
 // V is the vector type (e.g., []float32, []int8).
 func NewGraph[K cmp.Ordered, V VectorType]() *Graph[K, V] {
 	return &Graph[K, V]{
-		M:              16,
+		M:              DefaultM,
 		Ml:             0.25,
-		EfSearch:       50,
-		EfConstruction: 200,
+		EfSearch:       DefaultEfSearch,
+		EfConstruction: DefaultEfConstruction,
 		Rng:            defaultRand(),
 	}
 }
