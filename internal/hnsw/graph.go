@@ -239,7 +239,9 @@ func (n *layerNode[K, V]) search(
 	)
 	var (
 		// result is a max-heap storing the resultCap best (closest) found nodes so far.
-		result = heap.Heap[searchCandidate[K, V]]{}
+		// The worst-kept candidate sits at the root, so checking/evicting it (the hot
+		// path below) is O(1)/O(log n) instead of the O(n) scan a min-heap would need.
+		result = heap.MaxHeap[searchCandidate[K, V]]{}
 		// visited tracks nodes already processed to avoid redundant work and loops.
 		visited = make(map[K]bool)
 	)
@@ -312,7 +314,20 @@ func (n *layerNode[K, V]) search(
 		result.PopLast()
 	}
 
-	return result.Slice()
+	// Drain into ascending (closest-first) order. result is a max-heap, so
+	// draining it via PopLast() yields descending (worst-first) order in
+	// O(k log k); reverse once. Callers (Graph.search, Graph.Search) return
+	// this slice as-is with no further sort, so this drain is load-bearing,
+	// not cosmetic -- it also fixes a latent gap in the old min-heap
+	// Slice()-return: only index 0 was ever guaranteed to be the true
+	// closest node (the min-heap root), positions 1..k-1 were raw heap-array
+	// order, not actually sorted by distance.
+	sorted := make([]searchCandidate[K, V], 0, result.Len())
+	for result.Len() > 0 {
+		sorted = append(sorted, result.PopLast())
+	}
+	slices.Reverse(sorted)
+	return sorted
 }
 
 // replenish attempts to restore connectivity for a node that might have lost neighbors,
