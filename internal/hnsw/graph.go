@@ -283,10 +283,17 @@ func (n *layerNode[K, V]) search(
 
 		current := candidates.Pop().node // Get the closest node from candidates to explore
 
-		// Iterate through neighbors in a sorted, deterministic fashion for test consistency.
-		neighbors := slices.Clone(current.neighbors)
-		slices.SortFunc(neighbors, func(a, b *layerNode[K, V]) int { return cmp.Compare(a.Key, b.Key) })
-		for _, neighbor := range neighbors {
+		// Iterate neighbors directly in their stored order. This used to clone
+		// and sort by key first "for test consistency" -- but within one
+		// constructed graph, current.neighbors' order is already fully
+		// deterministic (a plain slice, not a map), so every search() call
+		// against the same graph state produces the same traversal and the
+		// same results; it just isn't canonically sorted by key. That clone +
+		// sort cost an allocation and an O(m log m) sort on every single node
+		// visited during traversal, purely to make tie-break outcomes match a
+		// specific order in tests -- tests that care about ties now assert
+		// membership among the tied candidates instead of a fixed winner.
+		for _, neighbor := range current.neighbors {
 			neighborID := neighbor.Key
 			if visited[neighborID] {
 				continue
