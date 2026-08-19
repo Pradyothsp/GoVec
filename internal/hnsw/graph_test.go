@@ -73,7 +73,7 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, EuclideanDistanceFloat32, nil, nil)
+	best := entry.search(2, 4, []float32{4}, noCacheDist(EuclideanDistanceFloat32), 0, nil, nil)
 
 	// Node 3 (value 3) and node 5 (value 5) are both exactly distance 1 from
 	// the target (4) -- a genuine tie, so either is a valid second-nearest.
@@ -215,7 +215,7 @@ func Test_selectNeighborsHeuristic_PrefersDiversityOverRawDistance(t *testing.T)
 	b := candidate(2, []float32{1.1, 0}, 1.1)
 	c := candidate(3, []float32{0, 2}, 2.0)
 
-	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{b, a, c}, 2, EuclideanDistanceFloat32)
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{b, a, c}, 2, noCacheDist(EuclideanDistanceFloat32))
 
 	require.Len(t, selected, 2)
 	assert.Equal(t, 1, selected[0].Key, "nearest candidate (A) should always be selected first")
@@ -232,7 +232,7 @@ func Test_selectNeighborsHeuristic_NoBackfillWhenCandidatesAreRedundant(t *testi
 	a := candidate(1, []float32{1, 0}, 1.0)
 	b := candidate(2, []float32{1.1, 0}, 1.1)
 
-	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 2, EuclideanDistanceFloat32)
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 2, noCacheDist(EuclideanDistanceFloat32))
 
 	require.Len(t, selected, 1, "B is redundant given A, and there's no third candidate to backfill with")
 	assert.Equal(t, 1, selected[0].Key)
@@ -244,7 +244,7 @@ func Test_selectNeighborsHeuristic_FewerCandidatesThanMReturnsAllUnpruned(t *tes
 	a := candidate(1, []float32{1, 0}, 1.0)
 	b := candidate(2, []float32{1.1, 0}, 1.1) // would be pruned as redundant if the pool were large enough to prune
 
-	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 5, EuclideanDistanceFloat32)
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 5, noCacheDist(EuclideanDistanceFloat32))
 
 	require.Len(t, selected, 2, "fewer candidates than m means nothing to prune, matching hnswlib's size() < M early return")
 }

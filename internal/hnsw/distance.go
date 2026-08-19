@@ -52,6 +52,79 @@ func EuclideanDistanceInt8(a, b []int8) float32 {
 	return float32(math.Sqrt(float64(sum)))
 }
 
+// PrecomputeSquaredNormFloat32 computes v's squared L2 norm (sum of
+// squares). Used as Graph.Precompute for cosine-metric float32 graphs (see
+// CachedCosineDistanceFloat32) -- cosine's distance formula needs each
+// vector's norm as a value standalone from any particular comparison, and
+// that norm never changes once the vector is stored, so computing it once
+// here and caching it (rather than inside every single distance() call, as
+// vek32.CosineSimilarity does today) removes real, measured redundant work
+// from HNSW's hottest loop. float64 accumulation, not float32: see
+// layerNode.precomputed's doc comment for why (written for []int8's larger
+// magnitudes, but the same headroom argument applies here with room to
+// spare, since float32 inputs are typically much smaller-magnitude than
+// int8's raw +-127 range).
+func PrecomputeSquaredNormFloat32(v []float32) float64 {
+	var sum float64
+	for _, x := range v {
+		sum += float64(x) * float64(x)
+	}
+	return sum
+}
+
+// CachedCosineDistanceFloat32 is CosineDistanceFloat32's cache-aware
+// counterpart: aCache/bCache are each vector's PrecomputeSquaredNormFloat32
+// result, computed once at insert time rather than recomputed here. Only
+// the dot product -- which genuinely depends on both vectors and can't be
+// cached -- is computed fresh. Deliberately has no zero-vector guard,
+// matching vek32.CosineSimilarity's existing behavior (a zero vector's
+// cache is 0, giving 0/0 -> NaN) exactly: this is a faster path to the same
+// answer, not a place to change what that answer is.
+func CachedCosineDistanceFloat32(aVec []float32, aCache float64, bVec []float32, bCache float64) float32 {
+	var dot float64
+	for i := range aVec {
+		dot += float64(aVec[i]) * float64(bVec[i])
+	}
+	magnitude := math.Sqrt(aCache) * math.Sqrt(bCache)
+	return float32(1 - dot/magnitude)
+}
+
+// PrecomputeSquaredNormInt8 computes v's squared L2 norm (sum of squares),
+// accumulated as int64 like core.CosineSimilarityInt8's own normA/normB --
+// int8 values squared and summed can overflow int8/int16 almost
+// immediately at realistic dimension counts, see layerNode.precomputed's
+// doc comment -- then converted to float64 to match Graph.Precompute's
+// signature. That conversion is exact: float64 represents any int64 this
+// codebase will realistically ever produce here without rounding.
+func PrecomputeSquaredNormInt8(v []int8) float64 {
+	var sum int64
+	for _, x := range v {
+		sum += int64(x) * int64(x)
+	}
+	return float64(sum)
+}
+
+// CachedCosineDistanceInt8 is CosineDistanceInt8's cache-aware counterpart,
+// mirroring core.CosineSimilarityInt8 exactly -- including its explicit
+// zero-vector guard (return the maximum distance, 1.0, rather than let a
+// zero norm divide-by-zero into NaN) and its cast order (divide as float32,
+// same as the uncached path, rather than accumulating the whole computation
+// in float64) -- so caching doesn't shift int8's existing numerical
+// behavior any more than necessary to get the speedup. aCache/bCache are
+// each vector's PrecomputeSquaredNormInt8 result.
+func CachedCosineDistanceInt8(aVec []int8, aCache float64, bVec []int8, bCache float64) float32 {
+	if aCache == 0 || bCache == 0 {
+		return 1.0
+	}
+	var dot int64
+	for i := range aVec {
+		dot += int64(aVec[i]) * int64(bVec[i])
+	}
+	magnitude := math.Sqrt(aCache) * math.Sqrt(bCache)
+	similarity := float32(dot) / float32(magnitude)
+	return 1.0 - similarity
+}
+
 // distanceFuncsFloat32 is a registry of known float32 distance functions, mapped by name.
 // This registry is essential for serializing and deserializing Graph instances,
 // allowing the correct distance function to be identified and restored during import.

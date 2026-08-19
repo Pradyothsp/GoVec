@@ -41,11 +41,13 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	wal                *WAL
 	encodeFunc         func([]float32) T
 	distanceFunc       func(T, T) (float32, error)
-	hnswDistFunc       hnsw.DistanceFunc[T] // stored for Clear() graph reset
-	hnswM              int                  // stored for Clear() graph reset
-	hnswEfSearch       int                  // stored for Clear() graph reset
-	hnswEfConstruction int                  // stored for Clear() graph reset
-	vectorStore        *storage.MmapStore   // nil when mmap is disabled
+	hnswDistFunc       hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
+	hnswPrecompute     func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
+	hnswCachedDistance func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
+	hnswM              int                                                          // stored for Clear() graph reset
+	hnswEfSearch       int                                                          // stored for Clear() graph reset
+	hnswEfConstruction int                                                          // stored for Clear() graph reset
+	vectorStore        *storage.MmapStore                                           // nil when mmap is disabled
 }
 
 // GetByID returns a vector by ID.
@@ -91,6 +93,11 @@ func NewHNSWIndex[T hnsw.VectorType](
 	encodeFunc func([]float32) T,
 	distanceFunc func(T, T) (float32, error),
 	hnswDistFunc hnsw.DistanceFunc[T],
+	// hnswPrecompute/hnswCachedDistance are the optional cache-aware pair
+	// (see hnsw.Graph.Precompute's doc comment) -- nil together for a
+	// metric with nothing worth caching.
+	hnswPrecompute func(v T) float64,
+	hnswCachedDistance func(aVec T, aCache float64, bVec T, bCache float64) float32,
 	m int,
 	efSearch int,
 	efConstruction int,
@@ -102,6 +109,8 @@ func NewHNSWIndex[T hnsw.VectorType](
 	g.EfSearch = efSearch
 	g.EfConstruction = efConstruction
 	g.Distance = hnswDistFunc
+	g.Precompute = hnswPrecompute
+	g.CachedDistance = hnswCachedDistance
 
 	return &HNSWIndex[T]{
 		graph:              g,
@@ -113,6 +122,8 @@ func NewHNSWIndex[T hnsw.VectorType](
 		encodeFunc:         encodeFunc,
 		distanceFunc:       distanceFunc,
 		hnswDistFunc:       hnswDistFunc,
+		hnswPrecompute:     hnswPrecompute,
+		hnswCachedDistance: hnswCachedDistance,
 		hnswM:              m,
 		hnswEfSearch:       efSearch,
 		hnswEfConstruction: efConstruction,
@@ -841,6 +852,8 @@ func (idx *HNSWIndex[T]) Clear() {
 	g.EfSearch = idx.hnswEfSearch
 	g.EfConstruction = idx.hnswEfConstruction
 	g.Distance = idx.hnswDistFunc
+	g.Precompute = idx.hnswPrecompute
+	g.CachedDistance = idx.hnswCachedDistance
 	idx.graph = g
 
 	idx.metadata = make(map[uint32]*core.VectorNode[T])

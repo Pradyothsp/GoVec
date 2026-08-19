@@ -43,6 +43,35 @@ type layerNode[K cmp.Ordered, V VectorType] struct {
 	// more than a linear scan over a handful of pointers costs in CPU --
 	// confirmed via heap profile, see govec-bench STATUS.md.
 	neighbors []*layerNode[K, V]
+
+	// precomputed is an opaque, metric-supplied value computed once via
+	// Graph.Precompute when this node is created (on insert or persistence
+	// import), and handed back to Graph.CachedDistance on every future
+	// comparison involving this node -- letting the metric skip work that's
+	// otherwise redundantly repeated on every single comparison (e.g.
+	// cosine's per-vector norm: needed on both sides of every distance()
+	// call, but it never changes once the vector is stored). layerNode
+	// itself never interprets this value -- see distFunc's doc comment.
+	//
+	// float64, not float32 or a type derived from V (e.g. int64 for
+	// []int8's integer sums): []int8's squared-norm accumulates in int64
+	// (see core.CosineSimilarityInt8) and can exceed float32's 2^24
+	// exact-integer ceiling at realistic embedding dimensions (3072 dims x
+	// 127^2 ~= 49.5M > 16.78M) -- float32 would silently lose precision
+	// there. float64 holds any int64 this codebase will realistically ever
+	// produce here exactly (up to 2^53), and that correctness is free:
+	// math.Sqrt only operates on float64 anyway, so an int64-cached value
+	// would still need this exact conversion before use, just one step
+	// later. A per-V cache type would need a third generic type parameter
+	// threaded through layerNode/Graph/HNSWIndex for zero benefit over just
+	// using float64 everywhere -- not worth the complexity.
+	//
+	// Left at its zero value, unused, when the configured metric doesn't
+	// opt in (Graph.Precompute == nil) -- e.g. Euclidean, whose current
+	// single-pass implementation has no redundant per-comparison norm
+	// computation to eliminate in the first place, or any custom-registered
+	// metric that doesn't supply Precompute/CachedDistance.
+	precomputed float64
 }
 
 // indexOfNeighbor returns the index of the neighbor with the given key in
@@ -59,7 +88,8 @@ func (n *layerNode[K, V]) indexOfNeighbor(key K) int {
 // removeNeighbor removes the neighbor with the given key, if present.
 // No-op if the key isn't found. Order among remaining neighbors is not
 // preserved (swap-with-last) -- nothing depends on neighbor slice order,
-// search() explicitly sorts by key before iterating for determinism.
+// search() iterates current.neighbors directly in whatever order it's
+// stored, which is already deterministic within one constructed graph.
 func (n *layerNode[K, V]) removeNeighbor(key K) {
 	if i := n.indexOfNeighbor(key); i >= 0 {
 		n.neighbors[i] = n.neighbors[len(n.neighbors)-1]
@@ -74,8 +104,9 @@ func (n *layerNode[K, V]) removeNeighbor(key K) {
 // 'm' closest by raw distance -- see selectNeighborsHeuristic's doc comment.
 // This can drop more than one existing neighbor, or newNode itself, though in
 // practice it's usually exactly one (m+1 candidates in, up to m selected).
-// 'dist' is the distance function used to compare vectors.
-func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist DistanceFunc[V]) {
+// 'dist' compares two stored nodes, using cached per-node values when the
+// graph's metric supports it (see distFunc's doc comment).
+func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist distFunc[V]) {
 	// If newNode is already a neighbor, just update it in place -- matches
 	// the map version's overwrite-on-existing-key semantics.
 	if i := n.indexOfNeighbor(newNode.Key); i >= 0 {
@@ -96,7 +127,7 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist Dist
 	// node was originally inserted for).
 	candidates := make([]searchCandidate[K, V], len(n.neighbors))
 	for i, neighbor := range n.neighbors {
-		candidates[i] = searchCandidate[K, V]{node: neighbor, dist: dist(neighbor.Value, n.Value)}
+		candidates[i] = searchCandidate[K, V]{node: neighbor, dist: dist(neighbor.Value, neighbor.precomputed, n.Value, n.precomputed)}
 	}
 	selected := selectNeighborsHeuristic(candidates, m, dist)
 
@@ -156,7 +187,7 @@ func (s searchCandidate[K, V]) Less(o searchCandidate[K, V]) bool {
 // nothing to select from. Note this can still return fewer than m even when
 // there are m or more candidates: the heuristic has no backfill step, so
 // highly redundant candidate sets can legitimately prune below m.
-func selectNeighborsHeuristic[K cmp.Ordered, V VectorType](candidates []searchCandidate[K, V], m int, dist DistanceFunc[V]) []*layerNode[K, V] {
+func selectNeighborsHeuristic[K cmp.Ordered, V VectorType](candidates []searchCandidate[K, V], m int, dist distFunc[V]) []*layerNode[K, V] {
 	if len(candidates) < m {
 		selected := make([]*layerNode[K, V], len(candidates))
 		for i, c := range candidates {
@@ -180,7 +211,7 @@ func selectNeighborsHeuristic[K cmp.Ordered, V VectorType](candidates []searchCa
 		}
 		good := true
 		for _, kept := range selected {
-			if dist(kept.Value, candidate.node.Value) < candidate.dist {
+			if dist(kept.Value, kept.precomputed, candidate.node.Value, candidate.node.precomputed) < candidate.dist {
 				good = false
 				break
 			}
@@ -203,7 +234,14 @@ func (n *layerNode[K, V]) search(
 	// considered during the search. Higher values increase accuracy at the cost of speed.
 	efSearch int,
 	target V,
-	distance DistanceFunc[V],
+	distance distFunc[V],
+	// targetCache is target's precomputed value (see Graph.Precompute's doc
+	// comment), computed once by the caller -- target has no layerNode of
+	// its own to carry a cached value on (it's an ephemeral query or
+	// not-yet-inserted vector), so this is search()'s only way to get it. 0
+	// when the configured metric has no cache; distance ignores it in that
+	// case, same as every other cache argument in this file.
+	targetCache float64,
 	// allowlist restricts which nodes may appear in the result set.
 	// nil means no filter (all nodes qualify). An empty map means no nodes qualify.
 	// Non-matching nodes are still explored for graph connectivity.
@@ -244,7 +282,7 @@ func (n *layerNode[K, V]) search(
 	candidates.Push(
 		searchCandidate[K, V]{
 			node: n,
-			dist: distance(n.Value, target),
+			dist: distance(n.Value, n.precomputed, target, targetCache),
 		},
 	)
 	// result is a max-heap storing the resultCap best (closest) found nodes so far.
@@ -300,7 +338,7 @@ func (n *layerNode[K, V]) search(
 			}
 			visited[neighborID] = true
 
-			dist := distance(neighbor.Value, target)
+			dist := distance(neighbor.Value, neighbor.precomputed, target, targetCache)
 
 			// Only worth exploring further if it could plausibly improve the
 			// result, or the result isn't full yet -- matches hnswlib's
@@ -357,7 +395,7 @@ func (n *layerNode[K, V]) search(
 // than it might look: replenish's candidates compete with the heuristic's own
 // carefully-chosen diverse connections, so adding low-quality (merely "first
 // found") candidates measurably diluted graph quality in practice.
-func (n *layerNode[K, V]) replenish(m int, dist DistanceFunc[V]) {
+func (n *layerNode[K, V]) replenish(m int, dist distFunc[V]) {
 	if len(n.neighbors) >= m {
 		return
 	}
@@ -391,7 +429,7 @@ func (n *layerNode[K, V]) replenish(m int, dist DistanceFunc[V]) {
 				continue
 			}
 			seen[candidate.Key] = struct{}{}
-			candidates = append(candidates, searchCandidate[K, V]{node: candidate, dist: dist(candidate.Value, n.Value)})
+			candidates = append(candidates, searchCandidate[K, V]{node: candidate, dist: dist(candidate.Value, candidate.precomputed, n.Value, n.precomputed)})
 		}
 		if len(candidates) >= maxCandidates {
 			break
@@ -412,7 +450,7 @@ func (n *layerNode[K, V]) replenish(m int, dist DistanceFunc[V]) {
 
 // isolate removes all connections to and from this node within its layer.
 // This is a prerequisite for deleting a node to ensure it's fully disconnected.
-func (n *layerNode[K, V]) isolate(m int, dist DistanceFunc[V]) {
+func (n *layerNode[K, V]) isolate(m int, dist distFunc[V]) {
 	// Remove backlinks from its current neighbors.
 	for _, neighbor := range n.neighbors {
 		neighbor.removeNeighbor(n.Key)
@@ -463,6 +501,34 @@ func (l *layer[K, V]) size() int {
 type Graph[K cmp.Ordered, V VectorType] struct {
 	// Distance is the distance function used to compare embeddings.
 	Distance DistanceFunc[V]
+
+	// Precompute and CachedDistance are an optional, opt-in pair that lets a
+	// metric skip work it would otherwise redundantly repeat on every single
+	// comparison. When both are set, Precompute(v) is called once per node
+	// (on insert or persistence import) and the result is cached on that
+	// node (layerNode.precomputed); CachedDistance is then used instead of
+	// Distance for every comparison involving that node, receiving both
+	// sides' cached values alongside the vectors themselves. Cosine is the
+	// motivating case: its distance formula needs each vector's norm as a
+	// value standalone from the comparison, and that norm never changes
+	// once the vector is stored, so recomputing it on every comparison (as
+	// plain Distance does) is pure waste. See CachedCosineDistanceFloat32.
+	//
+	// nil (the default) means "this metric has nothing worth caching" --
+	// every internal comparison falls back to calling Distance directly,
+	// identical to before this pair existed. Euclidean is the other metric
+	// this package ships, and deliberately leaves these nil: its current
+	// single-pass implementation (sum of squared diffs) never computes a
+	// standalone per-vector norm in the first place, so there's nothing
+	// here for it to cache. Any custom-registered DistanceFunc (see
+	// RegisterDistanceFuncFloat32/Int8) that doesn't set these gets the
+	// same zero-overhead fallback.
+	//
+	// CachedDistance must ignore cacheA/cacheB when Precompute is nil --
+	// though in that case CachedDistance itself is also nil and never
+	// called, so this is enforced by construction, not a runtime check.
+	Precompute     func(v V) float64
+	CachedDistance func(aVec V, aCache float64, bVec V, bCache float64) float32
 
 	// Rng is used for level generation. It may be set to a deterministic value
 	// for reproducibility. Note that deterministic number generation can lead to
@@ -519,6 +585,50 @@ func (g *Graph[K, V]) visitedScratch() map[K]bool {
 	}
 	clear(g.insertVisited)
 	return g.insertVisited
+}
+
+// distFunc computes the distance between two vectors, given each one's
+// precomputed cache value (0 and ignored when the configured metric has no
+// cache -- see Graph.Precompute's doc comment). It replaces passing a bare
+// DistanceFunc[V] to search()/addNeighbor()/replenish()/
+// selectNeighborsHeuristic() below: those need each side's cache, not just
+// its vector. DistanceFunc[V] itself -- the public, name-registered
+// contract used by persistence -- is unchanged; this is purely internal
+// plumbing built fresh (via distFuncFor) for each top-level Add()/search()
+// call.
+type distFunc[V VectorType] func(aVec V, aCache float64, bVec V, bCache float64) float32
+
+// distFuncFor builds this graph's distFunc[V]: CachedDistance when the
+// configured metric opted in, or a thin wrapper around Distance (ignoring
+// both cache arguments) otherwise. Call once per top-level Add()/search()
+// call and thread the result down, rather than re-branching on every
+// comparison.
+func (g *Graph[K, V]) distFuncFor() distFunc[V] {
+	if g.CachedDistance != nil {
+		return distFunc[V](g.CachedDistance)
+	}
+	return noCacheDist(g.Distance)
+}
+
+// noCacheDist adapts a plain DistanceFunc[V] into a distFunc[V] that ignores
+// both cache arguments -- the shape every internal call site needs, for a
+// metric that never populates a cache. Shared by distFuncFor's fallback
+// branch and any caller (e.g. tests) that wants to drive search()/
+// addNeighbor()/etc. directly with a bare DistanceFunc[V] and no caching.
+func noCacheDist[V VectorType](dist DistanceFunc[V]) distFunc[V] {
+	return func(aVec V, _ float64, bVec V, _ float64) float32 {
+		return dist(aVec, bVec)
+	}
+}
+
+// precompute returns g.Precompute(v), or 0 if the configured metric has no
+// cache (Precompute == nil) -- safe because distFuncFor's non-cached branch
+// ignores the cache arguments entirely in that case.
+func (g *Graph[K, V]) precompute(v V) float64 {
+	if g.Precompute == nil {
+		return 0
+	}
+	return g.Precompute(v)
 }
 
 // Default HNSW parameters, used by NewGraph() and mirrored by
@@ -683,9 +793,18 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 		efConstruction = g.M
 	}
 
+	// Built once for the whole batch, not per node/layer: distFuncFor()'s
+	// result doesn't depend on which node is being inserted, only on the
+	// graph's configured metric.
+	distFn := g.distFuncFor()
+
 	for _, node := range nodes {
 		key := node.Key
 		vec := node.Value
+		// vecCache is this node's precomputed value (see Graph.Precompute's
+		// doc comment) -- computed once here and reused for every layer this
+		// node touches below, instead of recomputing it on every layer.
+		vecCache := g.precompute(vec)
 
 		g.assertDims(vec)              // Ensure dimensional consistency.
 		insertLevel := g.randomLevel() // Determine the highest layer this node will be added to.
@@ -710,6 +829,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 					Key:   key,
 					Value: vec,
 				},
+				precomputed: vecCache,
 			}
 
 			// If the current layer is empty, the new node becomes the entry point.
@@ -735,7 +855,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 			// EfConstruction (not M) -- selectNeighborsHeuristic below needs a wide
 			// pool to choose diverse connections from, not just the M closest.
 			if insertLevel >= i {
-				candidatePool := searchPoint.search(efConstruction, efConstruction, vec, g.Distance, nil, g.visitedScratch())
+				candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, g.visitedScratch())
 				if len(candidatePool) == 0 {
 					// This should ideally not happen as the searchPoint itself should be in the result set.
 					panic("search returned no nodes")
@@ -765,10 +885,10 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				if i == 0 {
 					mCurMax = 2 * g.M
 				}
-				selectedNeighbors := selectNeighborsHeuristic(candidatePool, g.M, g.Distance)
+				selectedNeighbors := selectNeighborsHeuristic(candidatePool, g.M, distFn)
 				for _, neighborNode := range selectedNeighbors {
-					neighborNode.addNeighbor(newNode, mCurMax, g.Distance)
-					newNode.addNeighbor(neighborNode, g.M, g.Distance)
+					neighborNode.addNeighbor(newNode, mCurMax, distFn)
+					newNode.addNeighbor(neighborNode, g.M, distFn)
 				}
 			} else {
 				// Pass-through layer: this node's insertLevel is below i, so it
@@ -780,7 +900,7 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 				// code ran the full EfConstruction-breadth candidate search on
 				// every pass-through layer too -- pure wasted insert cost, worse
 				// the higher EfConstruction or the taller the graph.
-				nodes := searchPoint.search(1, 1, vec, g.Distance, nil, g.visitedScratch())
+				nodes := searchPoint.search(1, 1, vec, distFn, vecCache, nil, g.visitedScratch())
 				if len(nodes) == 0 {
 					elevator = ptr(searchPoint.Key)
 				} else {
@@ -838,6 +958,12 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		efSearch = h.EfSearch // Use the graph's configured EfSearch parameter.
 	}
 
+	// Built once per query, not per layer: near's cache doesn't change as
+	// the search descends through layers, and distFuncFor()'s result
+	// doesn't depend on near at all.
+	distFn := h.distFuncFor()
+	nearCache := h.precompute(near)
+
 	var elevator *K // Key of the node that serves as the entry point to the next lower layer.
 
 	// Traverse the graph from the highest layer down to the base layer (0).
@@ -854,7 +980,7 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		// For layers above the base layer, perform a limited search (k=1) to find the best
 		// entry point for the layer below.
 		if layerIdx > 0 {
-			nodes := searchPoint.search(1, efSearch, near, h.Distance, nil, nil)
+			nodes := searchPoint.search(1, efSearch, near, distFn, nearCache, nil, nil)
 			if len(nodes) == 0 {
 				// This implies an issue in graph construction or an empty layer.
 				// For robustness, if no nodes found, try to use the current searchPoint as elevator.
@@ -866,7 +992,7 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		}
 
 		// At the base layer (layerIdx == 0), perform the full search for 'k' nearest neighbors.
-		nodes := searchPoint.search(k, efSearch, near, h.Distance, allowlist, nil)
+		nodes := searchPoint.search(k, efSearch, near, distFn, nearCache, allowlist, nil)
 		out := make([]SearchResult[K, V], 0, len(nodes))
 
 		for _, node := range nodes {
@@ -902,6 +1028,7 @@ func (h *Graph[K, V]) Delete(key K) bool {
 
 	deleteLayer := map[int]struct{}{} // Keep track of layers that become empty.
 	var deleted bool
+	dist := h.distFuncFor() // built once, reused across every layer this key appears in
 	// Iterate through all layers, from highest to lowest, to remove the node.
 	for i, layer := range h.layers {
 		node, ok := layer.nodes[key]
@@ -916,7 +1043,7 @@ func (h *Graph[K, V]) Delete(key K) bool {
 		if i == 0 {
 			mCurMax = 2 * h.M // base layer allows up to 2*M connections -- see Add's comment
 		}
-		node.isolate(mCurMax, h.Distance) // Disconnect the node and replenish its former neighbors.
+		node.isolate(mCurMax, dist) // Disconnect the node and replenish its former neighbors.
 		deleted = true
 	}
 
