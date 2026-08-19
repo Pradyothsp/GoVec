@@ -131,14 +131,21 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist dist
 	}
 	selected := selectNeighborsHeuristic(candidates, m, dist)
 
-	// Diff against the pre-selection set to find who got dropped.
-	keep := make(map[K]struct{}, len(selected))
-	for _, s := range selected {
-		keep[s.Key] = struct{}{}
-	}
+	// Diff against the pre-selection set to find who got dropped. selected
+	// is small (<= m, so <= 16-32 elements), so a linear scan is cheap and
+	// allocation-free -- the same reasoning layerNode.neighbors itself is a
+	// slice instead of a map for (see that field's doc comment), just
+	// applied to this temporary set instead of a permanent field.
 	var dropped []*layerNode[K, V]
 	for _, neighbor := range n.neighbors {
-		if _, ok := keep[neighbor.Key]; !ok {
+		kept := false
+		for _, s := range selected {
+			if s.Key == neighbor.Key {
+				kept = true
+				break
+			}
+		}
+		if !kept {
 			dropped = append(dropped, neighbor)
 		}
 	}
