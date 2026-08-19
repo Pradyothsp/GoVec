@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"math/rand"
+	"runtime"
 	"sort"
 	"strconv"
 	"testing"
@@ -645,4 +646,187 @@ func bruteForceKNN(vectors [][]float32, excludeIdx int, q []float32, k int) map[
 	}
 
 	return truth
+}
+
+// randomVectors generates n random vectors of the given dimensionality,
+// seeded deterministically so callers can reproduce a specific failure.
+func randomVectors(seed int64, n, dim int) [][]float32 {
+	rng := rand.New(rand.NewSource(seed))
+	vectors := make([][]float32, n)
+	for i := range vectors {
+		v := make([]float32, dim)
+		for d := range v {
+			v[d] = rng.Float32()
+		}
+		vectors[i] = v
+	}
+	return vectors
+}
+
+// assertLayerSubsetInvariant asserts the core HNSW structural invariant --
+// every node present in layer i is also present in layer i-1 -- across
+// every layer boundary in g. This is the direct, general-purpose check for
+// the empty-layer hazard bug this session found: an item whose own
+// insertLevel didn't warrant presence in some higher layer nonetheless
+// becoming a permanent (if isolated) entry there, breaking exactly this
+// property. See prepareInsert's doc comment on the entry()==nil branch.
+func assertLayerSubsetInvariant[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) {
+	t.Helper()
+	for i := len(g.layers) - 1; i > 0; i-- {
+		upper := g.layers[i]
+		lower := g.layers[i-1]
+		for key := range upper.nodes {
+			_, ok := lower.nodes[key]
+			assert.Truef(t, ok, "key %v present in layer %d but missing from layer %d -- layer subset invariant violated", key, i, i-1)
+		}
+	}
+}
+
+// TestGraph_BatchParallelAdd_Race exercises addRound's parallel Prepare
+// phase directly (BatchParallelThreshold forced to 1 so even this test's
+// modest node count routes through it) with real multi-goroutine
+// parallelism (BatchParallelism forced to GOMAXPROCS). Intended to be run
+// under `go test -race`: the whole point of round-based barrier parallelism
+// is that no read (Prepare) ever overlaps in time with a write (Apply) to
+// the same data -- if that guarantee is broken, -race should catch it here.
+func TestGraph_BatchParallelAdd_Race(t *testing.T) {
+	t.Parallel()
+
+	const dim, n = 16, 300
+
+	g := NewGraph[int, []float32]()
+	g.M = 12
+	g.EfConstruction = 64
+	g.EfSearch = 32
+	g.Distance = CosineDistanceFloat32
+	g.Rng = rand.New(rand.NewSource(7))
+	g.BatchParallelism = runtime.GOMAXPROCS(0)
+	g.BatchParallelThreshold = 1
+
+	vectors := randomVectors(7, n, dim)
+	nodes := make([]Node[int, []float32], n)
+	for i, v := range vectors {
+		nodes[i] = MakeNode(i, v)
+	}
+
+	g.Add(nodes...)
+
+	require.Equal(t, n, g.Len(), "every node in the batch must land in the graph exactly once")
+	assertLayerSubsetInvariant(t, g)
+
+	// Sanity: the graph is actually usable after a parallel build, not just
+	// non-crashing -- a real query should find itself.
+	for i := 0; i < n; i += 37 {
+		results := g.Search(vectors[i], 1)
+		require.Len(t, results, 1)
+	}
+}
+
+// TestGraph_AddRound_EmptyLayerHazard is the direct regression test for the
+// empty-layer hazard bug: multiple round-mates independently observing the
+// same (newly created, empty) layer during Prepare and racing to claim it
+// as entry during Apply. Forces parallelism high enough that every node
+// lands in a single round against a starting-empty graph -- the worst case
+// per addRound's doc comment, since every layer up to the round's
+// collective max insertLevel starts genuinely empty at Prepare time for
+// every item simultaneously.
+func TestGraph_AddRound_EmptyLayerHazard(t *testing.T) {
+	t.Parallel()
+
+	const dim, n = 8, 40
+
+	g := NewGraph[int, []float32]()
+	g.M = 6
+	g.Ml = 0.9 // deliberately high: pushes many nodes to non-zero levels, maximizing how often multiple items in round 1 fight over the same new layer
+	g.EfConstruction = 32
+	g.EfSearch = 16
+	g.Distance = CosineDistanceFloat32
+	g.Rng = rand.New(rand.NewSource(11))
+	g.BatchParallelism = n // >= n: the whole batch is one round
+	g.BatchParallelThreshold = 1
+
+	vectors := randomVectors(11, n, dim)
+	nodes := make([]Node[int, []float32], n)
+	for i, v := range vectors {
+		nodes[i] = MakeNode(i, v)
+	}
+
+	g.Add(nodes...)
+
+	// The direct regression assertion: if the hazard were left unhandled
+	// (literal last-write-wins on layer.nodes), a losing item's connections
+	// would be silently dropped and this count would come up short.
+	require.Equal(t, n, g.Len())
+	assertLayerSubsetInvariant(t, g)
+
+	for i, v := range vectors {
+		got, ok := g.Lookup(i)
+		require.True(t, ok, "key %d missing from the graph after a hazarded round", i)
+		require.Equal(t, v, got)
+	}
+}
+
+// TestGraph_BatchParallelAdd_StructuralSoundness builds the same node set
+// twice from the same seed -- once forced fully serial, once forced through
+// addRound's parallel path -- and checks structural soundness, not
+// byte-identical output. Round-based parallelism's accepted trade-off
+// (items in the same round can't discover each other as neighbors, see
+// addRound's doc comment) means the two graphs' exact connections can
+// legitimately differ; what must not differ is: every key present, no
+// orphaned/missing nodes, and Search returning only real graph members.
+func TestGraph_BatchParallelAdd_StructuralSoundness(t *testing.T) {
+	t.Parallel()
+
+	const dim, n = 16, 250
+
+	vectors := randomVectors(23, n, dim)
+	nodes := make([]Node[int, []float32], n)
+	for i, v := range vectors {
+		nodes[i] = MakeNode(i, v)
+	}
+
+	build := func(parallel bool) *Graph[int, []float32] {
+		g := NewGraph[int, []float32]()
+		g.M = 10
+		g.EfConstruction = 48
+		g.EfSearch = 24
+		g.Distance = CosineDistanceFloat32
+		g.Rng = rand.New(rand.NewSource(1)) // same seed -- same level assignment sequence either way
+		if parallel {
+			g.BatchParallelism = runtime.GOMAXPROCS(0)
+			g.BatchParallelThreshold = 1
+		} else {
+			g.BatchParallelThreshold = n + 1 // never parallelize
+		}
+		g.Add(nodes...)
+		return g
+	}
+
+	serial := build(false)
+	parallel := build(true)
+
+	require.Equal(t, n, serial.Len())
+	require.Equal(t, n, parallel.Len())
+	assertLayerSubsetInvariant(t, serial)
+	assertLayerSubsetInvariant(t, parallel)
+
+	for i := range vectors {
+		_, ok := serial.Lookup(i)
+		require.True(t, ok)
+		_, ok = parallel.Lookup(i)
+		require.True(t, ok, "key %d missing from the parallel-built graph", i)
+	}
+
+	// Every result Search returns must be a real, resolvable graph member --
+	// no dangling/orphaned nodes reachable from a search that don't actually
+	// belong to the graph's own key set.
+	present := make(map[int]bool, n)
+	for _, node := range nodes {
+		present[node.Key] = true
+	}
+	for i := 0; i < n; i += 13 {
+		for _, r := range parallel.Search(vectors[i], 5) {
+			require.True(t, present[r.Key], "search returned a key not in the original node set: %v", r.Key)
+		}
+	}
 }

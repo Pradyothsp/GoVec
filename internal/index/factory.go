@@ -176,6 +176,14 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		efConstruction = hnsw.DefaultEfConstruction
 	}
 
+	// 0 is a valid, meaningful value for both (see their own doc comments:
+	// BatchParallelism 0 = runtime.GOMAXPROCS(0), BatchParallelThreshold 0 =
+	// hnsw.DefaultBatchParallelThreshold) -- passed straight through to
+	// Graph rather than resolved here, unlike m/efSearch/efConstruction
+	// above.
+	batchParallelism := cfg.HnswBatchParallelism
+	batchParallelThreshold := cfg.HnswBatchParallelThreshold
+
 	if cfg.Quantization == config.QuantizationScalar {
 		if mathBlock.Int8Func == nil {
 			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
@@ -188,6 +196,10 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			core.QuantizeVector, mathBlock.Int8Func, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
 			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
+		idx.graph.BatchParallelism = batchParallelism
+		idx.graph.BatchParallelThreshold = batchParallelThreshold
+		idx.hnswBatchParallelism = batchParallelism
+		idx.hnswBatchParallelThreshold = batchParallelThreshold
 		idx.quantization = string(cfg.Quantization)
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)
@@ -205,6 +217,10 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			identityFunc, mathBlock.FloatFunc, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
 			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
+		idx.graph.BatchParallelism = batchParallelism
+		idx.graph.BatchParallelThreshold = batchParallelThreshold
+		idx.hnswBatchParallelism = batchParallelism
+		idx.hnswBatchParallelThreshold = batchParallelThreshold
 		idx.quantization = string(cfg.Quantization)
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)

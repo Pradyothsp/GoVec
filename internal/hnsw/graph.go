@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"runtime"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/Pradyothsp/govec/internal/hnsw/heap"
@@ -611,6 +613,21 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	// touches this field, since concurrent Search() calls (an RLock-permitted
 	// pattern) can't safely share one map -- see visitedScratch's doc comment.
 	insertVisited map[K]bool
+
+	// BatchParallelism caps how many items' graph searches run concurrently
+	// within one Add() call's round-based parallelism (see addRound). 0
+	// (the default) resolves to runtime.GOMAXPROCS(0) -- see
+	// resolveParallelism. Never touched by addSerial/applyLive.
+	BatchParallelism int
+
+	// BatchParallelThreshold is the minimum node count an Add() call needs
+	// before round-based parallelism kicks in at all; below it, every node
+	// runs through addSerial instead (goroutine/WaitGroup overhead isn't
+	// worth it for a handful of items -- and a single-node Add(), the most
+	// common call shape, must always resolve here regardless of this value).
+	// 0 (the default) resolves to DefaultBatchParallelThreshold -- see
+	// resolveParallelism.
+	BatchParallelThreshold int
 }
 
 // visitedScratch returns g.insertVisited, lazily allocating it on first use
@@ -719,6 +736,17 @@ const (
 	// DefaultEfConstruction of 200 is hnswlib's own default and a reasonable
 	// starting point -- see docs/architecture/HNSW_EF_CONSTRUCTION.md.
 	DefaultEfConstruction = 200
+	// DefaultBatchParallelThreshold: below this many nodes in one Add() call,
+	// round-based parallelism (see addRound) is skipped entirely in favor of
+	// addSerial -- goroutine/WaitGroup overhead isn't worth paying for a
+	// handful of items. Picked from a real wall-clock sweep on an 8-core
+	// arm64 dev machine (M=16/EfConstruction=200/EfSearch=50, cosine,
+	// 128-dim): n=10 parallel was ~19% *slower* than serial (goroutine
+	// overhead dominates at that size), n=20 was already ~28% *faster* and
+	// the margin only widens from there (n=50: ~55% faster) -- so 20 sits
+	// just above the measured crossover, not in the middle of it. See
+	// HNSW_BULK_INSERT_PLAN.md §8 for the full sweep.
+	DefaultBatchParallelThreshold = 20
 )
 
 // defaultRand returns a new pseudo-random number generator initialized with the current time.
@@ -798,7 +826,13 @@ func (h *Graph[K, V]) randomLevel() int {
 // dimensions of vectors already present in the graph. This ensures consistency.
 // It panics if a mismatch is found.
 func (g *Graph[K, V]) assertDims(n V) {
-	if len(g.layers) == 0 {
+	// g.Len() (layer 0's actual node count), not len(g.layers) == 0: a round
+	// (addRound)'s serial preamble can grow g.layers ahead of any node
+	// actually being inserted into them (level assignment/layer growth for
+	// every item in the round all happen before the round's first Apply) --
+	// len(g.layers) == 0 would miss that intermediate state and call Dims()
+	// against a layer that exists but has no entry yet, panicking.
+	if g.Len() == 0 {
 		return // No existing vectors to compare against, so no assertion needed.
 	}
 	hasDims := g.Dims()
@@ -870,15 +904,69 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 	// distFuncFor() -- see rankDistFuncFor's doc comment.
 	distFn := g.rankDistFuncFor()
 
+	workers := g.resolveParallelism(len(nodes))
+	if workers <= 1 {
+		g.addSerial(nodes, efConstruction, distFn)
+		return
+	}
+
+	// pool is created once per Add() call and reused across every round --
+	// safe because addRound's barrier guarantees the previous round's
+	// goroutine using a given slot has fully returned before the next
+	// round's goroutine for that same slot starts (see visitedScratchPool's
+	// doc comment).
+	pool := newVisitedScratchPool[K](workers)
+	for start := 0; start < len(nodes); start += workers {
+		end := start + workers
+		if end > len(nodes) {
+			end = len(nodes)
+		}
+		g.addRound(nodes[start:end], efConstruction, distFn, pool)
+	}
+}
+
+// resolveParallelism decides how many items should run through addRound's
+// parallel Prepare phase concurrently for a batch of size n -- 1 means
+// "don't parallelize at all, use addSerial" (always true for n <= 1, so a
+// single-node Add() call, the most common shape, is unaffected by this
+// machinery). Below BatchParallelThreshold, parallelism is skipped even for
+// n > 1: goroutine/WaitGroup overhead isn't worth it for a handful of items.
+func (g *Graph[K, V]) resolveParallelism(n int) int {
+	threshold := g.BatchParallelThreshold
+	if threshold <= 0 {
+		threshold = DefaultBatchParallelThreshold
+	}
+	if n < threshold {
+		return 1
+	}
+
+	workers := g.BatchParallelism
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	if workers > n {
+		workers = n
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	return workers
+}
+
+// addSerial inserts nodes one at a time, each running fully through
+// applyLive against the graph's live current state before the next node
+// starts -- this is exactly Add()'s original, single-goroutine behavior,
+// used both as the below-threshold path (see resolveParallelism) and,
+// within addRound, for any item excluded from that round's parallel path
+// (an upsert or an intra-round duplicate key -- see addRound's doc comment).
+func (g *Graph[K, V]) addSerial(nodes []Node[K, V], efConstruction int, distFn distFunc[V]) {
 	for _, node := range nodes {
-		key := node.Key
-		vec := node.Value
 		// vecCache is this node's precomputed value (see Graph.Precompute's
 		// doc comment) -- computed once here and reused for every layer this
 		// node touches below, instead of recomputing it on every layer.
-		vecCache := g.precompute(vec)
+		vecCache := g.precompute(node.Value)
 
-		g.assertDims(vec)              // Ensure dimensional consistency.
+		g.assertDims(node.Value)       // Ensure dimensional consistency.
 		insertLevel := g.randomLevel() // Determine the highest layer this node will be added to.
 		// Create layers that don't exist yet, up to the insertLevel.
 		for insertLevel >= len(g.layers) {
@@ -889,105 +977,465 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 			panic("invalid level generated") // Should not happen with current randomLevel logic.
 		}
 
-		var elevator *K // Tracks the entry point into lower layers from higher ones.
+		g.addSerialPrepared(node, insertLevel, vecCache, efConstruction, distFn)
+	}
+}
 
-		preLen := g.Len() // Store graph length before insertion for invariant check.
+// addSerialPrepared is addSerial's per-item body, factored out so addRound's
+// serial preamble (which already computes insertLevel/vecCache for every
+// item in the round, upsert-or-not) can drive it directly without redoing
+// that work.
+func (g *Graph[K, V]) addSerialPrepared(node Node[K, V], insertLevel int, vecCache float64, efConstruction int, distFn distFunc[V]) {
+	key := node.Key
+	vec := node.Value
 
-		// Insert the node at each layer from the highest (insertLevel) down to the base layer (0).
-		for i := len(g.layers) - 1; i >= 0; i-- {
-			currentLayer := g.layers[i]
+	var elevator *K // Tracks the entry point into lower layers from higher ones.
+
+	preLen := g.Len() // Store graph length before insertion for invariant check.
+
+	// Insert the node at each layer from the highest (insertLevel) down to the base layer (0).
+	for i := len(g.layers) - 1; i >= 0; i-- {
+		elevator = g.applyLive(i, key, vec, vecCache, insertLevel, elevator, efConstruction, distFn)
+	}
+
+	// Invariant check: ensure the node was successfully added to the graph's base layer.
+	if g.Len() != preLen+1 {
+		// If adding failed for some reason, and the highest layer is now empty, trim it.
+		if len(g.layers) > 0 && g.layers[len(g.layers)-1].entry() == nil {
+			g.layers = g.layers[:len(g.layers)-1]
+		}
+	}
+}
+
+// applyLive performs Add()'s original single-item, single-layer insert
+// logic directly against the graph's current state -- no plan, no
+// parallelism, just layer i's slice of what addSerial used to do inline.
+// Returns the elevator key the layer below (i-1) should use as its search
+// start point.
+func (g *Graph[K, V]) applyLive(
+	i int, key K, vec V, vecCache float64, insertLevel int,
+	elevator *K, efConstruction int, distFn distFunc[V],
+) *K {
+	currentLayer := g.layers[i]
+	newNode := &layerNode[K, V]{
+		Node: Node[K, V]{
+			Key:   key,
+			Value: vec,
+		},
+		precomputed: vecCache,
+	}
+
+	// If the current layer is empty, the new node becomes the entry point.
+	if currentLayer.entry() == nil {
+		currentLayer.nodes = map[K]*layerNode[K, V]{key: newNode}
+		return elevator
+	}
+
+	// Determine the starting point for search in the current layer.
+	// For the highest layer, it's the layer's entry point. For lower layers,
+	// it's the 'elevator' node found from the layer above.
+	searchPoint := currentLayer.entry()
+	if elevator != nil {
+		searchPoint = currentLayer.nodes[*elevator]
+	}
+
+	if g.Distance == nil {
+		panic("(*Graph).Distance must be set before adding nodes")
+	}
+
+	// If the current layer is at or below the node's insertLevel, the node
+	// actually connects here: find a real candidate pool, bounded by
+	// EfConstruction (not M) -- selectNeighborsHeuristic below needs a wide
+	// pool to choose diverse connections from, not just the M closest.
+	if insertLevel >= i {
+		candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, g.visitedScratch())
+		if len(candidatePool) == 0 {
+			// This should ideally not happen as the searchPoint itself should be in the result set.
+			panic("search returned no nodes")
+		}
+
+		// The new elevator for the layer below. It will be the closest node found.
+		newElevator := ptr(candidatePool[0].node.Key)
+
+		// If the node already exists at this key, delete it first to update its position and connections.
+		if _, ok := currentLayer.nodes[key]; ok {
+			g.Delete(key) // This handles isolating the old node.
+		}
+
+		currentLayer.nodes[key] = newNode
+		// Select up to M diverse neighbors from the candidate pool, then
+		// create bi-directional connections between the new node and each.
+		// The new node's own outgoing connections are always capped at M,
+		// uniformly across every layer (matches hnswlib: getNeighborsByHeuristic2
+		// is always called with M_, never Mcurmax). But an existing neighbor's
+		// own capacity (mCurMax below) is layer-dependent: hnswlib caps the base
+		// layer at 2*M (maxM0_ = M_*2) and every other layer at M (maxM_ = M_) --
+		// the base layer holds ~every node and does the most work at query time,
+		// so it's allowed to grow denser. Using a uniform M everywhere (the
+		// original bug here) silently starved the base layer to half the
+		// connectivity a correctly-configured graph should have.
+		mCurMax := g.M
+		if i == 0 {
+			mCurMax = 2 * g.M
+		}
+		selectedNeighbors := selectNeighborsHeuristic(candidatePool, g.M, distFn)
+		for _, neighborNode := range selectedNeighbors {
+			neighborNode.addNeighbor(newNode, mCurMax, distFn)
+			newNode.addNeighbor(neighborNode, g.M, distFn)
+		}
+		return newElevator
+	}
+
+	// Pass-through layer: this node's insertLevel is below i, so it
+	// never connects here -- this layer only exists to hand off a good
+	// entry point to the layer below. A true ef=1 greedy descent (the
+	// paper's INSERT algorithm, and what hnswlib's addPoint does for
+	// exactly this case) is enough: no wider search here ever changes
+	// recall, since nothing found gets kept or connected to. The old
+	// code ran the full EfConstruction-breadth candidate search on
+	// every pass-through layer too -- pure wasted insert cost, worse
+	// the higher EfConstruction or the taller the graph.
+	found := searchPoint.search(1, 1, vec, distFn, vecCache, nil, g.visitedScratch())
+	if len(found) == 0 {
+		return ptr(searchPoint.Key)
+	}
+	return ptr(found[0].node.Key)
+}
+
+// planStepKind identifies which of applyLive's three original branches a
+// planStep represents -- see insertPlan's doc comment.
+type planStepKind uint8
+
+const (
+	// stepBecomeEntry means the layer was empty when prepareInsert observed
+	// it. Applying this step is only safe as planned if the layer is *still*
+	// empty at Apply time -- see applyInsert's doc comment for the hazard
+	// this guards against.
+	stepBecomeEntry planStepKind = iota
+	// stepConnect means insertLevel >= this layer's index: the node actually
+	// connects here, with neighbors already selected during Prepare.
+	stepConnect
+	// stepPassThrough means insertLevel < this layer's index: no connection
+	// is made, this step only hands an elevator key to the layer below.
+	stepPassThrough
+)
+
+// planStep is one layer's worth of prepareInsert's read-only work, replayed
+// by applyInsert. newNode (stepBecomeEntry/stepConnect only) is a freshly
+// allocated *layerNode, private to this plan until applyInsert publishes it
+// into the graph -- no other goroutine can observe or mutate it before then.
+type planStep[K cmp.Ordered, V VectorType] struct {
+	layerIdx          int
+	kind              planStepKind
+	newNode           *layerNode[K, V]   // stepBecomeEntry, stepConnect
+	selectedNeighbors []*layerNode[K, V] // stepConnect only
+	nextElevator      K                  // stepConnect, stepPassThrough only
+}
+
+// insertPlan is one item's full top-down set of planStep, computed by
+// prepareInsert against the graph state as it stood when the enclosing
+// round started, and later replayed serially by applyInsert.
+//
+// The empty-layer hazard: prepareInsert observes each layer read-only, so
+// two round-mates can independently see the same layer as empty and both
+// plan a stepBecomeEntry there. Applying both literally would let the
+// second overwrite the first (layer.nodes is a plain map keyed by K) --
+// silently losing the first node's connections entirely, not just a quality
+// loss. applyInsert re-checks emptiness at Apply time and falls back to a
+// live, single-layer redo (via applyLive) for every claim after the first;
+// see applyInsert's doc comment.
+type insertPlan[K cmp.Ordered, V VectorType] struct {
+	node        Node[K, V]
+	vecCache    float64
+	insertLevel int
+	steps       []planStep[K, V] // top-down: highest layer first
+}
+
+// visitedScratchPool hands each concurrent Prepare goroutine within one
+// addRound call its own scratch map for layerNode.search()'s visited
+// tracking -- g.insertVisited (the single shared map addSerial/applyLive
+// use) is only safe because Add() never previously ran concurrently with
+// itself; multiple Prepare goroutines sharing one map would both race and
+// corrupt each other's traversal. Sized once per Add() call (to
+// resolveParallelism's worker count) and reused across every round within
+// that call: safe because addRound's sync.WaitGroup barrier guarantees the
+// previous round's goroutine using a given slot has fully returned before
+// the next round's goroutine for that same slot starts.
+type visitedScratchPool[K cmp.Ordered] struct {
+	maps []map[K]bool
+}
+
+// newVisitedScratchPool allocates size empty maps, one per concurrent slot.
+func newVisitedScratchPool[K cmp.Ordered](size int) *visitedScratchPool[K] {
+	maps := make([]map[K]bool, size)
+	for i := range maps {
+		maps[i] = make(map[K]bool)
+	}
+	return &visitedScratchPool[K]{maps: maps}
+}
+
+// forSlot clears and returns the map for the given slot -- callers must not
+// retain it past the current prepareInsert call, and no two goroutines may
+// ever call forSlot with the same slot concurrently (see the pool's own doc
+// comment for why that's guaranteed).
+func (p *visitedScratchPool[K]) forSlot(slot int) map[K]bool {
+	clear(p.maps[slot])
+	return p.maps[slot]
+}
+
+// prepareInsert computes node's full top-down insert plan by walking the
+// graph exactly as applyLive does, but read-only: every mutation applyLive
+// would perform (layer.nodes writes, addNeighbor calls, Delete) is replaced
+// here with plan-step construction instead. Safe to call concurrently with
+// other prepareInsert calls for the same round -- each only reads
+// g.layers/layer.nodes/layerNode.neighbors/.Value/.precomputed/.Key, using
+// its own caller-supplied visited scratch map (never g.insertVisited, which
+// is reserved for the always-serial addSerial/applyLive paths).
+//
+// visited is cleared before each layer's search call, not just once at the
+// top -- matching g.visitedScratch()'s per-call-fresh semantics exactly
+// (see that method's doc comment): a node key can legitimately appear in
+// more than one layer (higher layers are subsets of lower ones), so
+// carrying visited-marks across layers would incorrectly suppress
+// exploration in a later layer's unrelated traversal.
+func (g *Graph[K, V]) prepareInsert(
+	node Node[K, V], insertLevel int, vecCache float64,
+	efConstruction int, distFn distFunc[V], visited map[K]bool,
+) *insertPlan[K, V] {
+	key := node.Key
+	vec := node.Value
+
+	plan := &insertPlan[K, V]{
+		node:        node,
+		vecCache:    vecCache,
+		insertLevel: insertLevel,
+		steps:       make([]planStep[K, V], 0, len(g.layers)),
+	}
+
+	var elevator *K
+
+	for i := len(g.layers) - 1; i >= 0; i-- {
+		currentLayer := g.layers[i]
+
+		if currentLayer.entry() == nil {
+			// Only legitimate if this item's own insertLevel actually
+			// reaches this layer. A round's serial preamble grows g.layers
+			// collectively to the round's *max* insertLevel across every
+			// item in it -- so an item whose own insertLevel is lower than
+			// that max will still walk through these newly-created empty
+			// layers (the top-down loop always starts at len(g.layers)-1,
+			// unconditionally). In serial addSerial/applyLive this
+			// combination (entry()==nil but insertLevel<i) can never occur
+			// -- a layer only ever exists because some single item's own
+			// insertLevel warranted creating it, immediately followed by
+			// that same item's own entry claim in the same synchronous
+			// call. Under round-based batching that tight coupling breaks:
+			// without this guard, a low-level item would wrongly become a
+			// permanent (if isolated) entry at a layer far above where it
+			// belongs, silently violating "higher layers are a subset of
+			// lower layers" for every later search that starts from there
+			// -- not a recall trade-off, real graph corruption. So: skip
+			// entirely, no plan step, elevator unchanged -- deferring the
+			// real claim to whichever round-mate (guaranteed to exist,
+			// since it's the reason this layer was grown at all) actually
+			// has insertLevel >= i.
+			if insertLevel >= i {
+				newNode := &layerNode[K, V]{
+					Node:        Node[K, V]{Key: key, Value: vec},
+					precomputed: vecCache,
+				}
+				plan.steps = append(plan.steps, planStep[K, V]{
+					layerIdx: i,
+					kind:     stepBecomeEntry,
+					newNode:  newNode,
+				})
+			}
+			// elevator deliberately left unchanged -- matches applyLive's
+			// original "continue" here exactly: a stepBecomeEntry layer
+			// never hands a new elevator to the layer below.
+			continue
+		}
+
+		searchPoint := currentLayer.entry()
+		if elevator != nil {
+			searchPoint = currentLayer.nodes[*elevator]
+		}
+
+		if g.Distance == nil {
+			panic("(*Graph).Distance must be set before adding nodes")
+		}
+
+		if insertLevel >= i {
+			clear(visited)
+			candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, visited)
+			if len(candidatePool) == 0 {
+				panic("search returned no nodes")
+			}
+
+			newElevator := candidatePool[0].node.Key
 			newNode := &layerNode[K, V]{
-				Node: Node[K, V]{
-					Key:   key,
-					Value: vec,
-				},
+				Node:        Node[K, V]{Key: key, Value: vec},
 				precomputed: vecCache,
 			}
+			selectedNeighbors := selectNeighborsHeuristic(candidatePool, g.M, distFn)
 
-			// If the current layer is empty, the new node becomes the entry point.
+			plan.steps = append(plan.steps, planStep[K, V]{
+				layerIdx:          i,
+				kind:              stepConnect,
+				newNode:           newNode,
+				selectedNeighbors: selectedNeighbors,
+				nextElevator:      newElevator,
+			})
+			elevator = &newElevator
+		} else {
+			clear(visited)
+			found := searchPoint.search(1, 1, vec, distFn, vecCache, nil, visited)
+			var newElevator K
+			if len(found) == 0 {
+				newElevator = searchPoint.Key
+			} else {
+				newElevator = found[0].node.Key
+			}
+
+			plan.steps = append(plan.steps, planStep[K, V]{
+				layerIdx:     i,
+				kind:         stepPassThrough,
+				nextElevator: newElevator,
+			})
+			elevator = &newElevator
+		}
+	}
+
+	return plan
+}
+
+// applyInsert replays plan's steps serially, in top-down order, performing
+// the mutations prepareInsert decided but never carried out itself.
+//
+// stepConnect/stepPassThrough need no re-validation against the graph's
+// current state: with upserts excluded from the round-parallel path (see
+// addRound), no round-mate ever calls Delete() mid-round, so
+// selectedNeighbors' pointers stay valid for the whole round. A "stale"
+// stepConnect plan -- frozen against the pre-round snapshot -- just produces
+// the already-accepted lower-quality connection (the documented trade-off
+// of round-based parallelism), never corruption.
+//
+// stepBecomeEntry does need re-validation: it re-checks
+// currentLayer.entry() == nil at Apply time, not trusting the Prepare-time
+// observation (see insertPlan's doc comment on the empty-layer hazard). If
+// still nil, this item legitimately becomes the entry -- apply as planned.
+// If another round-mate already claimed it, fall back to a live,
+// single-item, single-layer redo via applyLive, against the graph's current
+// (already-partially-mutated-by-this-round) state -- exactly what
+// addSerialPrepared would do for this one layer if this item were being
+// inserted right now, one at a time. This fallback is local to the one
+// stale layer: it does not cascade into this item's remaining plan steps.
+// In the original algorithm a stepBecomeEntry layer never sets elevator (it
+// just continues), so the layer below always uses currentLayer.entry() as
+// its search start point regardless of who the real entry turns out to be
+// -- exactly what this item's already-planned stepConnect/stepPassThrough
+// steps below it assumed too, so nothing here needs to propagate downward.
+//
+// Also note: Add()'s end-of-loop "trim top layer if still empty" invariant
+// guard is deliberately not replicated here -- trimming g.layers mid-round
+// would desync every other round-mate's already-computed step.layerIdx
+// references. That guard stays only in addSerialPrepared.
+func (g *Graph[K, V]) applyInsert(plan *insertPlan[K, V], efConstruction int, distFn distFunc[V]) {
+	key := plan.node.Key
+
+	for _, step := range plan.steps {
+		currentLayer := g.layers[step.layerIdx]
+
+		switch step.kind {
+		case stepBecomeEntry:
 			if currentLayer.entry() == nil {
-				currentLayer.nodes = map[K]*layerNode[K, V]{key: newNode}
+				currentLayer.nodes = map[K]*layerNode[K, V]{key: step.newNode}
 				continue
 			}
+			// Hazard: a round-mate applied earlier in this same loop and
+			// already claimed this layer. Redo this one layer live, elevator
+			// intentionally nil -- see this method's doc comment.
+			g.applyLive(step.layerIdx, key, plan.node.Value, plan.vecCache, plan.insertLevel, nil, efConstruction, distFn)
 
-			// Determine the starting point for search in the current layer.
-			// For the highest layer, it's the layer's entry point. For lower layers,
-			// it's the 'elevator' node found from the layer above.
-			searchPoint := currentLayer.entry()
-			if elevator != nil {
-				searchPoint = currentLayer.nodes[*elevator]
+		case stepConnect:
+			currentLayer.nodes[key] = step.newNode
+			mCurMax := g.M
+			if step.layerIdx == 0 {
+				mCurMax = 2 * g.M
+			}
+			for _, neighborNode := range step.selectedNeighbors {
+				neighborNode.addNeighbor(step.newNode, mCurMax, distFn)
+				step.newNode.addNeighbor(neighborNode, g.M, distFn)
 			}
 
-			if g.Distance == nil {
-				panic("(*Graph).Distance must be set before adding nodes")
-			}
-
-			// If the current layer is at or below the node's insertLevel, the node
-			// actually connects here: find a real candidate pool, bounded by
-			// EfConstruction (not M) -- selectNeighborsHeuristic below needs a wide
-			// pool to choose diverse connections from, not just the M closest.
-			if insertLevel >= i {
-				candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, g.visitedScratch())
-				if len(candidatePool) == 0 {
-					// This should ideally not happen as the searchPoint itself should be in the result set.
-					panic("search returned no nodes")
-				}
-
-				// Update the 'elevator' node for the next lower layer. It will be the closest node found.
-				elevator = ptr(candidatePool[0].node.Key)
-
-				// If the node already exists at this key, delete it first to update its position and connections.
-				if _, ok := currentLayer.nodes[key]; ok {
-					g.Delete(key) // This handles isolating the old node.
-				}
-
-				currentLayer.nodes[key] = newNode
-				// Select up to M diverse neighbors from the candidate pool, then
-				// create bi-directional connections between the new node and each.
-				// The new node's own outgoing connections are always capped at M,
-				// uniformly across every layer (matches hnswlib: getNeighborsByHeuristic2
-				// is always called with M_, never Mcurmax). But an existing neighbor's
-				// own capacity (mCurMax below) is layer-dependent: hnswlib caps the base
-				// layer at 2*M (maxM0_ = M_*2) and every other layer at M (maxM_ = M_) --
-				// the base layer holds ~every node and does the most work at query time,
-				// so it's allowed to grow denser. Using a uniform M everywhere (the
-				// original bug here) silently starved the base layer to half the
-				// connectivity a correctly-configured graph should have.
-				mCurMax := g.M
-				if i == 0 {
-					mCurMax = 2 * g.M
-				}
-				selectedNeighbors := selectNeighborsHeuristic(candidatePool, g.M, distFn)
-				for _, neighborNode := range selectedNeighbors {
-					neighborNode.addNeighbor(newNode, mCurMax, distFn)
-					newNode.addNeighbor(neighborNode, g.M, distFn)
-				}
-			} else {
-				// Pass-through layer: this node's insertLevel is below i, so it
-				// never connects here -- this layer only exists to hand off a good
-				// entry point to the layer below. A true ef=1 greedy descent (the
-				// paper's INSERT algorithm, and what hnswlib's addPoint does for
-				// exactly this case) is enough: no wider search here ever changes
-				// recall, since nothing found gets kept or connected to. The old
-				// code ran the full EfConstruction-breadth candidate search on
-				// every pass-through layer too -- pure wasted insert cost, worse
-				// the higher EfConstruction or the taller the graph.
-				nodes := searchPoint.search(1, 1, vec, distFn, vecCache, nil, g.visitedScratch())
-				if len(nodes) == 0 {
-					elevator = ptr(searchPoint.Key)
-				} else {
-					elevator = ptr(nodes[0].node.Key)
-				}
-			}
+		case stepPassThrough:
+			// No mutation -- this layer only handed off an elevator during
+			// Prepare, already baked into the layer below's own plan step.
 		}
+	}
+}
 
-		// Invariant check: ensure the node was successfully added to the graph's base layer.
-		if g.Len() != preLen+1 {
-			// If adding failed for some reason, and the highest layer is now empty, trim it.
-			if len(g.layers) > 0 && g.layers[len(g.layers)-1].entry() == nil {
-				g.layers = g.layers[:len(g.layers)-1]
-			}
+// addRound processes one round of a batch: a serial preamble (level
+// assignment, layer growth, precompute -- the only touch points for
+// g.Rng/g.layers, so they must stay serial), then every item's Prepare
+// running concurrently, a hard barrier, then every item's Apply running
+// serially. No read ever overlaps in time with a write to the same data:
+// Prepare only reads, and nothing in Apply starts until every Prepare
+// goroutine has returned.
+//
+// Upserts (node.Key already present in the graph's base layer) and
+// intra-round duplicate keys are excluded from the parallel path and
+// instead run through addSerialPrepared immediately, in the preamble, in
+// their original order -- mixing them into a parallel round would let one
+// item's Delete() (a real mutation touching other nodes' neighbor lists)
+// invalidate another round-mate's already-computed plan. See
+// insertPlan's doc comment for why plain new inserts don't have this
+// problem.
+func (g *Graph[K, V]) addRound(nodes []Node[K, V], efConstruction int, distFn distFunc[V], pool *visitedScratchPool[K]) {
+	n := len(nodes)
+	insertLevels := make([]int, n)
+	vecCaches := make([]float64, n)
+	parallelIdx := make([]int, 0, n)
+	seen := make(map[K]bool, n)
+
+	for i, node := range nodes {
+		g.assertDims(node.Value)
+		insertLevel := g.randomLevel()
+		for insertLevel >= len(g.layers) {
+			g.layers = append(g.layers, &layer[K, V]{})
 		}
+		if insertLevel < 0 {
+			panic("invalid level generated")
+		}
+		insertLevels[i] = insertLevel
+		vecCaches[i] = g.precompute(node.Value)
+
+		alreadyExists := len(g.layers) > 0 && g.layers[0].nodes[node.Key] != nil
+		if alreadyExists || seen[node.Key] {
+			g.addSerialPrepared(node, insertLevels[i], vecCaches[i], efConstruction, distFn)
+			continue
+		}
+		seen[node.Key] = true
+		parallelIdx = append(parallelIdx, i)
+	}
+
+	if len(parallelIdx) == 0 {
+		return
+	}
+
+	plans := make([]*insertPlan[K, V], len(parallelIdx))
+	var wg sync.WaitGroup
+	wg.Add(len(parallelIdx))
+	for slot, idx := range parallelIdx {
+		go func(slot, idx int) {
+			defer wg.Done()
+			plans[slot] = g.prepareInsert(nodes[idx], insertLevels[idx], vecCaches[idx], efConstruction, distFn, pool.forSlot(slot))
+		}(slot, idx)
+	}
+	wg.Wait() // The barrier: nothing below runs until every Prepare goroutine above has returned.
+
+	for _, plan := range plans {
+		g.applyInsert(plan, efConstruction, distFn)
 	}
 }
 
