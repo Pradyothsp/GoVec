@@ -145,10 +145,16 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist dist
 
 	n.neighbors = selected
 	for _, d := range dropped {
-		// Remove the backlink and try to find the disconnected node a
-		// replacement connection -- no-op if d is truly redundant everywhere.
+		// Remove the backlink only -- no repair pass. hnswlib's
+		// mutuallyConnectNewElement never replenishes on insertion either;
+		// evicted links are simply pruned, relying on HNSW's power-law
+		// small-world connectivity to keep the graph reachable without
+		// active healing on every eviction. replenish() itself is kept for
+		// Delete()/isolate(), where a node's neighbors lose a connection
+		// permanently (not just to a redistribution the heuristic already
+		// picked a diverse replacement set for) and have no other chance at
+		// repair.
 		d.removeNeighbor(n.Key)
-		d.replenish(m, dist)
 	}
 }
 
