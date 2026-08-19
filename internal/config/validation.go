@@ -125,5 +125,15 @@ func ValidateEngineConfig(cfg EngineConfig) error {
 		return fmt.Errorf("hnsw_ef_construction (%d) must be >= hnsw_m (%d)", cfg.HnswEfConstruction, cfg.HnswM)
 	}
 
+	// Both are 0-means-auto (see internal/hnsw/graph.go's BatchParallelism/
+	// BatchParallelThreshold doc comments) -- only reject a negative value,
+	// which can't be a deliberate config choice under that convention.
+	if cfg.HnswBatchParallelism < 0 {
+		return fmt.Errorf("hnsw_batch_parallelism must be >= 0, got %d", cfg.HnswBatchParallelism)
+	}
+	if cfg.HnswBatchParallelThreshold < 0 {
+		return fmt.Errorf("hnsw_batch_parallel_threshold must be >= 0, got %d", cfg.HnswBatchParallelThreshold)
+	}
+
 	return nil
 }

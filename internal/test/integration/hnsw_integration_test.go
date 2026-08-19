@@ -1,14 +1,20 @@
 package integration
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
@@ -662,4 +668,156 @@ func (s *HNSWScalarIntegrationSuite) TestHNSW_Scalar_PersistenceRoundTrip() {
 	s.Less(scalarInfo.Size(), float32Info.Size(),
 		"scalar snapshot (%d bytes) must be smaller than float32 snapshot (%d bytes)",
 		scalarInfo.Size(), float32Info.Size())
+}
+
+// =============================================================================
+// Group G — Batch insert / round-based parallelism
+// Covers HNSWIndex.BatchInsert's restructuring (a single batched
+// graph.Add call instead of one per item -- see internal/index/hnsw_index.go)
+// and the graph-level round-based parallel Prepare/Apply it now feeds
+// (internal/hnsw/graph.go's addRound). These run on both suites through
+// base-struct promotion.
+// =============================================================================
+
+// TestHNSW_BatchInsert_IntraBatchDuplicateID_LastWins verifies that when the
+// same external ID appears more than once within a single BatchInsert call,
+// only the last occurrence's data survives -- the documented, deliberate
+// "silent last-wins dedup, replicating today's exact net behavior" decision
+// (see HNSWIndex.BatchInsert's doc comment). This must hold regardless of
+// batch size / parallelism, since HNSWIndex.bookkeepInsert publishes
+// idx.metadata immediately per item specifically so this stays correct even
+// though the actual graph.Add call is deferred and batched.
+func (s *hnswSuiteBase) TestHNSW_BatchInsert_IntraBatchDuplicateID_LastWins() {
+	dim := 8
+	first := make([]float32, dim)
+	first[0] = 1
+	last := make([]float32, dim)
+	last[1] = 1
+
+	items := []index.BatchInsertItem{
+		{ID: "dup", Vector: first, Meta: map[string]interface{}{"version": "first"}},
+		{ID: "other", Vector: []float32{0, 0, 1, 0, 0, 0, 0, 0}},
+		{ID: "dup", Vector: last, Meta: map[string]interface{}{"version": "last"}},
+	}
+
+	failures, err := s.engine.BatchInsert(context.Background(), items)
+	s.Require().NoError(err)
+	s.Require().Empty(failures)
+
+	// last-wins: exactly 2 distinct keys survive, not 3.
+	s.Equal(2, s.engine.Len())
+
+	rec, err := s.engine.GetByID(context.Background(), "dup")
+	s.Require().NoError(err)
+	s.Equal("last", rec.Metadata["version"])
+	s.Equal(last, rec.Vector)
+}
+
+// TestHNSW_BatchInsert_MixedNewAndUpsert covers a batch that mixes brand-new
+// inserts with upserts of vectors that already existed before the batch
+// started. Upserts are excluded from Graph.Add's round-based parallel path
+// (see addRound's doc comment: bookkeepInsert's upsert pre-delete would
+// otherwise invalidate an already-computed round-mate plan) and routed
+// through the graph's serial fallback instead -- this exercises that split
+// end-to-end through HNSWIndex, not just at the Graph level (already covered
+// by internal/hnsw's own tests).
+func (s *hnswSuiteBase) TestHNSW_BatchInsert_MixedNewAndUpsert() {
+	dim := 8
+	const preexisting = 20
+
+	for i := 0; i < preexisting; i++ {
+		v := make([]float32, dim)
+		v[i%dim] = 1
+		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("existing-%d", i), v, core.SparseVector{}, nil))
+	}
+	s.Require().Equal(preexisting, s.engine.Len())
+
+	items := make([]index.BatchInsertItem, 0, preexisting+preexisting)
+	// Upsert every pre-existing vector with a rotated one-hot vector.
+	for i := 0; i < preexisting; i++ {
+		v := make([]float32, dim)
+		v[(i+1)%dim] = 1
+		items = append(items, index.BatchInsertItem{ID: fmt.Sprintf("existing-%d", i), Vector: v})
+	}
+	// Plus an equal number of brand-new keys in the same batch.
+	for i := 0; i < preexisting; i++ {
+		v := make([]float32, dim)
+		v[i%dim] = -1
+		items = append(items, index.BatchInsertItem{ID: fmt.Sprintf("new-%d", i), Vector: v})
+	}
+
+	failures, err := s.engine.BatchInsert(context.Background(), items)
+	s.Require().NoError(err)
+	s.Require().Empty(failures)
+
+	s.Equal(2*preexisting, s.engine.Len(), "upserts must not create duplicates, new keys must all land")
+
+	for i := 0; i < preexisting; i++ {
+		rec, err := s.engine.GetByID(context.Background(), fmt.Sprintf("existing-%d", i))
+		s.Require().NoError(err)
+		want := make([]float32, dim)
+		want[(i+1)%dim] = 1
+		s.Equal(want, rec.Vector, "existing-%d must reflect the upserted vector, not the original", i)
+	}
+	for i := 0; i < preexisting; i++ {
+		_, err := s.engine.GetByID(context.Background(), fmt.Sprintf("new-%d", i))
+		s.Require().NoError(err)
+	}
+}
+
+// TestHNSW_BatchInsert_LargeAboveThreshold_ViaREST sends a single batch
+// larger than hnsw.DefaultBatchParallelThreshold (20) through the actual
+// REST layer (POST /api/v1/vectors/batch), so Graph.Add's round-based
+// parallel path is genuinely exercised end-to-end -- HTTP handler -> engine
+// -> HNSWIndex.BatchInsert -> Graph.Add -- not just at the graph or engine
+// layer in isolation.
+func (s *hnswSuiteBase) TestHNSW_BatchInsert_LargeAboveThreshold_ViaREST() {
+	gin.SetMode(gin.TestMode)
+
+	dir := s.T().TempDir()
+	engine, wal := newHNSWEngine(s.T(), dir, s.quant)
+	defer wal.Close() //nolint:errcheck // test cleanup
+
+	router := api.SetupRouter(engine, "", dir+"/test.bin")
+
+	const dim, n = 8, 120 // above DefaultBatchParallelThreshold
+	vectors := generateTestVectors(n, dim)
+
+	payloadVectors := make([]map[string]interface{}, n)
+	for i, v := range vectors {
+		payloadVectors[i] = map[string]interface{}{
+			"id":     fmt.Sprintf("rv%d", i),
+			"vector": v,
+		}
+	}
+	body, err := json.Marshal(map[string]interface{}{"vectors": payloadVectors})
+	s.Require().NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	s.Require().Equal(http.StatusOK, w.Code, w.Body.String())
+
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			InsertedCount int `json:"inserted_count"`
+		} `json:"data"`
+	}
+	s.Require().NoError(json.Unmarshal(w.Body.Bytes(), &env))
+	s.True(env.Success)
+	s.Equal(n, env.Data.InsertedCount)
+	s.Equal(n, engine.Len())
+
+	// The graph built via the parallel path must still be genuinely
+	// searchable -- every inserted vector should find itself as its own
+	// nearest neighbor.
+	for i := 0; i < n; i += 17 {
+		results, err := engine.Search(context.Background(), vectors[i], core.SparseVector{}, 1, nil)
+		s.Require().NoError(err)
+		s.Require().Len(results, 1)
+		s.Equal(fmt.Sprintf("rv%d", i), results[0].ID)
+	}
 }

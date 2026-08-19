@@ -37,19 +37,21 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	distanceMetric string
 	dimensions     int // 0 until first insert; set lazily under mu.Lock()
 
-	mu                  sync.RWMutex
-	wal                 *WAL
-	encodeFunc          func([]float32) T
-	distanceFunc        func(T, T) (float32, error)
-	hnswDistFunc        hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
-	hnswPrecompute      func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
-	hnswCachedDistance  func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
-	hnswSquaredDistance hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset; nil for metrics with no cheaper ranking equivalent
-	hnswFromSquared     func(rank float32) float32                                   // stored for Clear() graph reset; nil alongside hnswSquaredDistance
-	hnswM               int                                                          // stored for Clear() graph reset
-	hnswEfSearch        int                                                          // stored for Clear() graph reset
-	hnswEfConstruction  int                                                          // stored for Clear() graph reset
-	vectorStore         *storage.MmapStore                                           // nil when mmap is disabled
+	mu                         sync.RWMutex
+	wal                        *WAL
+	encodeFunc                 func([]float32) T
+	distanceFunc               func(T, T) (float32, error)
+	hnswDistFunc               hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
+	hnswPrecompute             func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
+	hnswCachedDistance         func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
+	hnswSquaredDistance        hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset; nil for metrics with no cheaper ranking equivalent
+	hnswFromSquared            func(rank float32) float32                                   // stored for Clear() graph reset; nil alongside hnswSquaredDistance
+	hnswM                      int                                                          // stored for Clear() graph reset
+	hnswEfSearch               int                                                          // stored for Clear() graph reset
+	hnswEfConstruction         int                                                          // stored for Clear() graph reset
+	hnswBatchParallelism       int                                                          // stored for Clear() graph reset
+	hnswBatchParallelThreshold int                                                          // stored for Clear() graph reset
+	vectorStore                *storage.MmapStore                                           // nil when mmap is disabled
 }
 
 // GetByID returns a vector by ID.
@@ -163,7 +165,11 @@ func (idx *HNSWIndex[T]) Insert(ctx context.Context, id string, vec []float32, s
 }
 
 // BatchInsert adds or updates multiple vectors with a single WAL fsync for the
-// whole batch. If writing the batch to the WAL fails, no item is applied and the
+// whole batch, and a single batched idx.graph.Add call for the whole batch
+// (instead of one call per item) -- this is what lets Graph.Add's
+// round-based parallel Prepare (internal/hnsw's addRound) actually kick in;
+// a per-item Add call, one at a time, would never give it a batch to work
+// with. If writing the batch to the WAL fails, no item is applied and the
 // batch aborts entirely — see WAL.WriteEntries for the atomicity this relies on.
 func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertItem) ([]BatchInsertError, error) {
 	idx.mu.Lock()
@@ -186,22 +192,96 @@ func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertIte
 	}
 
 	var failures []BatchInsertError
+
+	// pendingByID collects every successfully bookkept item's graph node,
+	// keyed by internalID -- an intra-batch duplicate external ID always
+	// resolves to the same internalID (IDMapper.GetOrCreate is a pure
+	// function of the string), so a repeat here naturally overwrites to
+	// last-wins, replicating today's exact net behavior without needing a
+	// separate dedup pass. order preserves first-seen position so the
+	// eventual graph.Add call sees a deterministic node order.
+	pendingByID := make(map[uint32]hnsw.Node[uint32, T], len(items))
+	order := make([]uint32, 0, len(items))
+
 	for _, item := range items {
-		if err := idx.insertInternal(item.ID, item.Vector, item.Sparse, item.Meta); err != nil {
+		internalID, encoded, err := idx.bookkeepInsert(item.ID, item.Vector, item.Sparse, item.Meta)
+		if err != nil {
 			zerolog.Ctx(ctx).Error().Err(err).Str("id", item.ID).Msg("failed to apply batch insert item")
 			failures = append(failures, BatchInsertError{ID: item.ID, Err: err})
+			continue
+		}
+
+		if _, dup := pendingByID[internalID]; !dup {
+			order = append(order, internalID)
+		}
+		pendingByID[internalID] = hnsw.MakeNode[uint32, T](internalID, encoded)
+
+		// Published immediately, not deferred to the end: bookkeepInsert's
+		// own inverted-index/metaIndex/upsert-pre-delete logic reads
+		// idx.metadata to decide "does this key already have old content to
+		// replace" -- an intra-batch duplicate ID's second occurrence needs
+		// to see the first occurrence's data here to get that right. Only
+		// the graph mutation itself is deferred, batched into the one
+		// idx.graph.Add call below.
+		idx.metadata[internalID] = &core.VectorNode[T]{
+			InternalID: internalID,
+			ExternalID: item.ID,
+			Vector:     encoded,
+			Sparse:     item.Sparse,
+			Metadata:   item.Meta,
 		}
 	}
+
+	if len(order) == 0 {
+		return failures, nil
+	}
+
+	allNodes := make([]hnsw.Node[uint32, T], len(order))
+	for i, internalID := range order {
+		allNodes[i] = pendingByID[internalID]
+	}
+	idx.graph.Add(allNodes...)
 
 	return failures, nil
 }
 
-// insertInternal performs the core insert logic without WAL writes.
+// insertInternal performs the core insert logic without WAL writes, used by
+// Insert() (a single item, so bookkeepInsert's upsert pre-delete plus this
+// method's own graph.Add call always resolve to Graph's serial path
+// anyway -- see resolveParallelism) and by ReplayWAL.
 // PRECONDITION: idx.mu.Lock() must be held by caller.
 func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
-	internalID, err := idx.IDMapper.GetOrCreate(id)
+	internalID, encoded, err := idx.bookkeepInsert(id, vec, sparse, meta)
 	if err != nil {
 		return err
+	}
+
+	idx.graph.Add(hnsw.MakeNode[uint32, T](internalID, encoded))
+
+	idx.metadata[internalID] = &core.VectorNode[T]{
+		InternalID: internalID,
+		ExternalID: id,
+		Vector:     encoded,
+		Sparse:     sparse,
+		Metadata:   meta,
+	}
+
+	return nil
+}
+
+// bookkeepInsert performs every non-graph step of inserting a vector:
+// resolving/creating its internal ID, updating the inverted index and
+// MetadataIndex, dimension tracking, encoding, mmap storage, and the upsert
+// pre-delete (removing any existing graph node for this key so the caller's
+// subsequent graph.Add call inserts fresh rather than colliding). It
+// deliberately does not call idx.graph.Add or write idx.metadata itself --
+// both stay the caller's responsibility, so BatchInsert can defer every
+// item's graph.Add into a single batched call instead of one per item.
+// PRECONDITION: idx.mu.Lock() held by caller.
+func (idx *HNSWIndex[T]) bookkeepInsert(id string, vec []float32, sparse core.SparseVector, meta map[string]any) (internalID uint32, encoded T, err error) {
+	internalID, err = idx.IDMapper.GetOrCreate(id)
+	if err != nil {
+		return 0, encoded, err
 	}
 
 	if idx.InvertedIndex != nil {
@@ -226,9 +306,9 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 
 	encodeInput, err := prepareForEncode(vec, idx.quantization, idx.distanceMetric)
 	if err != nil {
-		return err
+		return 0, encoded, err
 	}
-	encoded := idx.encodeFunc(encodeInput)
+	encoded = idx.encodeFunc(encodeInput)
 
 	// When mmap is enabled, persist the encoded bytes and replace encoded with
 	// the mmap-backed slice.  Both the graph node (Node.Value) and the metadata
@@ -236,29 +316,20 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 	if idx.vectorStore != nil {
 		mmapVec, err := putToMmapStore(idx.vectorStore, internalID, encoded)
 		if err != nil {
-			return fmt.Errorf("mmap store put: %w", err)
+			return 0, encoded, fmt.Errorf("mmap store put: %w", err)
 		}
 		encoded = mmapVec
 	}
 
 	// For updates (re-using the same internalID), explicitly remove the node
-	// from the graph before re-adding. graph.Add's built-in delete-on-update
-	// operates inside the layer-iteration loop and can leave layers in a
-	// stale state when the only node is deleted mid-loop.
+	// from the graph before the caller re-adds it. graph.Add's built-in
+	// delete-on-update operates inside the layer-iteration loop and can
+	// leave layers in a stale state when the only node is deleted mid-loop.
 	if _, exists := idx.metadata[internalID]; exists {
 		idx.graph.Delete(internalID)
 	}
-	idx.graph.Add(hnsw.MakeNode[uint32, T](internalID, encoded))
 
-	idx.metadata[internalID] = &core.VectorNode[T]{
-		InternalID: internalID,
-		ExternalID: id,
-		Vector:     encoded,
-		Sparse:     sparse,
-		Metadata:   meta,
-	}
-
-	return nil
+	return internalID, encoded, nil
 }
 
 // Search finds the k nearest neighbors to the query vector using HNSW approximate search.
@@ -867,6 +938,8 @@ func (idx *HNSWIndex[T]) Clear() {
 	g.CachedDistance = idx.hnswCachedDistance
 	g.SquaredDistance = idx.hnswSquaredDistance
 	g.FromSquaredDistance = idx.hnswFromSquared
+	g.BatchParallelism = idx.hnswBatchParallelism
+	g.BatchParallelThreshold = idx.hnswBatchParallelThreshold
 	idx.graph = g
 
 	idx.metadata = make(map[uint32]*core.VectorNode[T])

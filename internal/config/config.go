@@ -46,6 +46,16 @@ type EngineConfig struct {
 	HnswM               int            `yaml:"hnsw_m"`
 	HnswEfSearch        int            `yaml:"hnsw_ef_search"`
 	HnswEfConstruction  int            `yaml:"hnsw_ef_construction"`
+	// HnswBatchParallelism caps how many items run through Graph.Add's
+	// round-based parallel Prepare phase concurrently (see
+	// internal/hnsw/graph.go's addRound). 0 (default) resolves to
+	// runtime.GOMAXPROCS(0).
+	HnswBatchParallelism int `yaml:"hnsw_batch_parallelism"`
+	// HnswBatchParallelThreshold is the minimum node count a single Add()
+	// call needs before round-based parallelism kicks in at all; below it,
+	// every node runs through the serial path instead. 0 (default)
+	// resolves to hnsw.DefaultBatchParallelThreshold.
+	HnswBatchParallelThreshold int `yaml:"hnsw_batch_parallel_threshold"`
 }
 
 // GRPCConfig holds gRPC server configuration.
@@ -126,6 +136,13 @@ func DefaultConfig() *Config {
 			HnswM:              16,
 			HnswEfSearch:       50,
 			HnswEfConstruction: 200,
+			// 0 = auto (runtime.GOMAXPROCS(0)) / hnsw.DefaultBatchParallelThreshold --
+			// see internal/hnsw/graph.go's own doc comments on these fields for
+			// the reasoning; kept as separate literals here for the same
+			// index-implementation-independence reason as HnswM/HnswEfSearch/
+			// HnswEfConstruction above.
+			HnswBatchParallelism:       0,
+			HnswBatchParallelThreshold: 20,
 		},
 		GRPC: GRPCConfig{
 			Enabled:          false,
