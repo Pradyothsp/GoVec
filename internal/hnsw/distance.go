@@ -29,6 +29,29 @@ func EuclideanDistanceFloat32(a, b []float32) float32 {
 	return float32(math.Sqrt(float64(sum)))
 }
 
+// SquaredEuclideanDistanceFloat32 is EuclideanDistanceFloat32 without the
+// final sqrt. Used as Graph.SquaredDistance for Euclidean-metric float32
+// graphs: sqrt is monotonic, so ranking on squared distance produces
+// identical ordering to ranking on real distance while skipping sqrt() on
+// every internal comparison -- only the k results a query actually returns
+// need the real value back, via FromSquaredEuclideanDistance.
+func SquaredEuclideanDistanceFloat32(a, b []float32) float32 {
+	var sum float32
+	for i := range a {
+		diff := a[i] - b[i]
+		sum += diff * diff
+	}
+	return sum
+}
+
+// FromSquaredEuclideanDistance converts a SquaredEuclideanDistanceFloat32/
+// SquaredEuclideanDistanceInt8 result back into the real Euclidean
+// distance. Shared by both vector types -- the squared value itself is
+// always a plain float32 regardless of which type produced it.
+func FromSquaredEuclideanDistance(sq float32) float32 {
+	return float32(math.Sqrt(float64(sq)))
+}
+
 // CosineDistanceInt8 computes the cosine distance between two int8 vectors.
 // Reuses internal/core implementation which uses int64 intermediate calculations to prevent overflow.
 func CosineDistanceInt8(a, b []int8) float32 {
@@ -50,6 +73,18 @@ func EuclideanDistanceInt8(a, b []int8) float32 {
 		sum += diff * diff
 	}
 	return float32(math.Sqrt(float64(sum)))
+}
+
+// SquaredEuclideanDistanceInt8 is SquaredEuclideanDistanceFloat32's int8
+// counterpart -- EuclideanDistanceInt8 without the final sqrt. See
+// SquaredEuclideanDistanceFloat32's doc comment.
+func SquaredEuclideanDistanceInt8(a, b []int8) float32 {
+	var sum int64
+	for i := range a {
+		diff := int64(a[i]) - int64(b[i])
+		sum += diff * diff
+	}
+	return float32(sum)
 }
 
 // PrecomputeSquaredNormFloat32 computes v's squared L2 norm (sum of

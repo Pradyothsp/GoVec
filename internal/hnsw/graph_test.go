@@ -470,6 +470,49 @@ func TestGraph_SearchWithDistance_NilAllowlist_SameAsSearch(t *testing.T) {
 	}
 }
 
+// TestGraph_SearchWithDistance_SquaredRanking_ReturnsRealDistance is the
+// critical correctness test for the SquaredDistance/FromSquaredDistance
+// ranking-only optimization: internal comparisons use squared Euclidean
+// distance, but SearchResult.Distance -- the value a caller actually reads
+// -- must always be the real distance, converted back via
+// FromSquaredDistance. Also confirms turning the optimization on doesn't
+// change results or their order versus the unoptimized path.
+func TestGraph_SearchWithDistance_SquaredRanking_ReturnsRealDistance(t *testing.T) {
+	build := func(useSquaredRanking bool) *Graph[int, []float32] {
+		g := newTestGraph[int]()
+		if useSquaredRanking {
+			g.SquaredDistance = SquaredEuclideanDistanceFloat32
+			g.FromSquaredDistance = FromSquaredEuclideanDistance
+		}
+		for i := 1; i <= 20; i++ {
+			g.Add(MakeNode(i, []float32{float32(i)}))
+		}
+		return g
+	}
+
+	plain := build(false)
+	squared := build(true)
+
+	plainResults := plain.SearchWithDistance([]float32{10.5}, 5, nil, 0)
+	squaredResults := squared.SearchWithDistance([]float32{10.5}, 5, nil, 0)
+
+	require.Len(t, squaredResults, len(plainResults))
+	for i := range plainResults {
+		assert.Equal(t, plainResults[i].Key, squaredResults[i].Key,
+			"result order must be unaffected by the squared-distance ranking optimization")
+
+		// The returned Distance must be the REAL Euclidean distance, not the
+		// squared value SquaredDistance computed internally -- this is the
+		// whole point of FromSquaredDistance's conversion step. Recompute
+		// independently via EuclideanDistanceFloat32 as the ground truth.
+		want := EuclideanDistanceFloat32([]float32{10.5}, []float32{float32(squaredResults[i].Key)})
+		assert.InDelta(t, want, squaredResults[i].Distance, 1e-4,
+			"SearchResult.Distance must be the real distance, not the squared ranking value")
+		assert.InDelta(t, plainResults[i].Distance, squaredResults[i].Distance, 1e-4,
+			"squared-ranking path must report the same distance as the plain path")
+	}
+}
+
 // TestGraph_SearchWithDistance_ConnectivityPreservation is the critical correctness test:
 // nodes NOT in the allowlist must still be traversed so the graph remains navigable.
 // Without this, nodes reachable only via excluded nodes would never be found.
