@@ -96,29 +96,51 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 	}
 }
 
-// hnswDistanceFuncFloat32 picks the graph-level distance function matching the
-// configured metric. HNSW needs its own DistanceFunc (lower = closer) separate
-// from core.MathBlock (higher = closer, used by the brute-force engine).
-func hnswDistanceFuncFloat32(metric config.DistanceMetric) (hnsw.DistanceFunc[[]float32], error) {
+// hnswMetricFuncs bundles the graph-level function slots a configured
+// distance metric populates on hnsw.Graph: Distance is always required.
+// Precompute/CachedDistance are the optional cache-aware pair (see
+// hnsw.Graph's own doc comment on those fields) and are left nil together
+// for a metric with nothing worth caching -- Euclidean today, whose current
+// single-pass implementation never computes a standalone per-vector value
+// in the first place.
+type hnswMetricFuncs[V hnsw.VectorType] struct {
+	Distance       hnsw.DistanceFunc[V]
+	Precompute     func(v V) float64
+	CachedDistance func(aVec V, aCache float64, bVec V, bCache float64) float32
+}
+
+// hnswDistanceFuncFloat32 picks the graph-level distance functions matching
+// the configured metric. HNSW needs its own DistanceFunc (lower = closer)
+// separate from core.MathBlock (higher = closer, used by the brute-force
+// engine).
+func hnswDistanceFuncFloat32(metric config.DistanceMetric) (hnswMetricFuncs[[]float32], error) {
 	switch metric {
 	case config.DistanceMetricCosine:
-		return hnsw.CosineDistanceFloat32, nil
+		return hnswMetricFuncs[[]float32]{
+			Distance:       hnsw.CosineDistanceFloat32,
+			Precompute:     hnsw.PrecomputeSquaredNormFloat32,
+			CachedDistance: hnsw.CachedCosineDistanceFloat32,
+		}, nil
 	case config.DistanceMetricEuclidean:
-		return hnsw.EuclideanDistanceFloat32, nil
+		return hnswMetricFuncs[[]float32]{Distance: hnsw.EuclideanDistanceFloat32}, nil
 	default:
-		return nil, fmt.Errorf("unsupported distance metric for HNSW: '%s'", metric)
+		return hnswMetricFuncs[[]float32]{}, fmt.Errorf("unsupported distance metric for HNSW: '%s'", metric)
 	}
 }
 
 // hnswDistanceFuncInt8 is the int8 counterpart of hnswDistanceFuncFloat32.
-func hnswDistanceFuncInt8(metric config.DistanceMetric) (hnsw.DistanceFunc[[]int8], error) {
+func hnswDistanceFuncInt8(metric config.DistanceMetric) (hnswMetricFuncs[[]int8], error) {
 	switch metric {
 	case config.DistanceMetricCosine:
-		return hnsw.CosineDistanceInt8, nil
+		return hnswMetricFuncs[[]int8]{
+			Distance:       hnsw.CosineDistanceInt8,
+			Precompute:     hnsw.PrecomputeSquaredNormInt8,
+			CachedDistance: hnsw.CachedCosineDistanceInt8,
+		}, nil
 	case config.DistanceMetricEuclidean:
-		return hnsw.EuclideanDistanceInt8, nil
+		return hnswMetricFuncs[[]int8]{Distance: hnsw.EuclideanDistanceInt8}, nil
 	default:
-		return nil, fmt.Errorf("unsupported distance metric for HNSW: '%s'", metric)
+		return hnswMetricFuncs[[]int8]{}, fmt.Errorf("unsupported distance metric for HNSW: '%s'", metric)
 	}
 }
 
@@ -147,12 +169,13 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		if mathBlock.Int8Func == nil {
 			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
 		}
-		graphDistanceFunc, err := hnswDistanceFuncInt8(cfg.DistanceMetric)
+		graphFuncs, err := hnswDistanceFuncInt8(cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
 		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
-			core.QuantizeVector, mathBlock.Int8Func, graphDistanceFunc, m, efSearch, efConstruction, metaIndex, mmapStore)
+			core.QuantizeVector, mathBlock.Int8Func, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
+			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.quantization = string(cfg.Quantization)
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)
@@ -161,13 +184,14 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 	}
 
 	if cfg.Quantization == config.QuantizationNone {
-		graphDistanceFunc, err := hnswDistanceFuncFloat32(cfg.DistanceMetric)
+		graphFuncs, err := hnswDistanceFuncFloat32(cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
 		identityFunc := func(v []float32) []float32 { return v }
 		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
-			identityFunc, mathBlock.FloatFunc, graphDistanceFunc, m, efSearch, efConstruction, metaIndex, mmapStore)
+			identityFunc, mathBlock.FloatFunc, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
+			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.quantization = string(cfg.Quantization)
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)

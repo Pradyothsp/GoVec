@@ -336,6 +336,10 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 					Key:   key,
 					Value: vec,
 				},
+				// Recomputed on import, same as on insert -- a persisted
+				// snapshot doesn't carry the cache on disk (it's cheap to
+				// rederive and doing so keeps the on-disk format unchanged).
+				precomputed: h.precompute(vec),
 			}
 			neighborKeysByNode[key] = neighborKeys
 		}
@@ -502,6 +506,9 @@ func (h *Graph[K, V]) ImportTopology(r io.Reader, lookupVec func(K) (V, bool)) e
 
 			nodes[key] = &layerNode[K, V]{
 				Node: Node[K, V]{Key: key, Value: vec},
+				// See the equivalent Import() site's comment: recomputed on
+				// import rather than persisted.
+				precomputed: h.precompute(vec),
 			}
 			neighborKeysByNode[key] = neighborKeys
 		}
