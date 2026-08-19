@@ -37,17 +37,19 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	distanceMetric string
 	dimensions     int // 0 until first insert; set lazily under mu.Lock()
 
-	mu                 sync.RWMutex
-	wal                *WAL
-	encodeFunc         func([]float32) T
-	distanceFunc       func(T, T) (float32, error)
-	hnswDistFunc       hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
-	hnswPrecompute     func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
-	hnswCachedDistance func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
-	hnswM              int                                                          // stored for Clear() graph reset
-	hnswEfSearch       int                                                          // stored for Clear() graph reset
-	hnswEfConstruction int                                                          // stored for Clear() graph reset
-	vectorStore        *storage.MmapStore                                           // nil when mmap is disabled
+	mu                  sync.RWMutex
+	wal                 *WAL
+	encodeFunc          func([]float32) T
+	distanceFunc        func(T, T) (float32, error)
+	hnswDistFunc        hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
+	hnswPrecompute      func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
+	hnswCachedDistance  func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
+	hnswSquaredDistance hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset; nil for metrics with no cheaper ranking equivalent
+	hnswFromSquared     func(rank float32) float32                                   // stored for Clear() graph reset; nil alongside hnswSquaredDistance
+	hnswM               int                                                          // stored for Clear() graph reset
+	hnswEfSearch        int                                                          // stored for Clear() graph reset
+	hnswEfConstruction  int                                                          // stored for Clear() graph reset
+	vectorStore         *storage.MmapStore                                           // nil when mmap is disabled
 }
 
 // GetByID returns a vector by ID.
@@ -98,6 +100,11 @@ func NewHNSWIndex[T hnsw.VectorType](
 	// metric with nothing worth caching.
 	hnswPrecompute func(v T) float64,
 	hnswCachedDistance func(aVec T, aCache float64, bVec T, bCache float64) float32,
+	// hnswSquaredDistance/hnswFromSquared are the optional ranking-only
+	// pair (see hnsw.Graph.SquaredDistance's doc comment) -- nil together
+	// for a metric with no cheaper ranking equivalent.
+	hnswSquaredDistance hnsw.DistanceFunc[T],
+	hnswFromSquared func(rank float32) float32,
 	m int,
 	efSearch int,
 	efConstruction int,
@@ -111,23 +118,27 @@ func NewHNSWIndex[T hnsw.VectorType](
 	g.Distance = hnswDistFunc
 	g.Precompute = hnswPrecompute
 	g.CachedDistance = hnswCachedDistance
+	g.SquaredDistance = hnswSquaredDistance
+	g.FromSquaredDistance = hnswFromSquared
 
 	return &HNSWIndex[T]{
-		graph:              g,
-		metadata:           make(map[uint32]*core.VectorNode[T]),
-		metaIndex:          metaIndex,
-		InvertedIndex:      invertedIndex,
-		IDMapper:           idMapper,
-		wal:                wal,
-		encodeFunc:         encodeFunc,
-		distanceFunc:       distanceFunc,
-		hnswDistFunc:       hnswDistFunc,
-		hnswPrecompute:     hnswPrecompute,
-		hnswCachedDistance: hnswCachedDistance,
-		hnswM:              m,
-		hnswEfSearch:       efSearch,
-		hnswEfConstruction: efConstruction,
-		vectorStore:        vectorStore,
+		graph:               g,
+		metadata:            make(map[uint32]*core.VectorNode[T]),
+		metaIndex:           metaIndex,
+		InvertedIndex:       invertedIndex,
+		IDMapper:            idMapper,
+		wal:                 wal,
+		encodeFunc:          encodeFunc,
+		distanceFunc:        distanceFunc,
+		hnswDistFunc:        hnswDistFunc,
+		hnswPrecompute:      hnswPrecompute,
+		hnswCachedDistance:  hnswCachedDistance,
+		hnswSquaredDistance: hnswSquaredDistance,
+		hnswFromSquared:     hnswFromSquared,
+		hnswM:               m,
+		hnswEfSearch:        efSearch,
+		hnswEfConstruction:  efConstruction,
+		vectorStore:         vectorStore,
 	}
 }
 
@@ -854,6 +865,8 @@ func (idx *HNSWIndex[T]) Clear() {
 	g.Distance = idx.hnswDistFunc
 	g.Precompute = idx.hnswPrecompute
 	g.CachedDistance = idx.hnswCachedDistance
+	g.SquaredDistance = idx.hnswSquaredDistance
+	g.FromSquaredDistance = idx.hnswFromSquared
 	idx.graph = g
 
 	idx.metadata = make(map[uint32]*core.VectorNode[T])

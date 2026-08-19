@@ -543,6 +543,35 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	Precompute     func(v V) float64
 	CachedDistance func(aVec V, aCache float64, bVec V, bCache float64) float32
 
+	// SquaredDistance and FromSquaredDistance are a second, independent
+	// opt-in pair: a cheaper distance-equivalent used only for internal
+	// ranking/comparison (search/addNeighbor/replenish/
+	// selectNeighborsHeuristic -- everywhere except the k results a query
+	// actually returns), paired with a conversion back to the real
+	// distance, applied once to just those k results. Euclidean is the
+	// motivating case: sqrt is a monotonic transform (a < b implies
+	// sqrt(a) < sqrt(b)), so ranking on squared distance produces identical
+	// ordering to ranking on real distance, while skipping sqrt() on every
+	// comparison except the handful that get returned. See
+	// SquaredEuclideanDistanceFloat32/FromSquaredEuclideanDistance.
+	//
+	// nil (the default) means "no cheaper ranking equivalent for this
+	// metric" -- every comparison falls back to Distance/CachedDistance
+	// (distFuncFor's existing behavior), and FromSquaredDistance is never
+	// called. Cosine deliberately leaves these nil: its distance isn't a
+	// monotonic transform of some cheaper quantity the way Euclidean's
+	// sqrt is, so there's no equivalent shortcut here for it to use --
+	// Precompute/CachedDistance above is cosine's own, differently-shaped
+	// optimization.
+	//
+	// FromSquaredDistance must be set whenever SquaredDistance is -- unlike
+	// CachedDistance/Precompute's cache arguments (safely ignorable), a nil
+	// FromSquaredDistance would leave squared values flowing out to a
+	// caller uncorrected, since rankDistFuncFor's whole purpose is to
+	// substitute SquaredDistance in wherever this pair is configured.
+	SquaredDistance     DistanceFunc[V]
+	FromSquaredDistance func(rank float32) float32
+
 	// Rng is used for level generation. It may be set to a deterministic value
 	// for reproducibility. Note that deterministic number generation can lead to
 	// degenerate graphs when exposed to adversarial inputs.
@@ -642,6 +671,34 @@ func (g *Graph[K, V]) precompute(v V) float64 {
 		return 0
 	}
 	return g.Precompute(v)
+}
+
+// rankDistFuncFor builds a distFunc[V] for internal ranking/comparison use
+// only -- values it produces must never reach a caller as-is; see
+// Graph.SquaredDistance's doc comment. Prefers SquaredDistance when the
+// metric opted in (cheaper: skips a monotonic transform every comparison
+// would otherwise pay for); falls back to distFuncFor's existing behavior
+// (CachedDistance, or plain Distance) when it hasn't. Callers whose
+// distance values never leave the graph (Add, Delete, and everything they
+// call) should always use this instead of distFuncFor -- only
+// Graph.search()'s base-layer result needs the real distance, converted
+// back via fromRank at that single boundary.
+func (g *Graph[K, V]) rankDistFuncFor() distFunc[V] {
+	if g.SquaredDistance != nil {
+		return noCacheDist(g.SquaredDistance)
+	}
+	return g.distFuncFor()
+}
+
+// fromRank converts a rankDistFuncFor()-produced value back into the real,
+// externally-correct distance -- the identity function when the configured
+// metric has no cheaper ranking equivalent (SquaredDistance == nil, so
+// rankDistFuncFor never substituted anything in the first place).
+func (g *Graph[K, V]) fromRank(v float32) float32 {
+	if g.FromSquaredDistance == nil {
+		return v
+	}
+	return g.FromSquaredDistance(v)
 }
 
 // Default HNSW parameters, used by NewGraph() and mirrored by
@@ -806,10 +863,12 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 		efConstruction = g.M
 	}
 
-	// Built once for the whole batch, not per node/layer: distFuncFor()'s
+	// Built once for the whole batch, not per node/layer: rankDistFuncFor()'s
 	// result doesn't depend on which node is being inserted, only on the
-	// graph's configured metric.
-	distFn := g.distFuncFor()
+	// graph's configured metric. Add() never returns a distance value to a
+	// caller, so it always prefers the cheaper ranking-only dispatcher over
+	// distFuncFor() -- see rankDistFuncFor's doc comment.
+	distFn := g.rankDistFuncFor()
 
 	for _, node := range nodes {
 		key := node.Key
@@ -972,9 +1031,15 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 	}
 
 	// Built once per query, not per layer: near's cache doesn't change as
-	// the search descends through layers, and distFuncFor()'s result
-	// doesn't depend on near at all.
-	distFn := h.distFuncFor()
+	// the search descends through layers, and rankDistFuncFor()'s result
+	// doesn't depend on near at all. Every layer traversed here (including
+	// the base layer below) only uses distances for ranking -- picking an
+	// elevator, ordering/evicting search() candidates -- so this always
+	// prefers the cheaper ranking-only dispatcher; the real distance is
+	// recovered via fromRank, once, only for the base layer's final k
+	// results below (the one place a value from this function actually
+	// reaches a caller).
+	distFn := h.rankDistFuncFor()
 	nearCache := h.precompute(near)
 
 	var elevator *K // Key of the node that serves as the entry point to the next lower layer.
@@ -1010,8 +1075,14 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 
 		for _, node := range nodes {
 			out = append(out, SearchResult[K, V]{
-				Node:     node.node.Node,
-				Distance: node.dist,
+				Node: node.node.Node,
+				// fromRank converts back from rankDistFuncFor()'s
+				// ranking-only value (e.g. squared Euclidean distance) to
+				// the real distance -- identity when the configured metric
+				// has no such shortcut (fromRank's doc comment). This is
+				// the only place in this file a rank value is allowed to
+				// reach a caller.
+				Distance: h.fromRank(node.dist),
 			})
 		}
 
@@ -1041,7 +1112,7 @@ func (h *Graph[K, V]) Delete(key K) bool {
 
 	deleteLayer := map[int]struct{}{} // Keep track of layers that become empty.
 	var deleted bool
-	dist := h.distFuncFor() // built once, reused across every layer this key appears in
+	dist := h.rankDistFuncFor() // built once, reused across every layer this key appears in; Delete never returns a distance value
 	// Iterate through all layers, from highest to lowest, to remove the node.
 	for i, layer := range h.layers {
 		node, ok := layer.nodes[key]
