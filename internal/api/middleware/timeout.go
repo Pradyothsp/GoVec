@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -21,7 +22,7 @@ func Timeout(d time.Duration) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 
-		if ctx.Err() == context.DeadlineExceeded {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			zerolog.Ctx(ctx).Warn().
 				Str("method", c.Request.Method).
 				Str("path", c.Request.URL.Path).

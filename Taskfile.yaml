@@ -112,6 +112,8 @@ tasks:
   # Fix formatting in-place
   fmt:fix:
     desc: Format all Go source files
+    aliases:
+      - fmt
     cmds:
       - gofmt -w .
       - echo "Formatting applied."
