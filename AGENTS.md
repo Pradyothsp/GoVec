@@ -112,25 +112,39 @@ engine:
 ## Current State & Roadmap
 
 ### Implemented
-- ✅ REST API (Insert, Search, Health)
-- ✅ Vector deletion (`DELETE /api/v1/vectors/:id`) and upsert-on-insert
-- ✅ Reset/clear all vectors (`POST /api/v1/admin/reset`) -- see `docs/architecture/ID_MAPPING.md` amendment
-- ✅ Generic Vector Engine (float32 & int8)
-- ✅ Approximate nearest neighbor search (HNSW, alongside brute-force linear scan) -- see `internal/hnsw`, `internal/index/factory.go`, and `docs/architecture/HNSW_EF_CONSTRUCTION.md` for the `hnsw_ef_construction`/`hnsw_ef_search` split
-- ✅ Cosine and Euclidean distance metrics (`engine.distance_metric`), both index types -- see `docs/architecture/DISTANCE_METRICS.md`
-- ✅ Write-Ahead Log (WAL) & Crash Recovery
-- ✅ Atomic Persistence (GOB encoding)
-- ✅ CI/CD with GitHub Actions (lint, test, vuln)
-- ✅ Docker support (multi-stage)
-- ✅ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`) -- closed the recall@1 gap (75.0%→98.0%, now beating Chroma's 97.0%); also fixed two other real bugs found along the way (base layer needs 2×M capacity, not M; query-time search was exploring at breadth `k` instead of `max(k, ef_search)`). Real cost regressions the fix introduced (insert latency, high-k query p99, RAM) have since been recovered by retuning `M`/`EfConstruction`/`EfSearch` together (M=24/300/20 → M=16/200/50) -- govec now wins or ties Chroma on insert, query (including the p99 tail that hit 88ms at its worst, now 2.84ms), and cold start; the apparent ~5.5x RAM gap turned out to be mostly a Go GC measurement artifact, not real storage cost -- see `docs/architecture/HNSW_NEIGHBOR_SELECTION.md` and `docs/architecture/MEMORY_TUNING.md`. **govec's own factory default for `hnsw_ef_search` was bumped 20→50 to match** (`internal/config/config.go`, `internal/index/factory.go`, `internal/hnsw/graph.go`'s `NewGraph()`) -- recall@1/5 plateau at 50 with no further latency cost below `k=50`, so this is a straight recall improvement for anyone on defaults, not just the benchmark tuning
-- 📖 `GOMEMLIMIT` (Go 1.19+ runtime env var, no code change) cuts govec's measured RAM footprint substantially under sustained load, at no latency cost -- deliberately not defaulted anywhere (the right value is proportional to your dataset size, not a universal constant); see `docs/architecture/MEMORY_TUNING.md` for the investigation and a sizing recommendation for deployers
-- ✅ Metadata filtering in search (`engine.enable_metadata_index`) -- in-memory inverted index over metadata fields, filters resolved to an allowlist in O(1); dynamic strategy at query time (selective filters pushed into graph traversal + scaled `ef_search`, non-selective filters post-filtered with mild over-fetch), works for both index types -- see `docs/architecture/METADATA_INDEX.md`
-- ✅ Concurrent-safe HNSW batch insert (round-based barrier parallelism: `hnsw_batch_parallelism`/`hnsw_batch_parallel_threshold`) -- `Graph.Add` splits a large batch into fixed-size rounds, runs every round's item-level graph *search* concurrently (read-only, one goroutine per item), then a `sync.WaitGroup` barrier, then replays every item's graph *mutation* serially -- no read ever overlaps a write to the same data, by construction. `HNSWIndex.BatchInsert` now issues one batched `Graph.Add` call per batch instead of one per item, so this actually gets a batch to parallelize. Measured ~2.6x wall-clock speedup on an 8-core arm64 dev machine (govec-bench's own Docker containers are capped at 1 CPU and can't show this) with no measurable recall regression, including the documented worst case (a batch's first round into a near-empty graph) -- see `HNSW_BULK_INSERT_PLAN.md` §7 for the full writeup, including a real correctness bug (not just the anticipated recall trade-off) found and fixed during implementation. Supersedes `docs/architecture/HNSW_CONCURRENT_INSERT.md`'s "tabled, low priority" verdict for its "Path 2" design specifically -- full per-node locking ("Path 1"/item 2 below) remains untouched
+- ✅ REST API (insert, search, delete, health) and optional gRPC server
+- ✅ Vector deletion (`DELETE /api/v1/vectors/:id`), upsert-on-insert, and reset (`POST /api/v1/admin/reset`)
+- ✅ Generic vector engine (`VectorIndex[T]`) over float32 and int8
+- ✅ Scalar (int8) quantization -- ~4x memory reduction
+- ✅ Approximate nearest neighbor search (HNSW) alongside brute-force linear scan
+- ✅ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`), with a distinct
+  `hnsw_ef_construction` separate from `hnsw_ef_search`
+- ✅ Concurrent-safe HNSW batch insert via round-based barrier parallelism
+  (`hnsw_batch_parallelism` / `hnsw_batch_parallel_threshold`): each round runs every item's
+  graph *search* concurrently, hits a `sync.WaitGroup` barrier, then replays every item's
+  graph *mutation* serially -- so no read ever overlaps a write, by construction
+- ✅ Cosine and Euclidean distance metrics, both index types
+- ✅ Metadata filtering in search (`engine.enable_metadata_index`) -- in-memory inverted index;
+  selective filters are pushed into graph traversal, non-selective ones post-filtered with over-fetch
+- ✅ Write-ahead log (WAL) and crash recovery
+- ✅ Atomic snapshot persistence (GOB encoding)
+- ✅ CI/CD with GitHub Actions (lint, test, vuln), multi-stage Dockerfile
+
+### Notes for deployers
+- `GOMEMLIMIT` (Go 1.19+, no code change) substantially cuts measured RAM under sustained load
+  at no latency cost. Deliberately not defaulted -- the right value is proportional to your
+  dataset size, not a universal constant.
 
 ### Planned
-- ⏳ Product & Binary quantization -- scalar (int8) quantization already ships; Product Quantization and Binary Quantization are the open items, and they're not similarly-sized asks (PQ needs training/codebook infrastructure this codebase doesn't have anywhere else; BQ is stateless, same shape as the existing scalar quantization)
-- ❌ HNSW dense ID-indexed storage -- evaluated with real numbers (~11MB combined at 100k vectors, using the per-entry map-overhead constant measured in the neighbor-slice fix) and declined; not worth the implementation cost -- see `docs/architecture/HNSW_MEMORY_LAYOUT.md`
-- ⏳ Full per-node-locking concurrent HNSW graph mutation (not just batch-scoped parallel insert, which now ships -- see above) -- bigger payoff ceiling, bigger risk: hnswlib itself needed a dedicated bug-fix PR for this exact design, and the failure mode (deadlocks) isn't caught by `-race`, only by hitting the wrong interleaving under load -- see `docs/architecture/HNSW_CONCURRENT_INSERT.md`
+- ⏳ Product and Binary quantization. Not similarly-sized asks: PQ needs training/codebook
+  infrastructure that doesn't exist anywhere in this codebase; BQ is stateless, the same shape
+  as the scalar quantization that already ships.
+- ⏳ Full per-node-locking concurrent HNSW graph mutation (beyond the batch-scoped parallel
+  insert that ships today). Bigger payoff ceiling, bigger risk: hnswlib needed a dedicated
+  bug-fix PR for this exact design, and the failure mode (deadlock) isn't caught by `-race`,
+  only by hitting the wrong interleaving under load.
+- ❌ HNSW dense ID-indexed storage -- evaluated with real numbers (~11MB combined at 100k
+  vectors) and declined; not worth the implementation cost.
 
 ## Testing & Workflow
 
