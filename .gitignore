@@ -10,3 +10,6 @@
 
 /govec
 /server
+
+# Task runner cache
+.task/

@@ -728,13 +728,13 @@ func (g *Graph[K, V]) fromRank(v float32) float32 {
 const (
 	// DefaultM is a good default for OpenAI-style embeddings.
 	DefaultM = 16
-	// DefaultEfSearch: see docs/architecture/HNSW_NEIGHBOR_SELECTION.md's
-	// EfConstruction/EfSearch sweep for why 50 -- recall@1/5 plateau there;
-	// below it, recall drops with no latency benefit, since resultCap =
-	// max(k, EfSearch) already floors at k for k > EfSearch anyway.
+	// DefaultEfSearch is 50 because recall@1/5 plateaus there in an
+	// EfConstruction/EfSearch sweep; below it, recall drops with no latency
+	// benefit, since resultCap = max(k, EfSearch) already floors at k for
+	// k > EfSearch anyway.
 	DefaultEfSearch = 50
 	// DefaultEfConstruction of 200 is hnswlib's own default and a reasonable
-	// starting point -- see docs/architecture/HNSW_EF_CONSTRUCTION.md.
+	// starting point.
 	DefaultEfConstruction = 200
 	// DefaultBatchParallelThreshold: below this many nodes in one Add() call,
 	// round-based parallelism (see addRound) is skipped entirely in favor of

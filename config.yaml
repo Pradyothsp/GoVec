@@ -1,5 +1,5 @@
 # GoVec Configuration File
-# See CLAUDE.md for detailed configuration documentation
+# See AGENTS.md for detailed configuration documentation
 
 server:
   host: "" # Bind to all interfaces (0.0.0.0)
@@ -11,8 +11,8 @@ server:
 storage:
   data_path: "./govec_data.bin"
   wal_path: "./govec.wal"
-  auto_save_enabled: false    # Disabled for govec-bench: a periodic save takes the write lock for the
-  auto_save_interval: 60s     # whole snapshot, blocking queries -- pure noise for latency benchmarking.
+  auto_save_enabled: true     # Periodic snapshot. Note: a save takes the write lock for the whole
+  auto_save_interval: 60s     # snapshot, briefly blocking queries -- disable it when benchmarking latency.
   enable_mmap: false          # Set to true to store vectors in OS-managed mmap files (requires dimensions > 0)
   mmap_store_path: "./govec_mmap/" # Directory for .vec chunk files (used when enable_mmap: true)
 
@@ -20,16 +20,17 @@ engine:
   index_type: "brute"         # Options: "brute" (linear scan, default), "hnsw" (ANN, faster for >10k vectors)
   quantization: "none"        # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
   distance_metric: "cosine"   # Options: "cosine", "euclidean"
-  dimensions: 128             # Required when enable_mmap: true (e.g. 1536 for OpenAI embeddings) -- 128 here for SIFT vectors (govec-bench)
+  dimensions: 0               # Required when enable_mmap: true (e.g. 1536 for OpenAI embeddings). 0 = no upfront enforcement
   enable_hybrid_search: true   # Enables the Inverted Index for Sparse Vectors
   enable_metadata_index: false # Enables in-memory inverted index for fast filtered search (brute & HNSW)
   # HNSW parameters (only used when index_type: "hnsw")
   hnsw_m: 16                  # Max connections per node (higher = better recall, more memory)
-  hnsw_ef_search: 20          # Search candidates (higher = better recall, slower)
+  hnsw_ef_search: 50          # Query-time search breadth (higher = better recall, slower). recall@1/5 plateaus at 50
+  hnsw_ef_construction: 200   # Build-time search breadth (higher = better graph, slower inserts)
   # hnsw_batch_parallelism: 0        # Concurrent workers for a single Add() call's round-based parallel Prepare phase. 0 = runtime.GOMAXPROCS(0)
   # hnsw_batch_parallel_threshold: 20 # Minimum node count in one Add() call before parallelism kicks in at all; below it, inserts stay fully serial
 
 grpc:
-  enabled: true              # Set to true to start the gRPC server. Override: GOVEC_GRPC_ENABLED
+  enabled: false              # Set to true to start the gRPC server. Override: GOVEC_GRPC_ENABLED
   port: 50051                 # gRPC listen port (must differ from HTTP port). Override: GOVEC_GRPC_PORT
   max_recv_msg_size_mb: 64    # Max incoming message size in MB. Override: GOVEC_GRPC_MAX_RECV_MSG_SIZE_MB
