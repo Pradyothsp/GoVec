@@ -230,9 +230,11 @@ func (s *PersistenceIntegrationTestSuite) TestConcurrentHTTPRequests_DuringSave(
 		go func(id int) {
 			defer wg.Done()
 
+			// 3-d to match PopulateIndexWithVectors above -- the index is
+			// already populated at that width.
 			payload := map[string]interface{}{
 				"id":     fmt.Sprintf("concurrent_vec%d", id),
-				"vector": []float32{float32(id), float32(id * 2)},
+				"vector": []float32{float32(id), float32(id * 2), float32(id * 3)},
 			}
 
 			body, _ := json.Marshal(payload)

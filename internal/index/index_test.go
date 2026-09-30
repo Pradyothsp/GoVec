@@ -86,14 +86,17 @@ func TestInsert_Variations(t *testing.T) {
 			},
 		},
 		{
-			name:     "empty_vector",
-			id:       "vec5",
-			vector:   fixtures.VecEmpty,
-			sparse:   core.SparseVector{},
-			metadata: nil,
+			// An empty vector can never be compared against anything, so it
+			// would make every later search fail once a real vector set the
+			// index's width -- rejected at insert instead.
+			name:        "empty_vector_is_rejected",
+			id:          "vec5",
+			vector:      fixtures.VecEmpty,
+			sparse:      core.SparseVector{},
+			metadata:    nil,
+			expectError: true,
 			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, _ := idx.IDMapper.ToUint32ID("vec5")
-				assert.Equal(t, fixtures.VecEmpty, idx.Store[internalID].Vector)
+				assert.NotContains(t, idx.Store, uint32(0))
 			},
 		},
 		{

@@ -279,6 +279,14 @@ func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.Sp
 // item's graph.Add into a single batched call instead of one per item.
 // PRECONDITION: idx.mu.Lock() held by caller.
 func (idx *HNSWIndex[T]) bookkeepInsert(id string, vec []float32, sparse core.SparseVector, meta map[string]any) (internalID uint32, encoded T, err error) {
+	// Reject a vector that can't be compared against the rest of the index,
+	// before any mutation below -- GetOrCreate allocates a permanent internal
+	// ID, and the index updates that follow are not rolled back on a later
+	// error.
+	if dimErr := validateVectorDims(vec, idx.dimensions); dimErr != nil {
+		return 0, encoded, dimErr
+	}
+
 	internalID, err = idx.IDMapper.GetOrCreate(id)
 	if err != nil {
 		return 0, encoded, err

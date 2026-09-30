@@ -77,13 +77,16 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 			expectLen: 3,
 		},
 		{
-			name: "large_vectors",
+			// Two 1536-d vectors, not one 1536-d and one 4096-d: an index has a
+			// single width, and mixing them is now rejected at insert. 4096-d
+			// persistence gets its own index in the next case.
+			name: "large_vectors_1536d",
 			setup: func(t *testing.T) *VectorIndex[[]float32] {
 				return newTestIndex(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				_ = idx.Insert(context.Background(), "large1", fixtures.Vec1536d, core.SparseVector{}, map[string]any{"size": 1536}) //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "large2", fixtures.Vec4096d, core.SparseVector{}, map[string]any{"size": 4096}) //nolint:errcheck // test setup
+				_ = idx.Insert(context.Background(), "large2", fixtures.Vec1536d, core.SparseVector{}, map[string]any{"size": 1536}) //nolint:errcheck // test setup
 			},
 			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				assert.Len(t, idx.Store, 2)
@@ -95,9 +98,27 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				assert.Contains(t, idx.Store, id1)
 				assert.Contains(t, idx.Store, id2)
 				assert.Len(t, idx.Store[id1].Vector, 1536)
-				assert.Len(t, idx.Store[id2].Vector, 4096)
+				assert.Len(t, idx.Store[id2].Vector, 1536)
 			},
 			expectLen: 2,
+		},
+		{
+			name: "large_vectors_4096d",
+			setup: func(t *testing.T) *VectorIndex[[]float32] {
+				return newTestIndex(t)
+			},
+			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
+				_ = idx.Insert(context.Background(), "large4096", fixtures.Vec4096d, core.SparseVector{}, map[string]any{"size": 4096}) //nolint:errcheck // test setup
+			},
+			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
+				assert.Len(t, idx.Store, 1)
+				id, err := idx.IDMapper.ToUint32ID("large4096")
+				require.NoError(t, err)
+
+				assert.Contains(t, idx.Store, id)
+				assert.Len(t, idx.Store[id].Vector, 4096)
+			},
+			expectLen: 1,
 		},
 		{
 			name: "special_characters_in_ids",
@@ -105,7 +126,9 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				return newTestIndex(t)
 			},
 			populate: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				_ = idx.Insert(context.Background(), "empty_vec", fixtures.VecEmpty, core.SparseVector{}, nil)                            //nolint:errcheck // test setup
+				// All 3-d: this case is about the ids, not the vectors, and an
+				// empty vector is no longer a valid insert.
+				_ = idx.Insert(context.Background(), "plain_vec", fixtures.Vec3dSimple, core.SparseVector{}, nil)                         //nolint:errcheck // test setup
 				_ = idx.Insert(context.Background(), "special-chars_!@#", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
 				_ = idx.Insert(context.Background(), "unicode-测试", fixtures.Vec3dAlternate, core.SparseVector{}, nil)                     //nolint:errcheck // test setup
 				_ = idx.Insert(context.Background(), "spaces in id", fixtures.Vec3dThird, core.SparseVector{}, fixtures.MetaEmpty)        //nolint:errcheck // test setup

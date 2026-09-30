@@ -148,6 +148,14 @@ func (idx *VectorIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertI
 // insertInternal performs the core insert logic without WAL writes.
 // PRECONDITION: idx.mu.Lock() must be held by caller.
 func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
+	// 0. Reject a vector that can't be compared against the rest of the index.
+	//    This runs before any mutation below -- GetOrCreate allocates a
+	//    permanent internal ID, and the index updates that follow are not
+	//    rolled back on a later error.
+	if err := validateVectorDims(vec, idx.dimensions); err != nil {
+		return err
+	}
+
 	// 1. Translate string ID → uint32 ID (create if doesn't exist)
 	internalID, err := idx.IDMapper.GetOrCreate(id)
 	if err != nil {
