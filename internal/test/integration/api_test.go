@@ -119,9 +119,11 @@ func (s *APITestSuite) TestVectorInsertAndOverwrite() {
 	s.Require().Contains(s.index.Store, internalID)
 	s.Assert().Equal([]float32{1.0, 2.0}, s.index.Store[internalID].Vector)
 
+	// Same width as the original: an overwrite cannot change the index's
+	// dimension, since every other vector in it is still the old width.
 	payload2 := map[string]interface{}{
 		"id":       "test_vec",
-		"vector":   []float32{3.0, 4.0, 5.0},
+		"vector":   []float32{3.0, 4.0},
 		"metadata": map[string]interface{}{"version": 2, "updated": true},
 	}
 
@@ -136,7 +138,7 @@ func (s *APITestSuite) TestVectorInsertAndOverwrite() {
 	internalID2, err2 := s.index.IDMapper.ToUint32ID("test_vec")
 	s.Require().NoError(err2)
 	s.Require().Contains(s.index.Store, internalID2)
-	s.Assert().Equal([]float32{3.0, 4.0, 5.0}, s.index.Store[internalID2].Vector)
+	s.Assert().Equal([]float32{3.0, 4.0}, s.index.Store[internalID2].Vector)
 	s.Assert().Equal(float64(2), s.index.Store[internalID2].Metadata["version"])
 	s.Assert().Len(s.index.Store, 1, "Should still have only one vector")
 }
@@ -273,7 +275,9 @@ func (s *APITestSuite) TestSequentialInserts() {
 }
 
 func (s *APITestSuite) TestEdgeCases() {
-	s.Run("empty_vector", func() {
+	s.Run("empty_vector_is_rejected", func() {
+		// An empty vector is uncomparable, so storing one would make every
+		// later search fail once a real vector set the index's width.
 		payload := map[string]interface{}{
 			"id":     "empty_vec",
 			"vector": []float32{},
@@ -286,7 +290,9 @@ func (s *APITestSuite) TestEdgeCases() {
 		w := httptest.NewRecorder()
 		s.router.ServeHTTP(w, req)
 
-		s.Assert().Equal(http.StatusCreated, w.Code)
+		s.Assert().NotEqual(http.StatusCreated, w.Code)
+		_, err := s.index.IDMapper.ToUint32ID("empty_vec")
+		s.Assert().Error(err, "a rejected insert must not leave an id mapping behind")
 	})
 
 	s.Run("special_characters_in_id", func() {
@@ -307,8 +313,10 @@ func (s *APITestSuite) TestEdgeCases() {
 
 	s.Run("complex_metadata", func() {
 		payload := map[string]interface{}{
-			"id":     "complex_meta",
-			"vector": []float32{1.0, 2.0},
+			"id": "complex_meta",
+			// 1-d to match special_characters_in_id above -- these subtests
+			// share one index, which has a single width.
+			"vector": []float32{1.0},
 			"metadata": map[string]interface{}{
 				"nested": map[string]interface{}{
 					"level1": map[string]interface{}{
