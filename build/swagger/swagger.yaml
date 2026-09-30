@@ -184,6 +184,29 @@ paths:
       summary: Flush index to disk
       tags:
       - system
+  /api/v1/admin/reset:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Clear all vectors from the index
+      tags:
+      - system
   /api/v1/info:
     get:
       produces:
