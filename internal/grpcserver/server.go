@@ -124,6 +124,7 @@ func (s *GoVecServer) Info(_ context.Context, _ *pb.InfoRequest) (*pb.InfoRespon
 		DistanceMetric: info.DistanceMetric,
 		Dimensions:     int32(info.Dimensions),  //nolint:gosec // dimension fits in int32
 		VectorCount:    int32(info.VectorCount), //nolint:gosec // vector count fits in int32
+		EnableMmap:     info.EnableMmap,
 	}, nil
 }
 
