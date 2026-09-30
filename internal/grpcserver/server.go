@@ -39,6 +39,10 @@ func (s *GoVecServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.In
 	}
 	meta := convert.ProtoToMeta(req.Metadata)
 	if err := s.engine.Insert(ctx, req.Id, req.Vector, sparse, meta); err != nil {
+		// A mis-sized vector is the caller's mistake, not a server fault.
+		if index.IsInvalidVectorError(err) {
+			return nil, status.Errorf(codes.InvalidArgument, "insert failed: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "insert failed: %v", err)
 	}
 	return &pb.InsertResponse{Status: "ok"}, nil

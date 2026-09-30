@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,24 @@ func TestValidateVectorDims(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+// The transports branch on these sentinels to answer 400 / InvalidArgument
+// instead of 500, so the wrapping has to survive fmt.Errorf.
+func TestValidateVectorDims_ErrorsAreClassifiable(t *testing.T) {
+	mismatch := validateVectorDims([]float32{1, 2}, 3)
+	require.Error(t, mismatch)
+	assert.ErrorIs(t, mismatch, ErrDimensionMismatch)
+	assert.True(t, IsInvalidVectorError(mismatch))
+
+	empty := validateVectorDims(nil, 3)
+	require.Error(t, empty)
+	assert.ErrorIs(t, empty, ErrEmptyVector)
+	assert.True(t, IsInvalidVectorError(empty))
+
+	assert.False(t, IsInvalidVectorError(nil), "no error is not a client error")
+	assert.False(t, IsInvalidVectorError(errors.New("disk on fire")),
+		"an unrelated failure must still read as a server fault")
 }
 
 // TestInsert_DimensionMismatch_DoesNotCorruptIndex is the regression test for

@@ -170,6 +170,14 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 
 	err := h.Engine.Insert(c.Request.Context(), req.ID, req.Vector, sparse, req.Metadata)
 	if err != nil {
+		// A mis-sized or empty vector is the caller's mistake, not a server
+		// fault -- report it as such, and don't log it at error level alongside
+		// real failures.
+		if index.IsInvalidVectorError(err) {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Str("id", req.ID).Msg("failed to insert vector")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return

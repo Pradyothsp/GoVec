@@ -534,3 +534,65 @@ func TestBatchInsert_WALFailureReturns500AndInsertsNothing(t *testing.T) {
 
 	assert.Equal(t, 0, idx.Len(), "no vector from the failed batch should have been applied")
 }
+
+// TestInsert_DimensionMismatchReturns400 pins the status for the one insert
+// failure that is unambiguously the caller's fault. The dimension guard makes
+// a wrong-width vector fail instead of quietly bricking search, but the
+// handler mapped every engine error to 500 -- telling a client that sent a
+// bad request that the server broke.
+func TestInsert_DimensionMismatchReturns400(t *testing.T) {
+	idx := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(idx)
+
+	router := gin.New()
+	router.POST("/vectors", handler.Insert)
+
+	// The first insert fixes the index at 3 dimensions.
+	first := httptest.NewRequest("POST", "/vectors",
+		bytes.NewBufferString(`{"id": "v1", "vector": [1.0, 2.0, 3.0]}`))
+	first.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, first)
+	require.Equal(t, http.StatusCreated, firstRec.Code)
+
+	req := httptest.NewRequest("POST", "/vectors",
+		bytes.NewBufferString(`{"id": "v2", "vector": [1.0, 2.0]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.False(t, resp["success"].(bool))
+	assert.Contains(t, resp["error"], "index requires 3",
+		"the client needs to be told what width to send")
+}
+
+// A genuine server fault must still read as one -- the 400 above is a
+// narrowing of the 500 case, not a replacement for it.
+func TestInsert_EngineFailureStillReturns500(t *testing.T) {
+	walPath := filepath.Join(t.TempDir(), "test.wal")
+	wal, err := index.NewWAL(walPath)
+	require.NoError(t, err)
+
+	idMapper := core.NewIDMapper()
+	identityFunc := func(v []float32) []float32 { return v }
+	idx := index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
+	require.NoError(t, wal.Close())
+
+	handler := NewVectorHandler(idx)
+	router := gin.New()
+	router.POST("/vectors", handler.Insert)
+
+	req := httptest.NewRequest("POST", "/vectors",
+		bytes.NewBufferString(`{"id": "v1", "vector": [1.0, 2.0, 3.0]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}

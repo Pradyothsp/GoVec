@@ -87,6 +87,25 @@ func (s *GoVecServerSuite) TestInsert_MissingVector() {
 	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
 }
 
+// A wrong-width vector is a bad request, not a server fault. The dimension
+// guard rejects it; this pins the status code the client sees.
+func (s *GoVecServerSuite) TestInsert_DimensionMismatch() {
+	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:     "vec-seed",
+		Vector: []float32{1.0, 2.0, 3.0},
+	})
+	require.NoError(s.T(), err)
+
+	_, err = s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:     "vec-wrong-width",
+		Vector: []float32{1.0, 2.0},
+	})
+
+	require.Error(s.T(), err)
+	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
+	assert.Contains(s.T(), status.Convert(err).Message(), "index requires 3")
+}
+
 func (s *GoVecServerSuite) TestInsert_WithMetadata() {
 	meta := map[string]*structpb.Value{
 		"label": structpb.NewStringValue("test"),
