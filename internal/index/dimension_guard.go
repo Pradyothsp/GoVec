@@ -5,8 +5,25 @@ import (
 	"fmt"
 )
 
-// ErrEmptyVector is returned when an insert supplies a zero-length vector.
-var ErrEmptyVector = errors.New("vector must not be empty")
+var (
+	// ErrEmptyVector is returned when an insert supplies a zero-length vector.
+	ErrEmptyVector = errors.New("vector must not be empty")
+
+	// ErrDimensionMismatch is returned when an insert supplies a vector whose
+	// width differs from the index's.
+	ErrDimensionMismatch = errors.New("vector dimension mismatch")
+)
+
+// IsInvalidVectorError reports whether err means the caller supplied an
+// unusable vector, as opposed to the server failing.
+//
+// Transports use this to answer with a client-error status -- HTTP 400, gRPC
+// InvalidArgument -- rather than reporting a 500 for a request the server
+// correctly rejected. Keeping the classification here means the transports do
+// not each need to know which sentinels the index layer defines.
+func IsInvalidVectorError(err error) bool {
+	return errors.Is(err, ErrEmptyVector) || errors.Is(err, ErrDimensionMismatch)
+}
 
 // validateVectorDims rejects any vector that could not participate in a
 // similarity comparison against the rest of the index.
@@ -34,7 +51,7 @@ func validateVectorDims(vec []float32, dimensions int) error {
 	}
 
 	if dimensions > 0 && len(vec) != dimensions {
-		return fmt.Errorf("vector has %d dimensions, index requires %d", len(vec), dimensions)
+		return fmt.Errorf("%w: vector has %d dimensions, index requires %d", ErrDimensionMismatch, len(vec), dimensions)
 	}
 
 	return nil
