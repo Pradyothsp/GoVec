@@ -682,8 +682,11 @@ type InfoResponse struct {
 	DistanceMetric string                 `protobuf:"bytes,3,opt,name=distance_metric,json=distanceMetric,proto3" json:"distance_metric,omitempty"`
 	Dimensions     int32                  `protobuf:"varint,4,opt,name=dimensions,proto3" json:"dimensions,omitempty"`
 	VectorCount    int32                  `protobuf:"varint,5,opt,name=vector_count,json=vectorCount,proto3" json:"vector_count,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Mirrors the REST /info field. Clients gate their own dimension check on
+	// this, so omitting it left every gRPC client unable to run that check.
+	EnableMmap    bool `protobuf:"varint,6,opt,name=enable_mmap,json=enableMmap,proto3" json:"enable_mmap,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *InfoResponse) Reset() {
@@ -749,6 +752,13 @@ func (x *InfoResponse) GetVectorCount() int32 {
 		return x.VectorCount
 	}
 	return 0
+}
+
+func (x *InfoResponse) GetEnableMmap() bool {
+	if x != nil {
+		return x.EnableMmap
+	}
+	return false
 }
 
 type FlushRequest struct {
@@ -961,7 +971,7 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"\fStatsRequest\"2\n" +
 	"\rStatsResponse\x12!\n" +
 	"\fvector_count\x18\x01 \x01(\x05R\vvectorCount\"\r\n" +
-	"\vInfoRequest\"\xbd\x01\n" +
+	"\vInfoRequest\"\xde\x01\n" +
 	"\fInfoResponse\x12\"\n" +
 	"\fquantization\x18\x01 \x01(\tR\fquantization\x12\x1d\n" +
 	"\n" +
@@ -970,7 +980,9 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"\n" +
 	"dimensions\x18\x04 \x01(\x05R\n" +
 	"dimensions\x12!\n" +
-	"\fvector_count\x18\x05 \x01(\x05R\vvectorCount\"\x0e\n" +
+	"\fvector_count\x18\x05 \x01(\x05R\vvectorCount\x12\x1f\n" +
+	"\venable_mmap\x18\x06 \x01(\bR\n" +
+	"enableMmap\"\x0e\n" +
 	"\fFlushRequest\"'\n" +
 	"\rFlushResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\"\x0f\n" +

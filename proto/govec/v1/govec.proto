@@ -72,6 +72,9 @@ message InfoResponse {
   string distance_metric = 3;
   int32  dimensions     = 4;
   int32  vector_count   = 5;
+  // Mirrors the REST /info field. Clients gate their own dimension check on
+  // this, so omitting it left every gRPC client unable to run that check.
+  bool   enable_mmap    = 6;
 }
 
 message FlushRequest {}
