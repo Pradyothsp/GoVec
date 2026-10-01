@@ -58,6 +58,20 @@ message DeleteResponse {
   string id     = 2;
 }
 
+message GetByIDRequest {
+  string id = 1;
+}
+
+// Mirrors REST's GET /api/v1/vectors/:id. Kept as its own message rather than
+// reusing InsertRequest: the two happen to share a shape today, but a stored
+// record is a response body, not an echo of the request that created it.
+message GetByIDResponse {
+  string id                               = 1;
+  repeated float vector                   = 2 [packed = true];
+  SparseVector sparse                     = 3;
+  map<string, google.protobuf.Value> metadata = 4;
+}
+
 message StatsRequest {}
 
 message StatsResponse {
@@ -83,6 +97,12 @@ message FlushResponse {
   string status = 1;
 }
 
+message ResetRequest {}
+
+message ResetResponse {
+  string status = 1;
+}
+
 message HealthRequest {}
 
 message HealthResponse {
@@ -94,8 +114,10 @@ service GoVecService {
   rpc BatchInsert (stream InsertRequest) returns (BatchInsertResponse);
   rpc Search      (SearchRequest)        returns (SearchResponse);
   rpc Delete      (DeleteRequest)        returns (DeleteResponse);
+  rpc GetByID     (GetByIDRequest)       returns (GetByIDResponse);
   rpc Stats       (StatsRequest)         returns (StatsResponse);
   rpc Info        (InfoRequest)          returns (InfoResponse);
   rpc Flush       (FlushRequest)         returns (FlushResponse);
+  rpc Reset       (ResetRequest)         returns (ResetResponse);
   rpc Health      (HealthRequest)        returns (HealthResponse);
 }

@@ -559,6 +559,121 @@ func (x *DeleteResponse) GetId() string {
 	return ""
 }
 
+type GetByIDRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetByIDRequest) Reset() {
+	*x = GetByIDRequest{}
+	mi := &file_govec_v1_govec_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetByIDRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetByIDRequest) ProtoMessage() {}
+
+func (x *GetByIDRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_govec_v1_govec_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetByIDRequest.ProtoReflect.Descriptor instead.
+func (*GetByIDRequest) Descriptor() ([]byte, []int) {
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetByIDRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+// Mirrors REST's GET /api/v1/vectors/:id. Kept as its own message rather than
+// reusing InsertRequest: the two happen to share a shape today, but a stored
+// record is a response body, not an echo of the request that created it.
+type GetByIDResponse struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Id            string                     `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Vector        []float32                  `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
+	Sparse        *SparseVector              `protobuf:"bytes,3,opt,name=sparse,proto3" json:"sparse,omitempty"`
+	Metadata      map[string]*structpb.Value `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetByIDResponse) Reset() {
+	*x = GetByIDResponse{}
+	mi := &file_govec_v1_govec_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetByIDResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetByIDResponse) ProtoMessage() {}
+
+func (x *GetByIDResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_govec_v1_govec_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetByIDResponse.ProtoReflect.Descriptor instead.
+func (*GetByIDResponse) Descriptor() ([]byte, []int) {
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetByIDResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *GetByIDResponse) GetVector() []float32 {
+	if x != nil {
+		return x.Vector
+	}
+	return nil
+}
+
+func (x *GetByIDResponse) GetSparse() *SparseVector {
+	if x != nil {
+		return x.Sparse
+	}
+	return nil
+}
+
+func (x *GetByIDResponse) GetMetadata() map[string]*structpb.Value {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
 type StatsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -567,7 +682,7 @@ type StatsRequest struct {
 
 func (x *StatsRequest) Reset() {
 	*x = StatsRequest{}
-	mi := &file_govec_v1_govec_proto_msgTypes[10]
+	mi := &file_govec_v1_govec_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -579,7 +694,7 @@ func (x *StatsRequest) String() string {
 func (*StatsRequest) ProtoMessage() {}
 
 func (x *StatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[10]
+	mi := &file_govec_v1_govec_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +707,7 @@ func (x *StatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsRequest.ProtoReflect.Descriptor instead.
 func (*StatsRequest) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{10}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{12}
 }
 
 type StatsResponse struct {
@@ -604,7 +719,7 @@ type StatsResponse struct {
 
 func (x *StatsResponse) Reset() {
 	*x = StatsResponse{}
-	mi := &file_govec_v1_govec_proto_msgTypes[11]
+	mi := &file_govec_v1_govec_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +731,7 @@ func (x *StatsResponse) String() string {
 func (*StatsResponse) ProtoMessage() {}
 
 func (x *StatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[11]
+	mi := &file_govec_v1_govec_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +744,7 @@ func (x *StatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsResponse.ProtoReflect.Descriptor instead.
 func (*StatsResponse) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{11}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StatsResponse) GetVectorCount() int32 {
@@ -647,7 +762,7 @@ type InfoRequest struct {
 
 func (x *InfoRequest) Reset() {
 	*x = InfoRequest{}
-	mi := &file_govec_v1_govec_proto_msgTypes[12]
+	mi := &file_govec_v1_govec_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -659,7 +774,7 @@ func (x *InfoRequest) String() string {
 func (*InfoRequest) ProtoMessage() {}
 
 func (x *InfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[12]
+	mi := &file_govec_v1_govec_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -672,7 +787,7 @@ func (x *InfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InfoRequest.ProtoReflect.Descriptor instead.
 func (*InfoRequest) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{12}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{14}
 }
 
 type InfoResponse struct {
@@ -691,7 +806,7 @@ type InfoResponse struct {
 
 func (x *InfoResponse) Reset() {
 	*x = InfoResponse{}
-	mi := &file_govec_v1_govec_proto_msgTypes[13]
+	mi := &file_govec_v1_govec_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +818,7 @@ func (x *InfoResponse) String() string {
 func (*InfoResponse) ProtoMessage() {}
 
 func (x *InfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[13]
+	mi := &file_govec_v1_govec_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +831,7 @@ func (x *InfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InfoResponse.ProtoReflect.Descriptor instead.
 func (*InfoResponse) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{13}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *InfoResponse) GetQuantization() string {
@@ -769,7 +884,7 @@ type FlushRequest struct {
 
 func (x *FlushRequest) Reset() {
 	*x = FlushRequest{}
-	mi := &file_govec_v1_govec_proto_msgTypes[14]
+	mi := &file_govec_v1_govec_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -781,7 +896,7 @@ func (x *FlushRequest) String() string {
 func (*FlushRequest) ProtoMessage() {}
 
 func (x *FlushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[14]
+	mi := &file_govec_v1_govec_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -794,7 +909,7 @@ func (x *FlushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushRequest.ProtoReflect.Descriptor instead.
 func (*FlushRequest) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{14}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{16}
 }
 
 type FlushResponse struct {
@@ -806,7 +921,7 @@ type FlushResponse struct {
 
 func (x *FlushResponse) Reset() {
 	*x = FlushResponse{}
-	mi := &file_govec_v1_govec_proto_msgTypes[15]
+	mi := &file_govec_v1_govec_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -818,7 +933,7 @@ func (x *FlushResponse) String() string {
 func (*FlushResponse) ProtoMessage() {}
 
 func (x *FlushResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[15]
+	mi := &file_govec_v1_govec_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -831,10 +946,90 @@ func (x *FlushResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushResponse.ProtoReflect.Descriptor instead.
 func (*FlushResponse) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{15}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *FlushResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type ResetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetRequest) Reset() {
+	*x = ResetRequest{}
+	mi := &file_govec_v1_govec_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetRequest) ProtoMessage() {}
+
+func (x *ResetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_govec_v1_govec_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetRequest.ProtoReflect.Descriptor instead.
+func (*ResetRequest) Descriptor() ([]byte, []int) {
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{18}
+}
+
+type ResetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetResponse) Reset() {
+	*x = ResetResponse{}
+	mi := &file_govec_v1_govec_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetResponse) ProtoMessage() {}
+
+func (x *ResetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_govec_v1_govec_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetResponse.ProtoReflect.Descriptor instead.
+func (*ResetResponse) Descriptor() ([]byte, []int) {
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ResetResponse) GetStatus() string {
 	if x != nil {
 		return x.Status
 	}
@@ -849,7 +1044,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_govec_v1_govec_proto_msgTypes[16]
+	mi := &file_govec_v1_govec_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -861,7 +1056,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[16]
+	mi := &file_govec_v1_govec_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -874,7 +1069,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{16}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{20}
 }
 
 type HealthResponse struct {
@@ -886,7 +1081,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_govec_v1_govec_proto_msgTypes[17]
+	mi := &file_govec_v1_govec_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +1093,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_govec_v1_govec_proto_msgTypes[17]
+	mi := &file_govec_v1_govec_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +1106,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_govec_v1_govec_proto_rawDescGZIP(), []int{17}
+	return file_govec_v1_govec_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HealthResponse) GetStatus() string {
@@ -967,7 +1162,17 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"8\n" +
 	"\x0eDeleteResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\" \n" +
+	"\x0eGetByIDRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x87\x02\n" +
+	"\x0fGetByIDResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\x06vector\x18\x02 \x03(\x02B\x02\x10\x01R\x06vector\x12.\n" +
+	"\x06sparse\x18\x03 \x01(\v2\x16.govec.v1.SparseVectorR\x06sparse\x12C\n" +
+	"\bmetadata\x18\x04 \x03(\v2'.govec.v1.GetByIDResponse.MetadataEntryR\bmetadata\x1aS\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x0e\n" +
 	"\fStatsRequest\"2\n" +
 	"\rStatsResponse\x12!\n" +
 	"\fvector_count\x18\x01 \x01(\x05R\vvectorCount\"\r\n" +
@@ -985,18 +1190,23 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"enableMmap\"\x0e\n" +
 	"\fFlushRequest\"'\n" +
 	"\rFlushResponse\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\"\x0e\n" +
+	"\fResetRequest\"'\n" +
+	"\rResetResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\"\x0f\n" +
 	"\rHealthRequest\"(\n" +
 	"\x0eHealthResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status2\xf6\x03\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status2\xf0\x04\n" +
 	"\fGoVecService\x12;\n" +
 	"\x06Insert\x12\x17.govec.v1.InsertRequest\x1a\x18.govec.v1.InsertResponse\x12G\n" +
 	"\vBatchInsert\x12\x17.govec.v1.InsertRequest\x1a\x1d.govec.v1.BatchInsertResponse(\x01\x12;\n" +
 	"\x06Search\x12\x17.govec.v1.SearchRequest\x1a\x18.govec.v1.SearchResponse\x12;\n" +
-	"\x06Delete\x12\x17.govec.v1.DeleteRequest\x1a\x18.govec.v1.DeleteResponse\x128\n" +
+	"\x06Delete\x12\x17.govec.v1.DeleteRequest\x1a\x18.govec.v1.DeleteResponse\x12>\n" +
+	"\aGetByID\x12\x18.govec.v1.GetByIDRequest\x1a\x19.govec.v1.GetByIDResponse\x128\n" +
 	"\x05Stats\x12\x16.govec.v1.StatsRequest\x1a\x17.govec.v1.StatsResponse\x125\n" +
 	"\x04Info\x12\x15.govec.v1.InfoRequest\x1a\x16.govec.v1.InfoResponse\x128\n" +
-	"\x05Flush\x12\x16.govec.v1.FlushRequest\x1a\x17.govec.v1.FlushResponse\x12;\n" +
+	"\x05Flush\x12\x16.govec.v1.FlushRequest\x1a\x17.govec.v1.FlushResponse\x128\n" +
+	"\x05Reset\x12\x16.govec.v1.ResetRequest\x1a\x17.govec.v1.ResetResponse\x12;\n" +
 	"\x06Health\x12\x17.govec.v1.HealthRequest\x1a\x18.govec.v1.HealthResponseB2Z0github.com/Pradyothsp/govec/gen/govec/v1;govecv1b\x06proto3"
 
 var (
@@ -1011,7 +1221,7 @@ func file_govec_v1_govec_proto_rawDescGZIP() []byte {
 	return file_govec_v1_govec_proto_rawDescData
 }
 
-var file_govec_v1_govec_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_govec_v1_govec_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_govec_v1_govec_proto_goTypes = []any{
 	(*SparseVector)(nil),        // 0: govec.v1.SparseVector
 	(*InsertRequest)(nil),       // 1: govec.v1.InsertRequest
@@ -1023,51 +1233,63 @@ var file_govec_v1_govec_proto_goTypes = []any{
 	(*SearchResponse)(nil),      // 7: govec.v1.SearchResponse
 	(*DeleteRequest)(nil),       // 8: govec.v1.DeleteRequest
 	(*DeleteResponse)(nil),      // 9: govec.v1.DeleteResponse
-	(*StatsRequest)(nil),        // 10: govec.v1.StatsRequest
-	(*StatsResponse)(nil),       // 11: govec.v1.StatsResponse
-	(*InfoRequest)(nil),         // 12: govec.v1.InfoRequest
-	(*InfoResponse)(nil),        // 13: govec.v1.InfoResponse
-	(*FlushRequest)(nil),        // 14: govec.v1.FlushRequest
-	(*FlushResponse)(nil),       // 15: govec.v1.FlushResponse
-	(*HealthRequest)(nil),       // 16: govec.v1.HealthRequest
-	(*HealthResponse)(nil),      // 17: govec.v1.HealthResponse
-	nil,                         // 18: govec.v1.InsertRequest.MetadataEntry
-	nil,                         // 19: govec.v1.SearchRequest.FiltersEntry
-	nil,                         // 20: govec.v1.SearchResult.MetaEntry
-	(*structpb.Value)(nil),      // 21: google.protobuf.Value
+	(*GetByIDRequest)(nil),      // 10: govec.v1.GetByIDRequest
+	(*GetByIDResponse)(nil),     // 11: govec.v1.GetByIDResponse
+	(*StatsRequest)(nil),        // 12: govec.v1.StatsRequest
+	(*StatsResponse)(nil),       // 13: govec.v1.StatsResponse
+	(*InfoRequest)(nil),         // 14: govec.v1.InfoRequest
+	(*InfoResponse)(nil),        // 15: govec.v1.InfoResponse
+	(*FlushRequest)(nil),        // 16: govec.v1.FlushRequest
+	(*FlushResponse)(nil),       // 17: govec.v1.FlushResponse
+	(*ResetRequest)(nil),        // 18: govec.v1.ResetRequest
+	(*ResetResponse)(nil),       // 19: govec.v1.ResetResponse
+	(*HealthRequest)(nil),       // 20: govec.v1.HealthRequest
+	(*HealthResponse)(nil),      // 21: govec.v1.HealthResponse
+	nil,                         // 22: govec.v1.InsertRequest.MetadataEntry
+	nil,                         // 23: govec.v1.SearchRequest.FiltersEntry
+	nil,                         // 24: govec.v1.SearchResult.MetaEntry
+	nil,                         // 25: govec.v1.GetByIDResponse.MetadataEntry
+	(*structpb.Value)(nil),      // 26: google.protobuf.Value
 }
 var file_govec_v1_govec_proto_depIdxs = []int32{
 	0,  // 0: govec.v1.InsertRequest.sparse:type_name -> govec.v1.SparseVector
-	18, // 1: govec.v1.InsertRequest.metadata:type_name -> govec.v1.InsertRequest.MetadataEntry
+	22, // 1: govec.v1.InsertRequest.metadata:type_name -> govec.v1.InsertRequest.MetadataEntry
 	4,  // 2: govec.v1.BatchInsertResponse.errors:type_name -> govec.v1.BatchError
 	0,  // 3: govec.v1.SearchRequest.sparse_query:type_name -> govec.v1.SparseVector
-	19, // 4: govec.v1.SearchRequest.filters:type_name -> govec.v1.SearchRequest.FiltersEntry
-	20, // 5: govec.v1.SearchResult.meta:type_name -> govec.v1.SearchResult.MetaEntry
+	23, // 4: govec.v1.SearchRequest.filters:type_name -> govec.v1.SearchRequest.FiltersEntry
+	24, // 5: govec.v1.SearchResult.meta:type_name -> govec.v1.SearchResult.MetaEntry
 	6,  // 6: govec.v1.SearchResponse.results:type_name -> govec.v1.SearchResult
-	21, // 7: govec.v1.InsertRequest.MetadataEntry.value:type_name -> google.protobuf.Value
-	21, // 8: govec.v1.SearchRequest.FiltersEntry.value:type_name -> google.protobuf.Value
-	21, // 9: govec.v1.SearchResult.MetaEntry.value:type_name -> google.protobuf.Value
-	1,  // 10: govec.v1.GoVecService.Insert:input_type -> govec.v1.InsertRequest
-	1,  // 11: govec.v1.GoVecService.BatchInsert:input_type -> govec.v1.InsertRequest
-	5,  // 12: govec.v1.GoVecService.Search:input_type -> govec.v1.SearchRequest
-	8,  // 13: govec.v1.GoVecService.Delete:input_type -> govec.v1.DeleteRequest
-	10, // 14: govec.v1.GoVecService.Stats:input_type -> govec.v1.StatsRequest
-	12, // 15: govec.v1.GoVecService.Info:input_type -> govec.v1.InfoRequest
-	14, // 16: govec.v1.GoVecService.Flush:input_type -> govec.v1.FlushRequest
-	16, // 17: govec.v1.GoVecService.Health:input_type -> govec.v1.HealthRequest
-	2,  // 18: govec.v1.GoVecService.Insert:output_type -> govec.v1.InsertResponse
-	3,  // 19: govec.v1.GoVecService.BatchInsert:output_type -> govec.v1.BatchInsertResponse
-	7,  // 20: govec.v1.GoVecService.Search:output_type -> govec.v1.SearchResponse
-	9,  // 21: govec.v1.GoVecService.Delete:output_type -> govec.v1.DeleteResponse
-	11, // 22: govec.v1.GoVecService.Stats:output_type -> govec.v1.StatsResponse
-	13, // 23: govec.v1.GoVecService.Info:output_type -> govec.v1.InfoResponse
-	15, // 24: govec.v1.GoVecService.Flush:output_type -> govec.v1.FlushResponse
-	17, // 25: govec.v1.GoVecService.Health:output_type -> govec.v1.HealthResponse
-	18, // [18:26] is the sub-list for method output_type
-	10, // [10:18] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 7: govec.v1.GetByIDResponse.sparse:type_name -> govec.v1.SparseVector
+	25, // 8: govec.v1.GetByIDResponse.metadata:type_name -> govec.v1.GetByIDResponse.MetadataEntry
+	26, // 9: govec.v1.InsertRequest.MetadataEntry.value:type_name -> google.protobuf.Value
+	26, // 10: govec.v1.SearchRequest.FiltersEntry.value:type_name -> google.protobuf.Value
+	26, // 11: govec.v1.SearchResult.MetaEntry.value:type_name -> google.protobuf.Value
+	26, // 12: govec.v1.GetByIDResponse.MetadataEntry.value:type_name -> google.protobuf.Value
+	1,  // 13: govec.v1.GoVecService.Insert:input_type -> govec.v1.InsertRequest
+	1,  // 14: govec.v1.GoVecService.BatchInsert:input_type -> govec.v1.InsertRequest
+	5,  // 15: govec.v1.GoVecService.Search:input_type -> govec.v1.SearchRequest
+	8,  // 16: govec.v1.GoVecService.Delete:input_type -> govec.v1.DeleteRequest
+	10, // 17: govec.v1.GoVecService.GetByID:input_type -> govec.v1.GetByIDRequest
+	12, // 18: govec.v1.GoVecService.Stats:input_type -> govec.v1.StatsRequest
+	14, // 19: govec.v1.GoVecService.Info:input_type -> govec.v1.InfoRequest
+	16, // 20: govec.v1.GoVecService.Flush:input_type -> govec.v1.FlushRequest
+	18, // 21: govec.v1.GoVecService.Reset:input_type -> govec.v1.ResetRequest
+	20, // 22: govec.v1.GoVecService.Health:input_type -> govec.v1.HealthRequest
+	2,  // 23: govec.v1.GoVecService.Insert:output_type -> govec.v1.InsertResponse
+	3,  // 24: govec.v1.GoVecService.BatchInsert:output_type -> govec.v1.BatchInsertResponse
+	7,  // 25: govec.v1.GoVecService.Search:output_type -> govec.v1.SearchResponse
+	9,  // 26: govec.v1.GoVecService.Delete:output_type -> govec.v1.DeleteResponse
+	11, // 27: govec.v1.GoVecService.GetByID:output_type -> govec.v1.GetByIDResponse
+	13, // 28: govec.v1.GoVecService.Stats:output_type -> govec.v1.StatsResponse
+	15, // 29: govec.v1.GoVecService.Info:output_type -> govec.v1.InfoResponse
+	17, // 30: govec.v1.GoVecService.Flush:output_type -> govec.v1.FlushResponse
+	19, // 31: govec.v1.GoVecService.Reset:output_type -> govec.v1.ResetResponse
+	21, // 32: govec.v1.GoVecService.Health:output_type -> govec.v1.HealthResponse
+	23, // [23:33] is the sub-list for method output_type
+	13, // [13:23] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_govec_v1_govec_proto_init() }
@@ -1081,7 +1303,7 @@ func file_govec_v1_govec_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_govec_v1_govec_proto_rawDesc), len(file_govec_v1_govec_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

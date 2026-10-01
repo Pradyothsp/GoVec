@@ -4,12 +4,14 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/grpcserver/convert"
 	"github.com/Pradyothsp/govec/internal/index"
 )
@@ -114,6 +116,37 @@ func (s *GoVecServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.De
 	return &pb.DeleteResponse{Status: "ok", Id: req.Id}, nil
 }
 
+// GetByID returns the full stored record for a vector, mirroring REST's
+// GET /api/v1/vectors/:id.
+func (s *GoVecServer) GetByID(ctx context.Context, req *pb.GetByIDRequest) (*pb.GetByIDResponse, error) {
+	if req.Id == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+
+	record, err := s.engine.GetByID(ctx, req.Id)
+	if err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "vector %q not found", req.Id)
+		}
+		return nil, status.Errorf(codes.Internal, "get by id failed: %v", err)
+	}
+
+	// Unlike Search, which drops unconvertible metadata keys to keep a result
+	// set flowing, a single-record fetch has no reason to hand back a record
+	// that quietly lost fields.
+	meta, err := convert.MetaToProto(record.Metadata)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "metadata conversion failed: %v", err)
+	}
+
+	return &pb.GetByIDResponse{
+		Id:       record.ID,
+		Vector:   record.Vector,
+		Sparse:   convert.SparseToProto(record.SparseVector),
+		Metadata: meta,
+	}, nil
+}
+
 // Stats returns the current vector count.
 func (s *GoVecServer) Stats(_ context.Context, _ *pb.StatsRequest) (*pb.StatsResponse, error) {
 	return &pb.StatsResponse{VectorCount: int32(s.engine.Len())}, nil //nolint:gosec // vector count fits in int32
@@ -138,6 +171,14 @@ func (s *GoVecServer) Flush(ctx context.Context, _ *pb.FlushRequest) (*pb.FlushR
 		return nil, status.Errorf(codes.Internal, "flush failed: %v", err)
 	}
 	return &pb.FlushResponse{Status: "ok"}, nil
+}
+
+// Reset clears every vector from the index, mirroring REST's
+// POST /api/v1/admin/reset. Like the REST endpoint it only clears memory and
+// the WAL -- call Flush afterward if the empty state should survive a restart.
+func (s *GoVecServer) Reset(_ context.Context, _ *pb.ResetRequest) (*pb.ResetResponse, error) {
+	s.engine.Clear()
+	return &pb.ResetResponse{Status: "ok"}, nil
 }
 
 // Health returns a static "ok" response — no engine interaction required.
