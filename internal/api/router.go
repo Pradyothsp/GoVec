@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -34,7 +33,6 @@ func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
 
 	v1 := r.Group("api/v1")
 	v1.Use(middleware.BearerAuth(apiKey))
-	v1.Use(middleware.Timeout(30 * time.Second))
 
 	v1.POST("/vectors", vecHandler.Insert)
 	v1.POST("/vectors/batch", vecHandler.BatchInsert)
