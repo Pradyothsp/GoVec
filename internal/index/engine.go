@@ -72,16 +72,44 @@ type BatchInsertError struct {
 }
 
 // VectorRecord holds the full stored data for a vector, returned by GetByID.
+//
+// sparse_vector and metadata are omitted from the JSON when the record has
+// none, rather than sent as null -- an absent field means absent, and callers
+// can test for the key.
+//
+// SparseVector is a pointer for exactly that reason: encoding/json honours
+// omitempty for pointers, maps and slices but silently ignores it on a struct
+// value, which this field used to be. Every dense-only record therefore went
+// out as {"sparse_vector":{"indices":null,"values":null}}, claiming a sparse
+// component that was not there. Build the field with sparseOrNil, never by
+// taking the address of a stored node's Sparse.
 type VectorRecord struct {
 	ID           string                 `json:"id" example:"vec-001"`
 	Vector       []float32              `json:"vector" swaggertype:"array,number"`
-	SparseVector core.SparseVector      `json:"sparse_vector,omitempty" swaggertype:"object"`
+	SparseVector *core.SparseVector     `json:"sparse_vector,omitempty" swaggertype:"object"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty" swaggertype:"object"`
 }
 
-// SearchResult represents a single search result with score and metadata
+// sparseOrNil returns a pointer to sv, or nil when sv holds nothing, so that a
+// dense-only VectorRecord omits sparse_vector from its JSON entirely.
+//
+// sv is taken by value, so the pointer is to the copy. Returning &node.Sparse
+// instead would hand a caller a path back into stored index state.
+func sparseOrNil(sv core.SparseVector) *core.SparseVector {
+	if sv.IsEmpty() {
+		return nil
+	}
+
+	return &sv
+}
+
+// SearchResult represents a single search result with score and metadata.
+//
+// meta is omitted when the vector carries no metadata, matching
+// VectorRecord.Metadata. It previously had no omitempty at all, so every
+// result in every response ended with "meta":null.
 type SearchResult struct {
 	ID    string                 `json:"id" example:"vec-001"`
 	Score float32                `json:"score" example:"0.97"`
-	Meta  map[string]interface{} `json:"meta" swaggertype:"object"`
+	Meta  map[string]interface{} `json:"meta,omitempty" swaggertype:"object"`
 }
