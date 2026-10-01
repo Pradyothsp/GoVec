@@ -24,9 +24,11 @@ const (
 	GoVecService_BatchInsert_FullMethodName = "/govec.v1.GoVecService/BatchInsert"
 	GoVecService_Search_FullMethodName      = "/govec.v1.GoVecService/Search"
 	GoVecService_Delete_FullMethodName      = "/govec.v1.GoVecService/Delete"
+	GoVecService_GetByID_FullMethodName     = "/govec.v1.GoVecService/GetByID"
 	GoVecService_Stats_FullMethodName       = "/govec.v1.GoVecService/Stats"
 	GoVecService_Info_FullMethodName        = "/govec.v1.GoVecService/Info"
 	GoVecService_Flush_FullMethodName       = "/govec.v1.GoVecService/Flush"
+	GoVecService_Reset_FullMethodName       = "/govec.v1.GoVecService/Reset"
 	GoVecService_Health_FullMethodName      = "/govec.v1.GoVecService/Health"
 )
 
@@ -38,9 +40,11 @@ type GoVecServiceClient interface {
 	BatchInsert(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[InsertRequest, BatchInsertResponse], error)
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
+	GetByID(ctx context.Context, in *GetByIDRequest, opts ...grpc.CallOption) (*GetByIDResponse, error)
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error)
 	Info(ctx context.Context, in *InfoRequest, opts ...grpc.CallOption) (*InfoResponse, error)
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
+	Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (*ResetResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
@@ -95,6 +99,16 @@ func (c *goVecServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts
 	return out, nil
 }
 
+func (c *goVecServiceClient) GetByID(ctx context.Context, in *GetByIDRequest, opts ...grpc.CallOption) (*GetByIDResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetByIDResponse)
+	err := c.cc.Invoke(ctx, GoVecService_GetByID_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *goVecServiceClient) Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StatsResponse)
@@ -125,6 +139,16 @@ func (c *goVecServiceClient) Flush(ctx context.Context, in *FlushRequest, opts .
 	return out, nil
 }
 
+func (c *goVecServiceClient) Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (*ResetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetResponse)
+	err := c.cc.Invoke(ctx, GoVecService_Reset_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *goVecServiceClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HealthResponse)
@@ -143,9 +167,11 @@ type GoVecServiceServer interface {
 	BatchInsert(grpc.ClientStreamingServer[InsertRequest, BatchInsertResponse]) error
 	Search(context.Context, *SearchRequest) (*SearchResponse, error)
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
+	GetByID(context.Context, *GetByIDRequest) (*GetByIDResponse, error)
 	Stats(context.Context, *StatsRequest) (*StatsResponse, error)
 	Info(context.Context, *InfoRequest) (*InfoResponse, error)
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
+	Reset(context.Context, *ResetRequest) (*ResetResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 }
 
@@ -168,6 +194,9 @@ func (UnimplementedGoVecServiceServer) Search(context.Context, *SearchRequest) (
 func (UnimplementedGoVecServiceServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
 }
+func (UnimplementedGoVecServiceServer) GetByID(context.Context, *GetByIDRequest) (*GetByIDResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetByID not implemented")
+}
 func (UnimplementedGoVecServiceServer) Stats(context.Context, *StatsRequest) (*StatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Stats not implemented")
 }
@@ -176,6 +205,9 @@ func (UnimplementedGoVecServiceServer) Info(context.Context, *InfoRequest) (*Inf
 }
 func (UnimplementedGoVecServiceServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Flush not implemented")
+}
+func (UnimplementedGoVecServiceServer) Reset(context.Context, *ResetRequest) (*ResetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Reset not implemented")
 }
 func (UnimplementedGoVecServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
@@ -261,6 +293,24 @@ func _GoVecService_Delete_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GoVecService_GetByID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetByIDRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GoVecServiceServer).GetByID(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GoVecService_GetByID_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GoVecServiceServer).GetByID(ctx, req.(*GetByIDRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GoVecService_Stats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StatsRequest)
 	if err := dec(in); err != nil {
@@ -315,6 +365,24 @@ func _GoVecService_Flush_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GoVecService_Reset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GoVecServiceServer).Reset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GoVecService_Reset_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GoVecServiceServer).Reset(ctx, req.(*ResetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GoVecService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HealthRequest)
 	if err := dec(in); err != nil {
@@ -353,6 +421,10 @@ var GoVecService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _GoVecService_Delete_Handler,
 		},
 		{
+			MethodName: "GetByID",
+			Handler:    _GoVecService_GetByID_Handler,
+		},
+		{
 			MethodName: "Stats",
 			Handler:    _GoVecService_Stats_Handler,
 		},
@@ -363,6 +435,10 @@ var GoVecService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Flush",
 			Handler:    _GoVecService_Flush_Handler,
+		},
+		{
+			MethodName: "Reset",
+			Handler:    _GoVecService_Reset_Handler,
 		},
 		{
 			MethodName: "Health",

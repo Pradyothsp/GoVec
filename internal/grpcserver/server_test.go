@@ -219,6 +219,111 @@ func (s *GoVecServerSuite) TestDelete_NotFound() {
 	assert.Equal(s.T(), codes.NotFound, status.Code(err))
 }
 
+// --- GetByID ---
+
+func (s *GoVecServerSuite) TestGetByID_HappyPath() {
+	meta := map[string]*structpb.Value{
+		"label": structpb.NewStringValue("stored"),
+	}
+	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:       "fetch-me",
+		Vector:   []float32{1.0, 2.0, 3.0},
+		Metadata: meta,
+		Sparse:   &pb.SparseVector{Indices: []uint32{0, 2}, Values: []float32{0.5, 0.25}},
+	})
+	require.NoError(s.T(), err)
+
+	resp, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "fetch-me"})
+
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), "fetch-me", resp.Id)
+	assert.Equal(s.T(), []float32{1.0, 2.0, 3.0}, resp.Vector)
+	assert.Equal(s.T(), "stored", resp.Metadata["label"].GetStringValue())
+	require.NotNil(s.T(), resp.Sparse, "a stored sparse vector must come back")
+	assert.Equal(s.T(), []uint32{0, 2}, resp.Sparse.Indices)
+}
+
+// A record with no sparse vector must not carry an empty message back --
+// SparseToProto returns nil for that case and this pins it over the wire.
+func (s *GoVecServerSuite) TestGetByID_OmitsEmptySparse() {
+	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:     "dense-only",
+		Vector: []float32{1.0, 2.0, 3.0},
+	})
+	require.NoError(s.T(), err)
+
+	resp, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "dense-only"})
+
+	require.NoError(s.T(), err)
+	assert.Nil(s.T(), resp.Sparse)
+}
+
+func (s *GoVecServerSuite) TestGetByID_NotFound() {
+	_, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "nonexistent"})
+	require.Error(s.T(), err)
+	assert.Equal(s.T(), codes.NotFound, status.Code(err))
+}
+
+func (s *GoVecServerSuite) TestGetByID_MissingID() {
+	_, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{})
+	require.Error(s.T(), err)
+	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
+}
+
+// --- Reset ---
+
+func (s *GoVecServerSuite) TestReset_ClearsEveryVector() {
+	for _, id := range []string{"r1", "r2"} {
+		_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
+			Id:     id,
+			Vector: []float32{1.0, 2.0, 3.0},
+		})
+		require.NoError(s.T(), err)
+	}
+	before, err := s.client.Stats(context.Background(), &pb.StatsRequest{})
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), int32(2), before.VectorCount)
+
+	resp, err := s.client.Reset(context.Background(), &pb.ResetRequest{})
+
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), "ok", resp.Status)
+
+	after, err := s.client.Stats(context.Background(), &pb.StatsRequest{})
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), int32(0), after.VectorCount)
+
+	_, err = s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "r1"})
+	assert.Equal(s.T(), codes.NotFound, status.Code(err), "a cleared vector must not be fetchable")
+}
+
+// Reset must leave the index usable, not just empty -- clearing the ID mapper
+// and then inserting again is where a half-finished Clear would show up.
+func (s *GoVecServerSuite) TestReset_IndexStillUsableAfterwards() {
+	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:     "before-reset",
+		Vector: []float32{1.0, 2.0, 3.0},
+	})
+	require.NoError(s.T(), err)
+
+	_, err = s.client.Reset(context.Background(), &pb.ResetRequest{})
+	require.NoError(s.T(), err)
+
+	_, err = s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:     "after-reset",
+		Vector: []float32{3.0, 2.0, 1.0},
+	})
+	require.NoError(s.T(), err)
+
+	found, err := s.client.Search(context.Background(), &pb.SearchRequest{
+		QueryVector: []float32{3.0, 2.0, 1.0},
+		K:           5,
+	})
+	require.NoError(s.T(), err)
+	require.Len(s.T(), found.Results, 1)
+	assert.Equal(s.T(), "after-reset", found.Results[0].Id)
+}
+
 // --- Stats ---
 
 func (s *GoVecServerSuite) TestStats() {
