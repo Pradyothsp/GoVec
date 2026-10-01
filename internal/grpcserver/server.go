@@ -99,6 +99,10 @@ func (s *GoVecServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.Se
 	filters := convert.ProtoToMeta(req.Filters)
 	results, err := s.engine.Search(ctx, req.QueryVector, sparse, int(req.K), filters)
 	if err != nil {
+		// A query the index can't compare is the caller's mistake.
+		if index.IsInvalidVectorError(err) {
+			return nil, status.Errorf(codes.InvalidArgument, "search failed: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "search failed: %v", err)
 	}
 	return &pb.SearchResponse{Results: convert.SearchResultsToProto(results)}, nil

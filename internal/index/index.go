@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -222,8 +221,12 @@ func (idx *VectorIndex[T]) Search(_ context.Context, query []float32, sparseQuer
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	if len(query) == 0 {
-		return nil, errors.New("empty query vector")
+	// A query of the wrong width can't be compared against anything stored,
+	// and the comparison functions report that as a bare "vector dimensions
+	// mismatch" from deep inside the scan. Checking here names the required
+	// width, classifies the failure as the caller's, and skips the scan.
+	if err := validateVectorDims(query, idx.dimensions); err != nil {
+		return nil, err
 	}
 
 	// Encode query to storage format

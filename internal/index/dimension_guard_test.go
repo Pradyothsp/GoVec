@@ -148,3 +148,49 @@ func TestBatchInsert_DimensionMismatch_RejectsOnlyTheBadItem(t *testing.T) {
 	require.NoError(t, searchErr, "search must survive a partially-rejected batch")
 	assert.Len(t, results, 2)
 }
+
+// Search had the same defect Insert did: a wrong-width query reached the
+// similarity loop and surfaced a bare "vector dimensions mismatch" that named
+// neither the width supplied nor the width required.
+func TestSearch_DimensionMismatch_IsRejectedWithTheRequiredWidth(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+
+	require.NoError(t, idx.Insert(ctx, "good", []float32{1, 2, 3}, core.SparseVector{}, nil))
+
+	_, err := idx.Search(ctx, []float32{1, 2}, core.SparseVector{}, 1, nil)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDimensionMismatch)
+	assert.Contains(t, err.Error(), "index requires 3")
+}
+
+// The HNSW engine short-circuits on an empty graph, so the guard has to run
+// before that or the two engines disagree on the same bad query.
+func TestHNSWSearch_DimensionMismatch_IsRejectedEvenWhenTheGraphIsEmpty(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestHNSWIndex(t)
+
+	require.NoError(t, idx.Insert(ctx, "good", []float32{1, 2, 3}, core.SparseVector{}, nil))
+	_, err := idx.Search(ctx, []float32{1, 2}, core.SparseVector{}, 1, nil)
+	require.Error(t, err, "a 2-d query must not be run against a 3-d graph")
+	assert.ErrorIs(t, err, ErrDimensionMismatch)
+
+	empty := newTestHNSWIndex(t)
+	empty.dimensions = 3
+	_, emptyErr := empty.Search(ctx, []float32{1, 2}, core.SparseVector{}, 1, nil)
+	assert.ErrorIs(t, emptyErr, ErrDimensionMismatch,
+		"an empty graph must not swallow a query it could never have matched")
+}
+
+// A query against an index with no width yet is unconstrained -- there is
+// nothing to disagree with -- and must not start erroring.
+func TestSearch_IndexWithNoWidthYet_AcceptsAnyQuery(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+
+	results, err := idx.Search(ctx, []float32{1, 2, 3, 4, 5}, core.SparseVector{}, 1, nil)
+
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}

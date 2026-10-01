@@ -225,6 +225,14 @@ func (h *VectorHandler) Search(c *gin.Context) {
 
 	results, err := h.Engine.Search(c.Request.Context(), req.Vector, sparse, req.K, req.Filters)
 	if err != nil {
+		// Same rule as Insert: a query the index can't compare is a bad
+		// request, not a server fault. It matters more here -- search is the
+		// call clients make in a loop.
+		if index.IsInvalidVectorError(err) {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Int("k", req.K).Msg("failed to search vectors")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return

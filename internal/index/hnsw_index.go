@@ -350,8 +350,11 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	if len(query) == 0 {
-		return nil, errors.New("empty query vector")
+	// Checked before the empty-graph short-circuit below so both engines
+	// reject a bad query identically, rather than one erroring and the other
+	// quietly returning no results.
+	if err := validateVectorDims(query, idx.dimensions); err != nil {
+		return nil, err
 	}
 
 	if idx.graph.Len() == 0 {
