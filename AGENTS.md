@@ -104,10 +104,14 @@ engine:
   distance_metric: "cosine" # "cosine" or "euclidean"
 ```
 
-### Key Environment Variables
-- `GOVEC_SERVER_PORT`
-- `GOVEC_QUANTIZATION`
-- `GOVEC_AUTO_SAVE_ENABLED`
+### Environment Variables
+Every field in `Config` has a `GOVEC_*` override — see `internal/config/loader.go` for the
+full list and README.md for it grouped by section. The name is `GOVEC_` plus the YAML key
+(`storage.wal_path` → `GOVEC_WAL_PATH`), with the section included only where the key alone
+would be ambiguous (`GOVEC_SERVER_PORT` vs `GOVEC_GRPC_PORT`).
+
+**Adding a config field means adding its override too.** `TestLoadFromEnv_EveryFieldHasAnOverride`
+fails if you don't. The readers live in `internal/config/env.go`, so it is one line.
 
 ## Current State & Roadmap
 

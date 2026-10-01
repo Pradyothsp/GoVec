@@ -80,13 +80,25 @@ GOVEC_AUTO_SAVE_ENABLED=false task run
 GOVEC_CONFIG_PATH=./custom.yaml task run
 ```
 
-**Available environment variables:**
-- `GOVEC_SERVER_PORT` - Server port (default: 8000)
-- `GOVEC_STORAGE_PATH` - Data file path (default: ./govec_data.bin)
-- `GOVEC_AUTO_SAVE_ENABLED` - Enable/disable auto-save (default: true)
-- `GOVEC_AUTO_SAVE_INTERVAL` - Auto-save interval (default: 60s)
+**Environment variables**
 
-See `config.example.yaml` for all available options.
+Every field in `config.yaml` has one, so the server can be configured without
+mounting a config file at all. The name is `GOVEC_` plus the YAML key — `storage.wal_path`
+is `GOVEC_WAL_PATH` — with the section included only where the key alone would be
+ambiguous (`GOVEC_SERVER_PORT` vs `GOVEC_GRPC_PORT`). An unset or empty variable leaves
+the configured value alone; one that can't be parsed logs a warning and keeps it.
+
+| | |
+|---|---|
+| **Server** | `GOVEC_SERVER_HOST` `GOVEC_SERVER_PORT` `GOVEC_SHUTDOWN_TIMEOUT` `GOVEC_READ_HEADER_TIMEOUT` `GOVEC_API_KEY` `GOVEC_LOG_LEVEL` `GOVEC_PPROF_ENABLED` `GOVEC_PPROF_ADDR` |
+| **Storage** | `GOVEC_DATA_PATH` `GOVEC_WAL_PATH` `GOVEC_AUTO_SAVE_ENABLED` `GOVEC_AUTO_SAVE_INTERVAL` `GOVEC_ENABLE_MMAP` `GOVEC_MMAP_STORE_PATH` |
+| **Engine** | `GOVEC_INDEX_TYPE` `GOVEC_QUANTIZATION` `GOVEC_DISTANCE_METRIC` `GOVEC_DIMENSIONS` `GOVEC_ENABLE_HYBRID_SEARCH` `GOVEC_ENABLE_METADATA_INDEX` |
+| **HNSW** | `GOVEC_HNSW_M` `GOVEC_HNSW_EF_SEARCH` `GOVEC_HNSW_EF_CONSTRUCTION` `GOVEC_HNSW_BATCH_PARALLELISM` `GOVEC_HNSW_BATCH_PARALLEL_THRESHOLD` |
+| **gRPC** | `GOVEC_GRPC_ENABLED` `GOVEC_GRPC_PORT` `GOVEC_GRPC_MAX_RECV_MSG_SIZE_MB` |
+
+`GOVEC_CONFIG_PATH` selects the config file itself, so it is read before any of the above.
+
+See `config.example.yaml` for what each option does and its default.
 
 ### Building
 
