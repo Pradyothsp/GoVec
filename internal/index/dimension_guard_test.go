@@ -194,3 +194,61 @@ func TestSearch_IndexWithNoWidthYet_AcceptsAnyQuery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
+
+// Reset wipes the index; a width it merely learned from the first insert has
+// nothing left to be consistent with. Keeping it left an *empty* index
+// rejecting every vector of a different size, so switching embedding models
+// after a reset needed a server restart.
+func TestClear_LearnedWidth_IsReleased(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+
+	require.NoError(t, idx.Insert(ctx, "three", []float32{1, 2, 3}, core.SparseVector{}, nil))
+	require.Equal(t, 3, idx.Info().Dimensions)
+
+	idx.Clear()
+
+	assert.Equal(t, 0, idx.Info().Dimensions, "a cleared index reports no width")
+	assert.NoError(t, idx.Insert(ctx, "five", []float32{1, 2, 3, 4, 5}, core.SparseVector{}, nil),
+		"an empty index must accept a vector of any width")
+}
+
+// A width the operator set in config is not the index's to forget -- mmap
+// sizing depends on it, and it is the whole point of setting it.
+func TestClear_ConfiguredWidth_Survives(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	idx.dimensions = 3
+	idx.configuredDimensions = 3
+
+	idx.Clear()
+
+	assert.Equal(t, 3, idx.Info().Dimensions)
+	assert.Error(t, idx.Insert(ctx, "five", []float32{1, 2, 3, 4, 5}, core.SparseVector{}, nil),
+		"a configured width still binds after a reset")
+}
+
+func TestHNSWClear_LearnedWidth_IsReleased(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestHNSWIndex(t)
+
+	require.NoError(t, idx.Insert(ctx, "three", []float32{1, 2, 3}, core.SparseVector{}, nil))
+	require.Equal(t, 3, idx.Info().Dimensions)
+
+	idx.Clear()
+
+	assert.Equal(t, 0, idx.Info().Dimensions)
+	assert.NoError(t, idx.Insert(ctx, "five", []float32{1, 2, 3, 4, 5}, core.SparseVector{}, nil))
+}
+
+func TestHNSWClear_ConfiguredWidth_Survives(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestHNSWIndex(t)
+	idx.dimensions = 3
+	idx.configuredDimensions = 3
+
+	idx.Clear()
+
+	assert.Equal(t, 3, idx.Info().Dimensions)
+	assert.Error(t, idx.Insert(ctx, "five", []float32{1, 2, 3, 4, 5}, core.SparseVector{}, nil))
+}

@@ -26,6 +26,10 @@ type VectorIndex[T any] struct {
 	indexType      string
 	distanceMetric string
 	dimensions     int // 0 until first insert; set lazily under mu.Lock()
+	// configuredDimensions is engine.dimensions from config, 0 when unset.
+	// Kept apart from dimensions so Clear can tell a width the operator chose
+	// from one the index happened to learn, and release only the latter.
+	configuredDimensions int
 
 	mu           sync.RWMutex
 	wal          *WAL
@@ -424,6 +428,12 @@ func (idx *VectorIndex[T]) Clear() {
 			log.Error().Err(err).Msg("failed to clear WAL")
 		}
 	}
+
+	// An empty index has no width to enforce. Keeping a learned one here left
+	// a reset index rejecting every vector of a different size -- so clearing
+	// to start over with different embeddings needed a server restart. A
+	// configured width is the operator's choice and survives.
+	idx.dimensions = idx.configuredDimensions
 }
 
 // Len returns the number of vectors in the index

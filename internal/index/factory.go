@@ -79,6 +79,7 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 		idx.indexType = "brute"
 		idx.distanceMetric = string(cfg.DistanceMetric)
 		idx.dimensions = cfg.Dimensions
+		idx.configuredDimensions = cfg.Dimensions
 		return idx, nil
 
 	case config.QuantizationNone:
@@ -89,6 +90,7 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 		idx.indexType = "brute"
 		idx.distanceMetric = string(cfg.DistanceMetric)
 		idx.dimensions = cfg.Dimensions
+		idx.configuredDimensions = cfg.Dimensions
 		return idx, nil
 
 	default:
@@ -204,6 +206,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)
 		idx.dimensions = cfg.Dimensions
+		idx.configuredDimensions = cfg.Dimensions
 		return idx, nil
 	}
 
@@ -225,6 +228,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		idx.indexType = "hnsw"
 		idx.distanceMetric = string(cfg.DistanceMetric)
 		idx.dimensions = cfg.Dimensions
+		idx.configuredDimensions = cfg.Dimensions
 		return idx, nil
 	}
 
