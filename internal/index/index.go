@@ -66,7 +66,7 @@ func (idx *VectorIndex[T]) GetByID(_ context.Context, id string) (*VectorRecord,
 	return &VectorRecord{
 		ID:           node.ExternalID,
 		Vector:       vec,
-		SparseVector: node.Sparse,
+		SparseVector: sparseOrNil(node.Sparse),
 		Metadata:     node.Metadata,
 	}, nil
 }

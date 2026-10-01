@@ -361,6 +361,66 @@ func TestGetByID_Success(t *testing.T) {
 	assert.Equal(t, meta["id"], rawMeta["id"])
 }
 
+// TestGetByID_DenseOnlyRecord_ReportsNoSparseComponent checks the response body
+// text, not the decoded struct.
+//
+// A dense-only record used to come back with
+// "sparse_vector":{"indices":null,"values":null} -- the field claiming to be
+// present and empty rather than being absent. TestGetByID_Success above passes
+// either way, because it only inspects the keys it names. The govec-python SDK
+// did not: it built a SparseVector from those nulls and raised ValueError on
+// every dense-only record.
+func TestGetByID_DenseOnlyRecord_ReportsNoSparseComponent(t *testing.T) {
+	index := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(index)
+
+	_, vec, meta := testutil.CreateTestVector("dense-only", 3)
+	_ = index.Insert(context.Background(), "dense-only", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
+
+	router := gin.New()
+	router.GET("/vectors/:id", handler.GetByID)
+
+	req := httptest.NewRequest("GET", "/vectors/dense-only", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "sparse_vector")
+}
+
+// TestGetByID_SparseRecord_StillReportsItsSparseComponent is the other half:
+// omitting the field must mean "there is none", not "we stopped sending it".
+func TestGetByID_SparseRecord_StillReportsItsSparseComponent(t *testing.T) {
+	index := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(index)
+
+	_, vec, meta := testutil.CreateTestVector("hybrid", 3)
+	sparse := core.SparseVector{Indices: []uint32{0, 7}, Values: []float32{0.5, 0.25}}
+	_ = index.Insert(context.Background(), "hybrid", vec, sparse, meta) //nolint:errcheck // test setup
+
+	router := gin.New()
+	router.GET("/vectors/:id", handler.GetByID)
+
+	req := httptest.NewRequest("GET", "/vectors/hybrid", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data struct {
+			SparseVector *core.SparseVector `json:"sparse_vector"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	require.NotNil(t, resp.Data.SparseVector)
+	assert.Equal(t, []uint32{0, 7}, resp.Data.SparseVector.Indices)
+	assert.Equal(t, []float32{0.5, 0.25}, resp.Data.SparseVector.Values)
+}
+
 // TestMalformedJSON verifies error handling for invalid JSON payloads
 func TestMalformedJSON(t *testing.T) {
 	index := testutil.NewTestIndex(t)
