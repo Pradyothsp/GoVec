@@ -117,7 +117,7 @@ func TestLoader_Load_WithEnvironmentVariables(t *testing.T) {
 		"GOVEC_SERVER_HOST":        "0.0.0.0",
 		"GOVEC_SERVER_PORT":        "7000",
 		"GOVEC_SHUTDOWN_TIMEOUT":   "20s",
-		"GOVEC_STORAGE_PATH":       "/custom/path.bin",
+		"GOVEC_DATA_PATH":          "/custom/path.bin",
 		"GOVEC_AUTO_SAVE_ENABLED":  "false",
 		"GOVEC_AUTO_SAVE_INTERVAL": "90s",
 	}
@@ -283,4 +283,114 @@ func TestLoader_Load_DurationParsing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoadFromEnv_EveryFieldHasAnOverride is the regression test for the gap
+// this file used to have: most fields had no GOVEC_* variable at all, and
+// nothing said which did. A deployment configured only through the
+// environment -- a container -- silently ran on defaults for whatever was
+// missing, with no error and no warning.
+//
+// Setting every variable to a non-default value and asserting it lands means
+// a new config field without an override fails here rather than in
+// production.
+func TestLoadFromEnv_EveryFieldHasAnOverride(t *testing.T) {
+	env := map[string]string{
+		"GOVEC_SERVER_HOST":                   "0.0.0.0",
+		"GOVEC_SERVER_PORT":                   "7001",
+		"GOVEC_SHUTDOWN_TIMEOUT":              "21s",
+		"GOVEC_READ_HEADER_TIMEOUT":           "22s",
+		"GOVEC_API_KEY":                       "secret",
+		"GOVEC_LOG_LEVEL":                     "debug",
+		"GOVEC_PPROF_ENABLED":                 "true",
+		"GOVEC_PPROF_ADDR":                    "localhost:6061",
+		"GOVEC_DATA_PATH":                     "/tmp/data.bin",
+		"GOVEC_WAL_PATH":                      "/tmp/govec.wal",
+		"GOVEC_AUTO_SAVE_ENABLED":             "false",
+		"GOVEC_AUTO_SAVE_INTERVAL":            "90s",
+		"GOVEC_ENABLE_MMAP":                   "true",
+		"GOVEC_MMAP_STORE_PATH":               "/tmp/mmap/",
+		"GOVEC_INDEX_TYPE":                    "hnsw",
+		"GOVEC_QUANTIZATION":                  "scalar",
+		"GOVEC_DISTANCE_METRIC":               "euclidean",
+		"GOVEC_DIMENSIONS":                    "1536",
+		"GOVEC_ENABLE_HYBRID_SEARCH":          "true",
+		"GOVEC_ENABLE_METADATA_INDEX":         "true",
+		"GOVEC_HNSW_M":                        "32",
+		"GOVEC_HNSW_EF_SEARCH":                "100",
+		"GOVEC_HNSW_EF_CONSTRUCTION":          "400",
+		"GOVEC_HNSW_BATCH_PARALLELISM":        "8",
+		"GOVEC_HNSW_BATCH_PARALLEL_THRESHOLD": "50",
+		"GOVEC_GRPC_ENABLED":                  "true",
+		"GOVEC_GRPC_PORT":                     "50052",
+		"GOVEC_GRPC_MAX_RECV_MSG_SIZE_MB":     "128",
+	}
+	for key, val := range env {
+		t.Setenv(key, val)
+	}
+
+	cfg, err := NewLoader("nonexistent.yaml").Load()
+
+	require.NoError(t, err)
+
+	assert.Equal(t, "0.0.0.0", cfg.Server.Host)
+	assert.Equal(t, 7001, cfg.Server.Port)
+	assert.Equal(t, 21*time.Second, cfg.Server.ShutdownTimeout)
+	assert.Equal(t, 22*time.Second, cfg.Server.ReadHeaderTimeout)
+	assert.Equal(t, "secret", cfg.Server.APIKey)
+	assert.Equal(t, "debug", cfg.Server.LogLevel)
+	assert.True(t, cfg.Server.PprofEnabled)
+	assert.Equal(t, "localhost:6061", cfg.Server.PprofAddr)
+
+	assert.Equal(t, "/tmp/data.bin", cfg.Storage.DataPath)
+	assert.Equal(t, "/tmp/govec.wal", cfg.Storage.WalPath)
+	assert.False(t, cfg.Storage.AutoSaveEnabled)
+	assert.Equal(t, 90*time.Second, cfg.Storage.AutoSaveInterval)
+	assert.True(t, cfg.Storage.EnableMmap)
+	assert.Equal(t, "/tmp/mmap/", cfg.Storage.MmapStorePath)
+
+	assert.Equal(t, IndexTypeHNSW, cfg.Engine.IndexType)
+	assert.Equal(t, QuantizationScalar, cfg.Engine.Quantization)
+	assert.Equal(t, DistanceMetricEuclidean, cfg.Engine.DistanceMetric)
+	assert.Equal(t, 1536, cfg.Engine.Dimensions)
+	assert.True(t, cfg.Engine.EnableHybridSearch)
+	assert.True(t, cfg.Engine.EnableMetadataIndex)
+	assert.Equal(t, 32, cfg.Engine.HnswM)
+	assert.Equal(t, 100, cfg.Engine.HnswEfSearch)
+	assert.Equal(t, 400, cfg.Engine.HnswEfConstruction)
+	assert.Equal(t, 8, cfg.Engine.HnswBatchParallelism)
+	assert.Equal(t, 50, cfg.Engine.HnswBatchParallelThreshold)
+
+	assert.True(t, cfg.GRPC.Enabled)
+	assert.Equal(t, 50052, cfg.GRPC.Port)
+	assert.Equal(t, 128, cfg.GRPC.MaxRecvMsgSizeMB)
+}
+
+// A value that does not parse must not take the process down -- refusing to
+// start over one bad variable is a worse failure for a container than running
+// on the configured default.
+func TestLoadFromEnv_UnparseableValue_KeepsThePreviousValue(t *testing.T) {
+	t.Setenv("GOVEC_SERVER_PORT", "not-a-number")
+	t.Setenv("GOVEC_AUTO_SAVE_INTERVAL", "not-a-duration")
+	t.Setenv("GOVEC_GRPC_ENABLED", "yes-please")
+
+	cfg, err := NewLoader("nonexistent.yaml").Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, DefaultConfig().Server.Port, cfg.Server.Port)
+	assert.Equal(t, DefaultConfig().Storage.AutoSaveInterval, cfg.Storage.AutoSaveInterval)
+	assert.Equal(t, DefaultConfig().GRPC.Enabled, cfg.GRPC.Enabled)
+}
+
+// An empty variable is not an instruction to blank the field -- otherwise an
+// unset-but-exported variable would silently wipe a configured value.
+func TestLoadFromEnv_EmptyValue_LeavesTheFieldAlone(t *testing.T) {
+	t.Setenv("GOVEC_DATA_PATH", "")
+	t.Setenv("GOVEC_LOG_LEVEL", "")
+
+	cfg, err := NewLoader("nonexistent.yaml").Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, DefaultConfig().Storage.DataPath, cfg.Storage.DataPath)
+	assert.Equal(t, DefaultConfig().Server.LogLevel, cfg.Server.LogLevel)
 }
