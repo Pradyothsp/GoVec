@@ -36,6 +36,10 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	indexType      string
 	distanceMetric string
 	dimensions     int // 0 until first insert; set lazily under mu.Lock()
+	// configuredDimensions is engine.dimensions from config, 0 when unset.
+	// Kept apart from dimensions so Clear can tell a width the operator chose
+	// from one the index happened to learn, and release only the latter.
+	configuredDimensions int
 
 	mu                         sync.RWMutex
 	wal                        *WAL
@@ -974,6 +978,10 @@ func (idx *HNSWIndex[T]) Clear() {
 			log.Error().Err(err).Msg("failed to clear WAL")
 		}
 	}
+
+	// See VectorIndex.Clear: an empty index has no width to enforce, so a
+	// learned one is released and a configured one kept.
+	idx.dimensions = idx.configuredDimensions
 }
 
 // Len returns the number of vectors in the HNSW index.
