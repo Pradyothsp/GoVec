@@ -567,14 +567,17 @@ func (s *APITestSuite) TestSearchValidationErrors() {
 		{
 			name:           "empty_vector",
 			payload:        map[string]interface{}{"vector": []float32{}, "k": 5},
-			expectedStatus: http.StatusInternalServerError,
-			errorContains:  "empty query vector",
+			expectedStatus: http.StatusBadRequest,
+			errorContains:  "must not be empty",
 		},
 		{
+			// The index holds a 3-d vector, so a 2-d query is the caller's
+			// mistake -- and the message has to name the width it wants,
+			// which the bare error from the similarity loop never did.
 			name:           "dimension_mismatch",
 			payload:        map[string]interface{}{"vector": []float32{1.0, 2.0}, "k": 5},
-			expectedStatus: http.StatusInternalServerError,
-			errorContains:  "dimension",
+			expectedStatus: http.StatusBadRequest,
+			errorContains:  "index requires 3",
 		},
 	}
 

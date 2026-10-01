@@ -198,6 +198,25 @@ func (s *GoVecServerSuite) TestSearch_NegativeK() {
 	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
 }
 
+// Search carried the same miscategorisation Insert did: a wrong-width query
+// came back as Internal, blaming the server for a bad request.
+func (s *GoVecServerSuite) TestSearch_DimensionMismatch() {
+	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
+		Id:     "search-width-seed",
+		Vector: []float32{1.0, 2.0, 3.0},
+	})
+	require.NoError(s.T(), err)
+
+	_, err = s.client.Search(context.Background(), &pb.SearchRequest{
+		QueryVector: []float32{1.0, 2.0},
+		K:           1,
+	})
+
+	require.Error(s.T(), err)
+	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
+	assert.Contains(s.T(), status.Convert(err).Message(), "index requires 3")
+}
+
 // --- Delete ---
 
 func (s *GoVecServerSuite) TestDelete_HappyPath() {

@@ -143,8 +143,8 @@ func TestQuery_Validation(t *testing.T) {
 			name:           "empty_vector",
 			body:           `{"vector": [], "k": 5}`,
 			contentType:    "application/json",
-			expectedStatus: http.StatusInternalServerError, // Actual error status
-			errorContains:  "",
+			expectedStatus: http.StatusBadRequest,
+			errorContains:  "must not be empty",
 		},
 		{
 			name:           "negative_k",
@@ -595,4 +595,27 @@ func TestInsert_EngineFailureStillReturns500(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// Search is the call clients make in a loop, so a wrong-width query reported
+// as a 500 is what would dominate a server's error rate. It must read as the
+// bad request it is, and say what width the index wants.
+func TestSearch_DimensionMismatchReturns400(t *testing.T) {
+	idx := testutil.NewTestIndex(t)
+	handler := NewVectorHandler(idx)
+	_, vec, _ := testutil.CreateTestVector("vec1", 3)
+	require.NoError(t, idx.Insert(context.Background(), "vec1", vec, core.SparseVector{}, nil))
+
+	router := gin.New()
+	router.POST("/query", handler.Search)
+
+	req := httptest.NewRequest("POST", "/query",
+		bytes.NewBufferString(`{"vector": [1.0, 2.0], "k": 5}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "index requires 3")
 }
