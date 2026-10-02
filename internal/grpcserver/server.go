@@ -47,7 +47,11 @@ func (s *GoVecServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.In
 		}
 		return nil, status.Errorf(codes.Internal, "insert failed: %v", err)
 	}
-	return &pb.InsertResponse{Status: "ok"}, nil
+	// "inserted", not "ok", to match what REST answers for the same call.
+	// Picking a protocol is meant to change the wire format and nothing else,
+	// and a caller testing `status == "ok"` used to pass over gRPC and fail
+	// over REST. See statusStrings in server_test.go, which pins all four.
+	return &pb.InsertResponse{Status: "inserted"}, nil
 }
 
 // BatchInsert handles a client-streaming batch of insert requests.
@@ -117,7 +121,7 @@ func (s *GoVecServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.De
 	if !found {
 		return nil, status.Errorf(codes.NotFound, "vector %q not found", req.Id)
 	}
-	return &pb.DeleteResponse{Status: "ok", Id: req.Id}, nil
+	return &pb.DeleteResponse{Status: "deleted", Id: req.Id}, nil
 }
 
 // GetByID returns the full stored record for a vector, mirroring REST's
@@ -174,7 +178,7 @@ func (s *GoVecServer) Flush(ctx context.Context, _ *pb.FlushRequest) (*pb.FlushR
 	if err := s.engine.SaveToFile(ctx, s.dataPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "flush failed: %v", err)
 	}
-	return &pb.FlushResponse{Status: "ok"}, nil
+	return &pb.FlushResponse{Status: "flushed"}, nil
 }
 
 // Reset clears every vector from the index, mirroring REST's
@@ -182,7 +186,7 @@ func (s *GoVecServer) Flush(ctx context.Context, _ *pb.FlushRequest) (*pb.FlushR
 // the WAL -- call Flush afterward if the empty state should survive a restart.
 func (s *GoVecServer) Reset(_ context.Context, _ *pb.ResetRequest) (*pb.ResetResponse, error) {
 	s.engine.Clear()
-	return &pb.ResetResponse{Status: "ok"}, nil
+	return &pb.ResetResponse{Status: "reset"}, nil
 }
 
 // Health returns a static "ok" response — no engine interaction required.
