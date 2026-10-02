@@ -68,7 +68,7 @@ func (s *GoVecServerSuite) TestInsert_HappyPath() {
 		Vector: []float32{1.0, 2.0, 3.0},
 	})
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "ok", resp.Status)
+	assert.Equal(s.T(), "inserted", resp.Status)
 }
 
 func (s *GoVecServerSuite) TestInsert_MissingID() {
@@ -117,7 +117,7 @@ func (s *GoVecServerSuite) TestInsert_WithMetadata() {
 		Metadata: meta,
 	})
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "ok", resp.Status)
+	assert.Equal(s.T(), "inserted", resp.Status)
 }
 
 // --- BatchInsert ---
@@ -228,7 +228,7 @@ func (s *GoVecServerSuite) TestDelete_HappyPath() {
 
 	resp, err := s.client.Delete(context.Background(), &pb.DeleteRequest{Id: "to-delete"})
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "ok", resp.Status)
+	assert.Equal(s.T(), "deleted", resp.Status)
 	assert.Equal(s.T(), "to-delete", resp.Id)
 }
 
@@ -306,7 +306,7 @@ func (s *GoVecServerSuite) TestReset_ClearsEveryVector() {
 	resp, err := s.client.Reset(context.Background(), &pb.ResetRequest{})
 
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "ok", resp.Status)
+	assert.Equal(s.T(), "reset", resp.Status)
 
 	after, err := s.client.Stats(context.Background(), &pb.StatsRequest{})
 	require.NoError(s.T(), err)
@@ -366,7 +366,7 @@ func (s *GoVecServerSuite) TestInfo() {
 func (s *GoVecServerSuite) TestFlush() {
 	resp, err := s.client.Flush(context.Background(), &pb.FlushRequest{})
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "ok", resp.Status)
+	assert.Equal(s.T(), "flushed", resp.Status)
 }
 
 // --- Health ---
