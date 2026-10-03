@@ -104,8 +104,8 @@ narrate what the code does line by line.
 - Coverage target: ~100% for `internal/core` and `internal/config`.
 - Known, unfixed bugs get a regression test committed with `t.Skip("<link to doc>")`, so the
   fix has a ready-made test to un-skip (example: `hnsw_filtered_search_test.go`).
-- Before adding a test, check that the behaviour isn't already covered. The suite has real
-  redundancy (see `docs/test-suite-review.md`).
+- Before adding a test, check that the behaviour isn't already covered. The suite already has
+  real redundancy, so don't add to it.
 
 ## Traps
 
