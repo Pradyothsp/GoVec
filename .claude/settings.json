@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/filter-test-output.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/filter-test-output.sh\""
           }
         ]
       }
