@@ -85,7 +85,7 @@ func main() {
 	}
 
 	// Start Background Snapshotting (The "Auto-Save")
-	startAutoSave(cfg, engine)
+	stopAutoSave := startAutoSave(cfg, engine)
 
 	// Create and start an HTTP server
 	srv := startHTTPServer(cfg, router)
@@ -94,7 +94,7 @@ func main() {
 	waitForInterrupt()
 
 	// Graceful shutdown
-	shutdownServer(cfg, engine, srv, debugSrv, grpcSrv)
+	shutdownServer(cfg, engine, srv, debugSrv, grpcSrv, stopAutoSave)
 }
 
 // setupLogging configures the global logger based on the environment.
@@ -187,27 +187,42 @@ func runRecovery(cfg *config.Config, engine index.Engine) error {
 	return nil
 }
 
-// startAutoSave starts the background snapshotting ticker.
-func startAutoSave(cfg *config.Config, engine index.Engine) {
+// startAutoSave starts the background snapshotting ticker. The returned stop
+// function cancels it and waits for the goroutine to exit, so once stop
+// returns no auto-save is running or can start -- shutdown relies on that to
+// make its own save the last one.
+func startAutoSave(cfg *config.Config, engine index.Engine) (stop func()) {
 	if !cfg.Storage.AutoSaveEnabled {
 		log.Info().Msg("auto-save disabled")
-		return
+		return func() {}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(cfg.Storage.AutoSaveInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			log.Info().Msg("auto-saving snapshot")
-			if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
-				log.Error().Err(err).Msg("failed to save snapshot")
-			} else {
-				log.Info().Msg("snapshot saved")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				log.Info().Msg("auto-saving snapshot")
+				if err := engine.SaveToFile(ctx, cfg.Storage.DataPath); err != nil {
+					log.Error().Err(err).Msg("failed to save snapshot")
+				} else {
+					log.Info().Msg("snapshot saved")
+				}
 			}
 		}
 	}()
 
 	log.Info().Dur("interval", cfg.Storage.AutoSaveInterval).Msg("auto-save enabled")
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // startHTTPServer configures and starts the REST API server.
@@ -237,15 +252,11 @@ func waitForInterrupt() {
 }
 
 // shutdownServer handles the graceful shutdown of all server components.
-func shutdownServer(cfg *config.Config, engine index.Engine, srv, debugSrv *http.Server, grpcSrv *grpc.Server) {
-	// Save data before shutdown
-	log.Info().Msg("saving data to disk")
-	if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
-		log.Error().Err(err).Msg("error saving data on shutdown")
-	} else {
-		log.Info().Msg("data saved successfully")
-	}
-
+//
+// Order matters: stop taking requests, stop auto-save, then save. Saving first
+// would let requests accepted afterwards land only in the WAL, and a late
+// auto-save could follow the final one.
+func shutdownServer(cfg *config.Config, engine index.Engine, srv, debugSrv *http.Server, grpcSrv *grpc.Server, stopAutoSave func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
@@ -262,6 +273,15 @@ func shutdownServer(cfg *config.Config, engine index.Engine, srv, debugSrv *http
 	if grpcSrv != nil {
 		grpcSrv.GracefulStop()
 		log.Info().Msg("gRPC server stopped")
+	}
+
+	stopAutoSave()
+
+	log.Info().Msg("saving data to disk")
+	if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
+		log.Error().Err(err).Msg("error saving data on shutdown")
+	} else {
+		log.Info().Msg("data saved successfully")
 	}
 
 	log.Info().Msg("server stopped")
