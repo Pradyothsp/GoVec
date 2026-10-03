@@ -1,27 +1,26 @@
-# Only what `go build ./cmd/server` needs (plus config.yaml) belongs in the build context.
+# Allowlist: ignore everything, then re-include only what `go build ./cmd/server` and the image
+# need. Anything new in the repo stays out of the build by default -- a blocklist would need
+# every new file type remembered, and since the Dockerfile's `COPY . .` precedes `go build`,
+# any stray file in the context busts the build cache whenever it changes.
+#
+# Patterns here match from the context root: `*.md` would only catch root-level files, so
+# exclusions below use `**/`.
+*
 
-# VCS, CI, editor and agent tooling
-.git
-.github
-.idea
-.claude
-.agents
-.task
-.pre-commit-config.yaml
+!go.mod
+!go.sum
+!config.yaml
 
-# Local runtime state -- must never be baked into an image
-*.bin
-*.wal
-govec_mmap/
+!cmd/
+!gen/
+!internal/
+!build/swagger/docs.go
 
-# Build and test artifacts
-/govec
-/server
-coverage.*
-*.out
-*.log
-
-# Docs and examples are not compiled
-docs/
-examples/
-*.md
+# Inside the re-included trees: tests, examples and docs are never compiled into the server.
+**/*_test.go
+internal/test/
+internal/hnsw/example/
+internal/hnsw/.github/
+**/*.md
+**/LICENSE
+**/.gitignore
