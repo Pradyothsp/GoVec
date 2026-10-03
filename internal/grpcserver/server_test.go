@@ -18,6 +18,7 @@ import (
 
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
 	"github.com/Pradyothsp/govec/internal/grpcserver"
+	"github.com/Pradyothsp/govec/internal/release"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -359,6 +360,7 @@ func (s *GoVecServerSuite) TestInfo() {
 	// The test engine (created via testutil.NewTestIndex) bypasses the factory
 	// and does not populate indexType/distanceMetric — assert the RPC succeeds.
 	assert.GreaterOrEqual(s.T(), resp.VectorCount, int32(0))
+	assert.Equal(s.T(), release.Version, resp.Version)
 }
 
 // --- Flush ---

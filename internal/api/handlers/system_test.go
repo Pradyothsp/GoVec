@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/release"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -104,6 +105,27 @@ func TestInfo_DimensionsSetAfterInsert(t *testing.T) {
 	assert.True(t, env.Success)
 	assert.Equal(t, float64(3), env.Data["dimensions"], "dimensions should be set from first insert")
 	assert.Equal(t, float64(1), env.Data["vector_count"])
+}
+
+func TestInfo_ReportsServerVersion(t *testing.T) {
+	original := release.Version
+	release.Version = "v9.9.9-test"
+	t.Cleanup(func() { release.Version = original })
+
+	h := NewSystemHandler(testutil.NewTestIndex(t), "")
+
+	router := gin.New()
+	router.GET("/info", h.Info)
+
+	req := httptest.NewRequest(http.MethodGet, "/info", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	var env struct {
+		Data map[string]interface{} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "v9.9.9-test", env.Data["version"])
 }
 
 func TestFlush_Success(t *testing.T) {

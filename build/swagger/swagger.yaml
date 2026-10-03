@@ -57,6 +57,30 @@ definitions:
         example: deleted
         type: string
     type: object
+  handlers.InfoResponse:
+    properties:
+      dimensions:
+        example: 0
+        type: integer
+      distance_metric:
+        example: cosine
+        type: string
+      enable_mmap:
+        example: false
+        type: boolean
+      index_type:
+        example: brute
+        type: string
+      quantization:
+        example: none
+        type: string
+      vector_count:
+        example: 0
+        type: integer
+      version:
+        example: v0.1.0
+        type: string
+    type: object
   handlers.InsertResponse:
     properties:
       status:
@@ -83,27 +107,6 @@ definitions:
     properties:
       vector_count:
         example: 42
-        type: integer
-    type: object
-  index.EngineInfo:
-    properties:
-      dimensions:
-        example: 0
-        type: integer
-      distance_metric:
-        example: cosine
-        type: string
-      enable_mmap:
-        example: false
-        type: boolean
-      index_type:
-        example: brute
-        type: string
-      quantization:
-        example: none
-        type: string
-      vector_count:
-        example: 0
         type: integer
     type: object
   index.SearchResult:
@@ -219,7 +222,7 @@ paths:
             - $ref: '#/definitions/response.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/index.EngineInfo'
+                  $ref: '#/definitions/handlers.InfoResponse'
               type: object
         "401":
           description: Unauthorized
@@ -227,7 +230,7 @@ paths:
             $ref: '#/definitions/response.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get engine configuration info
+      summary: Get engine configuration info and server version
       tags:
       - system
   /api/v1/stats:

@@ -89,6 +89,8 @@ message InfoResponse {
   // Mirrors the REST /info field. Clients gate their own dimension check on
   // this, so omitting it left every gRPC client unable to run that check.
   bool   enable_mmap    = 6;
+  // The server release (the git tag it was built from, or "dev"). Mirrors the REST /info field.
+  string version        = 7;
 }
 
 message FlushRequest {}

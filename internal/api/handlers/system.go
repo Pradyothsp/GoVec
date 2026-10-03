@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/api/response"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/release"
 )
 
 // SystemHandler handles system-level endpoints (stats, info, admin operations).
@@ -39,17 +40,24 @@ func (h *SystemHandler) Stats(c *gin.Context) {
 	response.OK(c, http.StatusOK, StatsResponse{VectorCount: h.Engine.Len()})
 }
 
+// InfoResponse is the JSON response for the info endpoint: the engine's configuration plus the
+// server release, so a client can ask a running server which version it is.
+type InfoResponse struct {
+	index.EngineInfo
+	Version string `json:"version" example:"v0.1.0"`
+}
+
 // Info handles GET /api/v1/info
 //
-// @Summary      Get engine configuration info
+// @Summary      Get engine configuration info and server version
 // @Tags         system
 // @Produce      json
-// @Success      200  {object}  response.Response{data=index.EngineInfo}
+// @Success      200  {object}  response.Response{data=handlers.InfoResponse}
 // @Failure      401  {object}  response.ErrorResponse
 // @Security     BearerAuth
 // @Router       /api/v1/info [get]
 func (h *SystemHandler) Info(c *gin.Context) {
-	response.OK(c, http.StatusOK, h.Engine.Info())
+	response.OK(c, http.StatusOK, InfoResponse{EngineInfo: h.Engine.Info(), Version: release.Version})
 }
 
 // Flush handles POST /api/v1/admin/flush

@@ -127,7 +127,7 @@ Every REST response uses the same envelope:
 | `DELETE` | `/api/v1/vectors/:id` | Delete a vector |
 | `POST` | `/api/v1/vectors/search` | k-NN search with optional `filter` and `sparse_vector` |
 | `GET` | `/api/v1/stats` | Vector count |
-| `GET` | `/api/v1/info` | Engine configuration (index type, quantization, metric, dimensions) |
+| `GET` | `/api/v1/info` | Server version and engine configuration (index type, quantization, metric, dimensions) |
 | `POST` | `/api/v1/admin/flush` | Write a snapshot now |
 | `POST` | `/api/v1/admin/reset` | Delete all vectors |
 

@@ -14,6 +14,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/grpcserver/convert"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/release"
 )
 
 // GoVecServer implements pb.GoVecServiceServer by delegating to an index.Engine.
@@ -170,6 +171,7 @@ func (s *GoVecServer) Info(_ context.Context, _ *pb.InfoRequest) (*pb.InfoRespon
 		Dimensions:     int32(info.Dimensions),  //nolint:gosec // dimension fits in int32
 		VectorCount:    int32(info.VectorCount), //nolint:gosec // vector count fits in int32
 		EnableMmap:     info.EnableMmap,
+		Version:        release.Version,
 	}, nil
 }
 

@@ -20,6 +20,7 @@ import (
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/grpcserver"
+	"github.com/Pradyothsp/govec/internal/release"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -173,4 +174,31 @@ func TestStatusStrings_RESTAndGRPCAgree(t *testing.T) {
 				tt.name, restStatus, grpcStatus)
 		})
 	}
+}
+
+// A client asking a server which release it is must get the same answer over either
+// transport -- the field was added to both at once, and this keeps either from dropping it.
+func TestInfoVersion_RESTAndGRPCAgree(t *testing.T) {
+	original := release.Version
+	release.Version = "v9.9.9-parity"
+	t.Cleanup(func() { release.Version = original })
+
+	router, grpcClient := parityServers(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	var envelope struct {
+		Data struct {
+			Version string `json:"version"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), "body was %s", rec.Body.String())
+
+	resp, err := grpcClient.Info(context.Background(), &pb.InfoRequest{})
+	require.NoError(t, err)
+
+	assert.Equal(t, "v9.9.9-parity", envelope.Data.Version, "REST /info version")
+	assert.Equal(t, "v9.9.9-parity", resp.Version, "gRPC Info version")
 }

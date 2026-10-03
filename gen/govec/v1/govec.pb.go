@@ -799,7 +799,9 @@ type InfoResponse struct {
 	VectorCount    int32                  `protobuf:"varint,5,opt,name=vector_count,json=vectorCount,proto3" json:"vector_count,omitempty"`
 	// Mirrors the REST /info field. Clients gate their own dimension check on
 	// this, so omitting it left every gRPC client unable to run that check.
-	EnableMmap    bool `protobuf:"varint,6,opt,name=enable_mmap,json=enableMmap,proto3" json:"enable_mmap,omitempty"`
+	EnableMmap bool `protobuf:"varint,6,opt,name=enable_mmap,json=enableMmap,proto3" json:"enable_mmap,omitempty"`
+	// The server release (the git tag it was built from, or "dev"). Mirrors the REST /info field.
+	Version       string `protobuf:"bytes,7,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -874,6 +876,13 @@ func (x *InfoResponse) GetEnableMmap() bool {
 		return x.EnableMmap
 	}
 	return false
+}
+
+func (x *InfoResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
 }
 
 type FlushRequest struct {
@@ -1176,7 +1185,7 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"\fStatsRequest\"2\n" +
 	"\rStatsResponse\x12!\n" +
 	"\fvector_count\x18\x01 \x01(\x05R\vvectorCount\"\r\n" +
-	"\vInfoRequest\"\xde\x01\n" +
+	"\vInfoRequest\"\xf8\x01\n" +
 	"\fInfoResponse\x12\"\n" +
 	"\fquantization\x18\x01 \x01(\tR\fquantization\x12\x1d\n" +
 	"\n" +
@@ -1187,7 +1196,8 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"dimensions\x12!\n" +
 	"\fvector_count\x18\x05 \x01(\x05R\vvectorCount\x12\x1f\n" +
 	"\venable_mmap\x18\x06 \x01(\bR\n" +
-	"enableMmap\"\x0e\n" +
+	"enableMmap\x12\x18\n" +
+	"\aversion\x18\a \x01(\tR\aversion\"\x0e\n" +
 	"\fFlushRequest\"'\n" +
 	"\rFlushResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\"\x0e\n" +

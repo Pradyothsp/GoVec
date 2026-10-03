@@ -118,7 +118,7 @@ const docTemplate = `{
                 "tags": [
                     "system"
                 ],
-                "summary": "Get engine configuration info",
+                "summary": "Get engine configuration info and server version",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -131,7 +131,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/index.EngineInfo"
+                                            "$ref": "#/definitions/handlers.InfoResponse"
                                         }
                                     }
                                 }
@@ -645,6 +645,39 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.InfoResponse": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "distance_metric": {
+                    "type": "string",
+                    "example": "cosine"
+                },
+                "enable_mmap": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "index_type": {
+                    "type": "string",
+                    "example": "brute"
+                },
+                "quantization": {
+                    "type": "string",
+                    "example": "none"
+                },
+                "vector_count": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "version": {
+                    "type": "string",
+                    "example": "v0.1.0"
+                }
+            }
+        },
         "handlers.InsertResponse": {
             "type": "object",
             "properties": {
@@ -684,35 +717,6 @@ const docTemplate = `{
                 "vector_count": {
                     "type": "integer",
                     "example": 42
-                }
-            }
-        },
-        "index.EngineInfo": {
-            "type": "object",
-            "properties": {
-                "dimensions": {
-                    "type": "integer",
-                    "example": 0
-                },
-                "distance_metric": {
-                    "type": "string",
-                    "example": "cosine"
-                },
-                "enable_mmap": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "index_type": {
-                    "type": "string",
-                    "example": "brute"
-                },
-                "quantization": {
-                    "type": "string",
-                    "example": "none"
-                },
-                "vector_count": {
-                    "type": "integer",
-                    "example": 0
                 }
             }
         },
