@@ -6,6 +6,11 @@ vars:
   WAL_FILE: govec.wal
   BIN_FILE: govec_data.bin
   MMAP_FILE: govec_mmap
+  # v0.1.0 on a tagged commit, v0.1.0-3-gabc1234 three commits later, -dirty with local
+  # changes; the bare commit hash before the first tag. Release images get the tag from CI.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  LDFLAGS: -X github.com/Pradyothsp/govec/internal/release.Version={{.VERSION}}
 
 tasks:
   # Run tests with gotestsum (human-friendly output)
@@ -138,7 +143,7 @@ tasks:
   build:
     desc: Build the GoVec server
     cmds:
-      - go build -o govec cmd/server/main.go
+      - go build -ldflags "{{.LDFLAGS}}" -o govec ./cmd/server
     generates:
       - govec
 
@@ -146,7 +151,7 @@ tasks:
   run:
     desc: Run the GoVec server
     cmds:
-      - go run cmd/server/main.go
+      - go run -ldflags "{{.LDFLAGS}}" ./cmd/server
 
   # Clean build artifacts and coverage reports
   clean:

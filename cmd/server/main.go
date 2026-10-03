@@ -15,10 +15,12 @@ import (
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 
+	"github.com/Pradyothsp/govec/build/swagger"
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/grpcserver"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/release"
 )
 
 // @title           GoVec API
@@ -48,7 +50,7 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to open WAL")
 	}
 
-	log.Info().Msg("starting server")
+	log.Info().Str("version", release.Version).Msg("starting server")
 
 	// Create engine via factory
 	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
@@ -66,6 +68,9 @@ func main() {
 			log.Error().Err(err).Msg("failed to close WAL")
 		}
 	}(wal)
+
+	// The generated spec carries the static @version annotation; report the running release.
+	swagger.SwaggerInfo.Version = release.Version
 
 	router := api.SetupRouter(engine, cfg.Server.APIKey, cfg.Storage.DataPath)
 
