@@ -7,7 +7,7 @@ gRPC from a single static binary.
 [![CI](https://github.com/Pradyothsp/govec/actions/workflows/go.yml/badge.svg)](https://github.com/Pradyothsp/govec/actions/workflows/go.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Pradyothsp/govec.svg)](https://pkg.go.dev/github.com/Pradyothsp/govec)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Pradyothsp/govec)](https://goreportcard.com/report/github.com/Pradyothsp/govec)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 GoVec is inspired by Qdrant, Weaviate and Pinecone, but deliberately smaller. It targets
 prototyping, local semantic search, and ML apps that need vector search on a single node,
@@ -240,9 +240,7 @@ development setup, the test and lint workflow, and project conventions.
 
 ## License
 
-GoVec is licensed under the [GNU Affero General Public License v3.0](LICENSE). The
-[Python SDK](https://github.com/Pradyothsp/govec-python) is licensed separately under
-Apache-2.0.
+GoVec is licensed under the [Apache License 2.0](LICENSE).
 
 The HNSW implementation in `internal/hnsw` is derived from
 [coder/hnsw](https://github.com/coder/hnsw) (CC0-1.0).
