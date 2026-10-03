@@ -22,12 +22,22 @@ func init() {
 
 // SnapshotHeader contains metadata about the snapshot file format
 type SnapshotHeader struct {
-	Version             int    // File format version (3=VectorIndex, 4=HNSWIndex, 5=VectorIndex+mmap, 6=HNSWIndex+mmap)
-	Quantization        string // "none" or "scalar"
-	DistanceMetric      string // "cosine", etc.
-	HybridSearchEnabled bool   // Whether inverted index is included
-	IndexType           string // "" or "brute" = VectorIndex; "hnsw" = HNSWIndex
+	Version        int    // snapshotVersion at save time; recorded, never branched on at load
+	Quantization   string // "none" or "scalar"
+	DistanceMetric string // "cosine", etc.
+	IndexType      string // "" or "brute" = VectorIndex; "hnsw" = HNSWIndex
+	Mmap           bool   // vectors live in the mmap store, not inline in the snapshot
 }
+
+// snapshotVersion is written into every snapshot header so a file records
+// which format produced it. Load paths deliberately ignore it: they branch on
+// IndexType and Mmap.
+const snapshotVersion = 1
+
+// The inverted index is never written to a snapshot. It is derived data --
+// every posting comes from a node's sparse vector, which the snapshot does
+// store -- so each load path rebuilds it instead. A saved copy could only
+// disagree with the store it was derived from.
 
 // vectorNodeSnapshot is a vector-free snapshot of a VectorNode used when mmap
 // is enabled.  The Vector field is intentionally omitted: vectors live in the
@@ -40,8 +50,8 @@ type vectorNodeSnapshot struct {
 }
 
 // SaveToFile serializes the index to a specific path.
-// When mmap is enabled (vectorStore != nil) it writes version 5 (no inline vectors).
-// Otherwise it writes the standard version 3 format.
+// When mmap is enabled (vectorStore != nil) the vectors stay in the mmap store
+// and the snapshot carries everything else; otherwise vectors are inline.
 func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
@@ -74,7 +84,7 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	return err
 }
 
-// saveToFileHeap writes the standard (heap-backed) v3 snapshot.
+// saveToFileHeap writes a snapshot with the vectors inline.
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
 	if idx.wal != nil {
@@ -91,10 +101,9 @@ func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
 
 	encoder := gob.NewEncoder(f)
 	header := SnapshotHeader{
-		Version:             3,
-		Quantization:        quantType,
-		DistanceMetric:      "cosine",
-		HybridSearchEnabled: idx.InvertedIndex != nil,
+		Version:        snapshotVersion,
+		Quantization:   quantType,
+		DistanceMetric: "cosine",
 	}
 	if err := encoder.Encode(header); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -111,13 +120,6 @@ func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
 	}
-	if idx.InvertedIndex != nil {
-		if err := encoder.Encode(idx.InvertedIndex); err != nil {
-			_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			return err
-		}
-	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
@@ -129,7 +131,7 @@ func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
 	return nil
 }
 
-// saveToFileMmap writes a v5 snapshot (no inline vectors; vectors live in mmap).
+// saveToFileMmap writes a snapshot without vectors; they stay in the mmap store.
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 	// Flush mmap pages to disk before clearing WAL.
@@ -162,10 +164,10 @@ func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 
 	encoder := gob.NewEncoder(f)
 	header := SnapshotHeader{
-		Version:             5,
-		Quantization:        quantType,
-		DistanceMetric:      "cosine",
-		HybridSearchEnabled: idx.InvertedIndex != nil,
+		Version:        snapshotVersion,
+		Quantization:   quantType,
+		DistanceMetric: "cosine",
+		Mmap:           true,
 	}
 	if err := encoder.Encode(header); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -181,13 +183,6 @@ func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
-	}
-	if idx.InvertedIndex != nil {
-		if err := encoder.Encode(idx.InvertedIndex); err != nil {
-			_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			return err
-		}
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -227,16 +222,8 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 		return fmt.Errorf("failed to decode snapshot header: %w", err)
 	}
 
-	if header.Version < 1 || header.Version > 5 {
-		return fmt.Errorf("unsupported snapshot version: %d (expected 1-5)", header.Version)
-	}
-
 	if header.IndexType == "hnsw" {
 		return fmt.Errorf("snapshot was created with HNSW index. Delete data files or change index_type to 'hnsw' in config")
-	}
-
-	if header.Version < 3 {
-		return fmt.Errorf("snapshot version %d uses string IDs (incompatible with v3 uint32 IDs). Delete data files and re-insert data", header.Version)
 	}
 
 	var expectedQuant string
@@ -256,11 +243,11 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 		return fmt.Errorf("failed to decode IDMapper: %w", err)
 	}
 
-	if header.Version == 5 {
-		// Mmap format: vectors live in the mmap store, not in the GOB stream.
-		err = idx.loadFromFileMmap(decoder, &header)
+	if header.Mmap {
+		// Vectors live in the mmap store, not in the GOB stream.
+		err = idx.loadFromFileMmap(decoder)
 	} else {
-		// Standard heap format (v3).
+		// Vectors are inline in the store.
 		if err := decoder.Decode(&idx.Store); err != nil {
 			return fmt.Errorf("failed to decode store: %w", err)
 		}
@@ -272,20 +259,7 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 			}
 		}
 
-		if header.Version == 2 && header.HybridSearchEnabled {
-			if idx.InvertedIndex != nil {
-				var loadedIndex map[uint32][]core.Posting
-				if err := decoder.Decode(&loadedIndex); err != nil {
-					return fmt.Errorf("failed to decode inverted index: %w", err)
-				}
-				idx.InvertedIndex = loadedIndex
-			} else {
-				var discarded map[uint32][]core.Posting
-				if err := decoder.Decode(&discarded); err != nil {
-					return fmt.Errorf("failed to skip inverted index: %w", err)
-				}
-			}
-		}
+		idx.rebuildInvertedIndex()
 	}
 
 	if err == nil {
@@ -301,9 +275,9 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 
 // loadFromFileMmap reconstructs the Store from mmap-backed snapshots.
 // PRECONDITION: idx.mu.Lock() held; IDMapper already decoded.
-func (idx *VectorIndex[T]) loadFromFileMmap(decoder *gob.Decoder, header *SnapshotHeader) error {
+func (idx *VectorIndex[T]) loadFromFileMmap(decoder *gob.Decoder) error {
 	if idx.vectorStore == nil {
-		return fmt.Errorf("snapshot is mmap format (v5) but mmap storage is not configured")
+		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
 	}
 
 	var snapshots []vectorNodeSnapshot
@@ -332,20 +306,7 @@ func (idx *VectorIndex[T]) loadFromFileMmap(decoder *gob.Decoder, header *Snapsh
 		}
 	}
 
-	if header.HybridSearchEnabled {
-		if idx.InvertedIndex != nil {
-			var loadedIndex map[uint32][]core.Posting
-			if err := decoder.Decode(&loadedIndex); err != nil {
-				return fmt.Errorf("failed to decode inverted index: %w", err)
-			}
-			idx.InvertedIndex = loadedIndex
-		} else {
-			var discarded map[uint32][]core.Posting
-			if err := decoder.Decode(&discarded); err != nil {
-				return fmt.Errorf("failed to skip inverted index: %w", err)
-			}
-		}
-	}
+	idx.rebuildInvertedIndex()
 
 	return nil
 }

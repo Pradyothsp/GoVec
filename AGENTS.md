@@ -85,7 +85,7 @@ The engine uses Go generics (`VectorIndex[T]`) to support different vector types
 - `internal/index/engine.go`: Common `Engine` interface.
 - `internal/index/factory.go`: Creates `VectorIndex[T]` (brute-force) or `HNSWIndex[T]` (ANN) based on configuration.
 - `internal/index/wal.go`: Write-ahead log for durability and recovery.
-- `internal/core/persistence.go`: Atomic snapshot saving/loading using GOB.
+- `internal/index/persistence.go`: Atomic snapshot saving/loading using GOB.
 
 ## Configuration
 
@@ -147,6 +147,16 @@ fails if you don't. The readers live in `internal/config/env.go`, so it is one l
   insert that ships today). Bigger payoff ceiling, bigger risk: hnswlib needed a dedicated
   bug-fix PR for this exact design, and the failure mode (deadlock) isn't caught by `-race`,
   only by hitting the wrong interleaving under load.
+- ⏳ Inverted-index-backed sparse scoring for hybrid search. Both engines keep a sparse
+  inverted index (`InvertedIndex`, posting lists maintained on insert/delete and rebuilt on
+  snapshot load), but **nothing reads the postings yet**: `computeSparseScores` scans every
+  node's sparse vector instead. The index is deliberately kept as the foundation for this
+  work -- don't delete it as dead code. Two problems it should solve:
+  - HNSW hybrid search computes sparse scores for all `n` documents, then uses only the
+    graph's ~`k` candidates, so every hybrid query is O(n) despite the O(log n) graph.
+  - HNSW hybrid search only reranks the dense candidates. A strong keyword match that isn't
+    close in meaning is never retrieved; full hybrid systems fetch candidates from both the
+    graph and the inverted index and merge them.
 - ❌ HNSW dense ID-indexed storage -- evaluated with real numbers (~11MB combined at 100k
   vectors) and declined; not worth the implementation cost.
 

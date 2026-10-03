@@ -188,9 +188,11 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 			},
 			validate: func(t *testing.T, idx *VectorIndex[[]float32]) {
 				assert.Len(t, idx.Store, 3)
-				assert.NotNil(t, idx.InvertedIndex, "Inverted index should be preserved")
-				// Inverted index entries may be empty if sparse vectors weren't indexed
-				// The important thing is that the inverted index map itself is not nil
+				// The three fixtures cover 9 distinct tokens with 10 postings
+				// (token 100 appears in both SparseTfIdf and SparseLarge).
+				// NotNil alone passed while every posting was being lost on load.
+				assert.Len(t, idx.InvertedIndex, 9, "every token must have its posting list back")
+				assert.Equal(t, 10, countPostings(idx.InvertedIndex), "every posting must survive the reload")
 			},
 			expectLen: 3,
 		},
@@ -396,49 +398,6 @@ func TestRoundTrip_ComplexMetadata(t *testing.T) {
 	assert.Equal(t, complexMeta, loadedMeta, "Complex metadata should be preserved exactly")
 }
 
-// TestVersionMismatch verifies backward compatibility with older snapshot versions
-func TestVersionMismatch(t *testing.T) {
-	tests := []struct {
-		name          string
-		setup         func(*testing.T, string)
-		expectError   bool
-		errorContains string
-	}{
-		{
-			name: "v1_snapshot_without_idmapper",
-			setup: func(t *testing.T, path string) {
-				// Create a V1 snapshot (no IDMapper, no InvertedIndex)
-				idx := newTestIndex(t)
-				_ = idx.Insert(context.Background(), "v1_test", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
-
-				// Manually create V1 format (would need to mock old format)
-				// For now, just save normally - in reality would need old serialization
-				_ = idx.SaveToFile(context.Background(), path) //nolint:errcheck // test setup
-			},
-			expectError: false, // Should load successfully
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmpFile := filepath.Join(t.TempDir(), "version_test.bin")
-			tt.setup(t, tmpFile)
-
-			idx := newTestIndex(t)
-			err := idx.LoadFromFile(context.Background(), tmpFile)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				if tt.errorContains != "" {
-					assert.Contains(t, err.Error(), tt.errorContains)
-				}
-			} else {
-				assert.NoError(t, err, "Should load older version successfully")
-			}
-		})
-	}
-}
-
 // TestIDMapper_Persistence verifies IDMapper survives save/load cycles
 func TestIDMapper_Persistence(t *testing.T) {
 	idx := newTestIndex(t)
@@ -473,4 +432,74 @@ func TestIDMapper_Persistence(t *testing.T) {
 		require.NoError(t, err, "Should find mapping for %s", id)
 		assert.Contains(t, newIdx.Store, internalID, "Vector should exist for %s", id)
 	}
+}
+
+// TestLoadFromFile_RebuildsInvertedIndex is the regression test for reloaded
+// hybrid indexes losing every sparse posting: the load path used to look for a
+// saved copy behind a version check that could never pass, and kept the empty
+// map from the constructor. Snapshots no longer store the inverted index at
+// all; LoadFromFile rebuilds it from the nodes' sparse vectors.
+func TestLoadFromFile_RebuildsInvertedIndex(t *testing.T) {
+	ctx := context.Background()
+
+	// doc2 is the closer dense match; only a working sparse boost on token 10
+	// can put doc1 above it.
+	populate := func(t *testing.T, idx *VectorIndex[[]float32]) {
+		t.Helper()
+		require.NoError(t, idx.Insert(ctx, "doc1", []float32{0.9, 0.1, 0}, core.SparseVector{
+			Indices: []uint32{10}, Values: []float32{10.0},
+		}, nil))
+		require.NoError(t, idx.Insert(ctx, "doc2", []float32{1, 0, 0}, core.SparseVector{}, nil))
+		require.NoError(t, idx.Insert(ctx, "doc3", []float32{0, 1, 0}, core.SparseVector{
+			Indices: []uint32{99}, Values: []float32{9.0},
+		}, nil))
+	}
+
+	assertSparseBoostWorks := func(t *testing.T, idx *VectorIndex[[]float32]) {
+		t.Helper()
+		assert.Len(t, idx.InvertedIndex, 2, "tokens 10 and 99 must both have posting lists")
+		assert.Equal(t, 2, countPostings(idx.InvertedIndex))
+
+		sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{1.0}}
+		results, err := idx.Search(ctx, []float32{1, 0, 0}, sparseQuery, 2, nil)
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		assert.Equal(t, "doc1", results[0].ID, "the sparse boost must outrank doc2's better dense score")
+	}
+
+	t.Run("hybrid_enabled", func(t *testing.T) {
+		idx := newTestIndexWithHybrid(t)
+		populate(t, idx)
+
+		// Sanity check: the ranking really does depend on the sparse boost.
+		assertSparseBoostWorks(t, idx)
+
+		path := filepath.Join(t.TempDir(), "hybrid.bin")
+		require.NoError(t, idx.SaveToFile(ctx, path))
+
+		loaded := newTestIndexWithHybrid(t)
+		require.NoError(t, loaded.LoadFromFile(ctx, path))
+		assertSparseBoostWorks(t, loaded)
+	})
+
+	t.Run("hybrid_disabled_loads_hybrid_snapshot", func(t *testing.T) {
+		idx := newTestIndexWithHybrid(t)
+		populate(t, idx)
+
+		path := filepath.Join(t.TempDir(), "hybrid.bin")
+		require.NoError(t, idx.SaveToFile(ctx, path))
+
+		loaded := newTestIndex(t)
+		require.NoError(t, loaded.LoadFromFile(ctx, path))
+		assert.Nil(t, loaded.InvertedIndex, "an index without hybrid search must not grow an inverted index")
+		assert.Len(t, loaded.Store, 3)
+	})
+}
+
+func countPostings(inverted map[uint32][]core.Posting) int {
+	n := 0
+	for _, postings := range inverted {
+		n += len(postings)
+	}
+	return n
 }

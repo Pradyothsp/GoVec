@@ -521,8 +521,8 @@ func (idx *HNSWIndex[T]) deleteInternal(id string) error {
 }
 
 // SaveToFile serializes the HNSW index to a snapshot file.
-// When mmap is enabled it writes version 6 (topology-only graph; no inline vectors).
-// Otherwise it writes the standard version 4 format.
+// When mmap is enabled the snapshot holds a topology-only graph and no vectors;
+// otherwise vectors are inline.
 func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
@@ -555,7 +555,7 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	return err
 }
 
-// saveToFileHeap writes the standard v4 snapshot (inline vectors embedded in GOB).
+// saveToFileHeap writes a snapshot with the vectors inline (embedded in the GOB stream).
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
 	if idx.wal != nil {
@@ -573,11 +573,10 @@ func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
 	encoder := gob.NewEncoder(f)
 
 	header := SnapshotHeader{
-		Version:             4,
-		Quantization:        quantType,
-		DistanceMetric:      "cosine",
-		HybridSearchEnabled: idx.InvertedIndex != nil,
-		IndexType:           "hnsw",
+		Version:        snapshotVersion,
+		Quantization:   quantType,
+		DistanceMetric: "cosine",
+		IndexType:      "hnsw",
 	}
 	if err := encoder.Encode(header); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -593,13 +592,6 @@ func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
-	}
-	if idx.InvertedIndex != nil {
-		if err := encoder.Encode(idx.InvertedIndex); err != nil {
-			_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			return err
-		}
 	}
 
 	var graphBuf bytes.Buffer
@@ -625,7 +617,7 @@ func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
 	return nil
 }
 
-// saveToFileMmap writes a v6 snapshot: topology-only graph bytes + vectorNodeSnapshot list.
+// saveToFileMmap writes a snapshot without vectors: topology-only graph bytes + vectorNodeSnapshot list.
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 	if err := idx.vectorStore.Sync(); err != nil {
@@ -662,11 +654,11 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 
 	encoder := gob.NewEncoder(f)
 	header := SnapshotHeader{
-		Version:             6,
-		Quantization:        quantType,
-		DistanceMetric:      "cosine",
-		HybridSearchEnabled: idx.InvertedIndex != nil,
-		IndexType:           "hnsw",
+		Version:        snapshotVersion,
+		Quantization:   quantType,
+		DistanceMetric: "cosine",
+		IndexType:      "hnsw",
+		Mmap:           true,
 	}
 	if err := encoder.Encode(header); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -682,13 +674,6 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
-	}
-	if idx.InvertedIndex != nil {
-		if err := encoder.Encode(idx.InvertedIndex); err != nil {
-			_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-			return err
-		}
 	}
 	if err := encoder.Encode(topoBytes.Bytes()); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -707,7 +692,7 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 }
 
 // LoadFromFile reads the HNSW index from a snapshot file.
-// Supports version 4 (heap-backed vectors) and version 6 (mmap-backed vectors).
+// Handles both heap-backed and mmap-backed snapshots.
 // A missing file is not an error — the server starts with an empty index.
 func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err error) {
 	start := time.Now()
@@ -735,10 +720,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	}
 
 	if header.IndexType != "hnsw" {
-		return fmt.Errorf("snapshot was created with brute-force index (version %d). Delete data files or change index_type to 'brute' in config", header.Version)
-	}
-	if header.Version != 4 && header.Version != 6 {
-		return fmt.Errorf("unsupported HNSW snapshot version %d (expected 4 or 6)", header.Version)
+		return fmt.Errorf("snapshot was created with brute-force index. Delete data files or change index_type to 'brute' in config")
 	}
 
 	var expectedQuant string
@@ -758,27 +740,12 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 		return fmt.Errorf("failed to decode IDMapper: %w", err)
 	}
 
-	if header.Version == 6 {
-		err = idx.loadFromFileMmap(decoder, &header)
+	if header.Mmap {
+		err = idx.loadFromFileMmap(decoder)
 	} else {
-		// Standard v4: metadata map contains inline vectors.
+		// Metadata map contains inline vectors.
 		if err := decoder.Decode(&idx.metadata); err != nil {
 			return fmt.Errorf("failed to decode metadata: %w", err)
-		}
-
-		if header.HybridSearchEnabled {
-			if idx.InvertedIndex != nil {
-				var loadedIndex map[uint32][]core.Posting
-				if err := decoder.Decode(&loadedIndex); err != nil {
-					return fmt.Errorf("failed to decode inverted index: %w", err)
-				}
-				idx.InvertedIndex = loadedIndex
-			} else {
-				var discarded map[uint32][]core.Posting
-				if err := decoder.Decode(&discarded); err != nil {
-					return fmt.Errorf("failed to skip inverted index: %w", err)
-				}
-			}
 		}
 
 		var graphBytes []byte
@@ -793,6 +760,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	if idx.metaIndex != nil {
 		idx.rebuildMetaIndex()
 	}
+	idx.rebuildInvertedIndex()
 
 	if err == nil {
 		zerolog.Ctx(ctx).Info().
@@ -805,11 +773,11 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	return err
 }
 
-// loadFromFileMmap reconstructs the index from a v6 mmap-backed snapshot.
+// loadFromFileMmap reconstructs the index from an mmap-backed snapshot.
 // PRECONDITION: idx.mu.Lock() held; IDMapper already decoded.
-func (idx *HNSWIndex[T]) loadFromFileMmap(decoder *gob.Decoder, header *SnapshotHeader) error {
+func (idx *HNSWIndex[T]) loadFromFileMmap(decoder *gob.Decoder) error {
 	if idx.vectorStore == nil {
-		return fmt.Errorf("snapshot is mmap format (v6) but mmap storage is not configured")
+		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
 	}
 
 	var snapshots []vectorNodeSnapshot
@@ -829,21 +797,6 @@ func (idx *HNSWIndex[T]) loadFromFileMmap(decoder *gob.Decoder, header *Snapshot
 			Vector:     vec,
 			Sparse:     snap.Sparse,
 			Metadata:   snap.Metadata,
-		}
-	}
-
-	if header.HybridSearchEnabled {
-		if idx.InvertedIndex != nil {
-			var loadedIndex map[uint32][]core.Posting
-			if err := decoder.Decode(&loadedIndex); err != nil {
-				return fmt.Errorf("failed to decode inverted index: %w", err)
-			}
-			idx.InvertedIndex = loadedIndex
-		} else {
-			var discarded map[uint32][]core.Posting
-			if err := decoder.Decode(&discarded); err != nil {
-				return fmt.Errorf("failed to skip inverted index: %w", err)
-			}
 		}
 	}
 
@@ -878,6 +831,20 @@ func (idx *HNSWIndex[T]) rebuildMetaIndex() {
 	idx.metaIndex.Clear()
 	for internalID, node := range idx.metadata {
 		idx.metaIndex.Add(internalID, node.Metadata)
+	}
+}
+
+// rebuildInvertedIndex recomputes every posting list from the sparse vectors
+// in idx.metadata, discarding whatever the inverted index held before.
+// MUST be called with idx.mu.Lock() held.
+func (idx *HNSWIndex[T]) rebuildInvertedIndex() {
+	if idx.InvertedIndex == nil {
+		return // Hybrid search disabled
+	}
+
+	idx.InvertedIndex = make(map[uint32][]core.Posting)
+	for internalID, node := range idx.metadata {
+		idx.addToInvertedIndex(internalID, node.Sparse)
 	}
 }
 
