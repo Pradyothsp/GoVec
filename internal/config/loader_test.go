@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,6 +366,35 @@ func TestLoadFromEnv_EveryFieldHasAnOverride(t *testing.T) {
 	assert.True(t, cfg.GRPC.Enabled)
 	assert.Equal(t, 50052, cfg.GRPC.Port)
 	assert.Equal(t, 128, cfg.GRPC.MaxRecvMsgSizeMB)
+
+	// The asserts above only cover fields someone remembered to list. This
+	// walks every field, so a new one with no override -- which keeps its
+	// default even with every variable set -- fails here by name.
+	assertNoFieldKeptItsDefault(t, *cfg, *DefaultConfig())
+}
+
+// assertNoFieldKeptItsDefault fails for every leaf field of got that still
+// equals the same field in defaults, reporting each by its dotted path.
+func assertNoFieldKeptItsDefault(t *testing.T, got, defaults Config) {
+	t.Helper()
+	var unchanged []string
+	var walk func(path string, g, d reflect.Value)
+	walk = func(path string, g, d reflect.Value) {
+		if g.Kind() == reflect.Struct {
+			for i := 0; i < g.NumField(); i++ {
+				walk(path+"."+g.Type().Field(i).Name, g.Field(i), d.Field(i))
+			}
+			return
+		}
+		if reflect.DeepEqual(g.Interface(), d.Interface()) {
+			unchanged = append(unchanged, strings.TrimPrefix(path, "."))
+		}
+	}
+	walk("", reflect.ValueOf(got), reflect.ValueOf(defaults))
+
+	assert.Empty(t, unchanged,
+		"these fields kept their default with every GOVEC_* variable set -- add an override "+
+			"in loader.go and an entry to the env map above")
 }
 
 // A value that does not parse must not take the process down -- refusing to
