@@ -143,6 +143,8 @@ Every REST response uses the same envelope:
 ## Configuration
 
 GoVec reads `config.yaml` from the working directory, or the file named by `GOVEC_CONFIG_PATH`.
+In the Docker image, mount your own file at `/app/config.yaml`. All data lives in the `/data`
+volume, and gRPC needs `-p 50051:50051` once enabled.
 Every field also has an environment variable, and the environment wins. The variable name is
 `GOVEC_` plus the YAML key (`storage.wal_path` → `GOVEC_WAL_PATH`). The section is included
 only where the key alone would be ambiguous (`GOVEC_SERVER_PORT` vs `GOVEC_GRPC_PORT`).

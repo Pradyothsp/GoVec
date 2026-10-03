@@ -1,0 +1,108 @@
+name: Release
+
+# Publishes a container image to GHCR and a GitHub Release -- only when a version tag is pushed.
+# Pushes to main run go.yml (CI) and never publish anything.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# v0.1.0      -> ghcr.io/pradyothsp/govec:0.1.0, :0.1, :latest
+# v0.2.0-rc.1 -> ghcr.io/pradyothsp/govec:0.2.0-rc.1 only; pre-releases never move :latest
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  IMAGE: ghcr.io/pradyothsp/govec
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # A tag can point at any commit, not only one CI has already passed on.
+      - name: Test with race detector
+        run: go test -race ./...
+
+  image:
+    name: Build and push image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Go build cross-compiles natively (see Dockerfile); QEMU is only needed for the
+      # runtime stage's few RUN steps on arm64.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Pull what was actually published and prove it serves, so a broken image fails the
+      # release instead of reaching users.
+      - name: Smoke-test the published image
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker run -d --name govec -p 8000:8000 "${IMAGE}:${VERSION}"
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          docker logs govec
+          exit 1
+
+  release:
+    name: GitHub Release
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=(--generate-notes --verify-tag)
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" "${flags[@]}"

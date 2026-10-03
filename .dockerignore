@@ -1,0 +1,27 @@
+# Only what `go build ./cmd/server` needs (plus config.yaml) belongs in the build context.
+
+# VCS, CI, editor and agent tooling
+.git
+.github
+.idea
+.claude
+.agents
+.task
+.pre-commit-config.yaml
+
+# Local runtime state -- must never be baked into an image
+*.bin
+*.wal
+govec_mmap/
+
+# Build and test artifacts
+/govec
+/server
+coverage.*
+*.out
+*.log
+
+# Docs and examples are not compiled
+docs/
+examples/
+*.md
