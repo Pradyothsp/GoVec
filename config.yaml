@@ -1,5 +1,5 @@
 # GoVec Configuration File
-# See AGENTS.md for detailed configuration documentation.
+# See config.example.yaml for every option and its default.
 #
 # Every field below has a GOVEC_* environment override, and environment wins over this
 # file. The name is GOVEC_ plus the key: storage.wal_path -> GOVEC_WAL_PATH. The section
