@@ -74,8 +74,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: VERSION=${{ github.ref_name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=govec-image
+          cache-to: type=gha,scope=govec-image,mode=max
 
       # Pull what was actually published and prove it serves, so a broken image fails the
       # release instead of reaching users.

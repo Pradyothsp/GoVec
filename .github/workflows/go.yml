@@ -111,3 +111,57 @@ jobs:
           buf generate
           goimports -w gen/
           git diff --exit-code gen/
+
+  # Builds the release image on every PR and push -- never pushed anywhere -- so a change that
+  # breaks the Dockerfile fails here instead of in release.yml after a tag is cut. Shares the
+  # build cache with release.yml, so tag builds start from layers CI already built.
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build for every release platform
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: VERSION=ci-${{ github.sha }}
+          cache-from: type=gha,scope=govec-image
+          cache-to: type=gha,scope=govec-image,mode=max
+
+      # A multi-platform build can't be loaded into the local daemon, so load amd64 on its
+      # own -- every layer comes from the cache the step above just filled.
+      - name: Load the amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: govec:ci
+          build-args: VERSION=ci-${{ github.sha }}
+          cache-from: type=gha,scope=govec-image
+
+      - name: Smoke-test the image
+        env:
+          EXPECTED_VERSION: ci-${{ github.sha }}
+        run: |
+          docker run -d --name govec -p 9697:9697 govec:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:9697/health; then
+              version=$(curl -fsS http://localhost:9697/api/v1/info | jq -r .data.version)
+              [ "$version" = "$EXPECTED_VERSION" ] && exit 0
+              echo "image reports version '$version', expected '$EXPECTED_VERSION'"
+              exit 1
+            fi
+            sleep 1
+          done
+          docker logs govec
+          exit 1
