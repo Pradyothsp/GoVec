@@ -92,8 +92,8 @@ func collectAdvancedMetrics(b *testing.B, quantization string, numVectors, vecto
 		b.Fatalf("NewEngine failed: %v", err)
 	}
 
-	vectors := generateDiverseVectors(numVectors, vectorDim)
-	queries := generateDiverseVectors(numQueries, vectorDim)
+	vectors := generateTestVectors(numVectors, vectorDim)
+	queries := generateTestVectors(numQueries, vectorDim)
 
 	// Measure insert performance with detailed metrics
 	runtime.GC()
@@ -198,7 +198,7 @@ func BenchmarkQuantizationMetrics_Accuracy(b *testing.B) {
 	engineScalar, _ := index.NewEngine(config.EngineConfig{Quantization: "scalar", DistanceMetric: "cosine"}, config.StorageConfig{}, wal2)
 
 	// Insert same vectors
-	vectors := generateDiverseVectors(numVectors, vectorDim)
+	vectors := generateTestVectors(numVectors, vectorDim)
 	for i, vec := range vectors {
 		id := fmt.Sprintf("vec%d", i)
 		engineNone.Insert(context.Background(), id, vec, core.SparseVector{}, nil)
@@ -208,7 +208,7 @@ func BenchmarkQuantizationMetrics_Accuracy(b *testing.B) {
 		}, nil)
 	}
 
-	queries := generateDiverseVectors(numQueries, vectorDim)
+	queries := generateTestVectors(numQueries, vectorDim)
 
 	var (
 		recallAt1Sum  float64
@@ -325,7 +325,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 	engine, _ := index.NewEngine(cfg, config.StorageConfig{}, wal)
 
 	// Pre-populate with initial vectors
-	vectors := generateDiverseVectors(numVectors, vectorDim)
+	vectors := generateTestVectors(numVectors, vectorDim)
 	for i, vec := range vectors {
 		engine.Insert(context.Background(), fmt.Sprintf("initial%d", i), vec, core.SparseVector{
 
@@ -341,7 +341,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 		go func(workerID int) {
 			defer wg.Done()
 			for i := 0; i < insertsPerWorker; i++ {
-				vec := generateDiverseVectors(1, vectorDim)[0]
+				vec := generateTestVectors(1, vectorDim)[0]
 				id := fmt.Sprintf("worker%d_vec%d", workerID, i)
 				engine.Insert(context.Background(), id, vec, core.SparseVector{}, nil)
 			}
@@ -360,7 +360,7 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 		go func() {
 			defer wg.Done()
 			for i := 0; i < searchesPerWorker; i++ {
-				query := generateDiverseVectors(1, vectorDim)[0]
+				query := generateTestVectors(1, vectorDim)[0]
 				engine.Search(context.Background(), query, core.SparseVector{}, 10, nil)
 			}
 		}()
@@ -378,22 +378,6 @@ func runConcurrencyBenchmark(b *testing.B, quantization string, numVectors, vect
 }
 
 // Helper functions
-
-func generateDiverseVectors(count, dim int) [][]float32 {
-	vectors := make([][]float32, count)
-	for i := 0; i < count; i++ {
-		vec := make([]float32, dim)
-		for j := 0; j < dim; j++ {
-			vec[j] = float32(
-				math.Sin(float64(i*j)/100.0)+
-					math.Cos(float64(i+j*7)/50.0)*0.5+
-					math.Sin(float64(i*13+j)/30.0)*0.3,
-			) * 0.4
-		}
-		vectors[i] = vec
-	}
-	return vectors
-}
 
 func calculatePercentile(durations []time.Duration, percentile float64) float64 {
 	sorted := make([]time.Duration, len(durations))
@@ -541,11 +525,4 @@ func printAdvancedComparison(b *testing.B, none, scalar AdvancedMetrics) {
 		none.BytesPerSearch, scalar.BytesPerSearch)
 	b.Logf("╚═════════════════════════════════════════════════════════════════╝")
 	b.Logf("")
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

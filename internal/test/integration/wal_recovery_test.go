@@ -56,8 +56,6 @@ func TestWALRecoveryTestSuite(t *testing.T) {
 // =============================================================================
 
 func (s *WALRecoveryTestSuite) TestWALRecovery_CrashAfterInserts() {
-	// 🔴 CRITICAL: Will reveal main.go bug (lines 40-42)
-
 	// Phase 1: Insert 50 vectors via HTTP
 	for i := 0; i < 50; i++ {
 		payload := map[string]interface{}{
@@ -103,9 +101,6 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashAfterInserts() {
 		s.Require().NoError(err, "Vector %s should exist", vecID)
 		s.Assert().Contains(recoveredIdx.Store, internalID)
 	}
-
-	// NOTE: This test may FAIL with current main.go:40-42
-	// Expected fix: Load from DataPath (GOB), then ReplayWAL from WalPath (JSON)
 }
 
 func (s *WALRecoveryTestSuite) TestWALRecovery_CrashDuringMixedOperations() {

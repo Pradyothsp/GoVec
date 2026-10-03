@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -161,7 +162,7 @@ func TestVectorIndex_Delete_WritesToWAL(t *testing.T) {
 	require.NoError(t, err)
 
 	// Parse entries (should be INSERT + DELETE)
-	lines := splitLines(data)
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
 	assert.Len(t, lines, 2, "WAL should have INSERT + DELETE entries")
 
 	var deleteEntry index.WALEntry
@@ -376,22 +377,4 @@ func TestVectorIndex_Recovery_WALOnly(t *testing.T) {
 
 	// Verify all 10 vectors recovered from WAL alone
 	assert.Len(t, recoveredIdx.Store, 10, "All 10 vectors should be recovered from WAL")
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i := 0; i < len(data); i++ {
-		if data[i] == '\n' {
-			if i > start {
-				lines = append(lines, data[start:i])
-			}
-			start = i + 1
-		}
-	}
-	return lines
 }
