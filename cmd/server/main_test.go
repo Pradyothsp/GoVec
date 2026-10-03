@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Pradyothsp/govec/internal/index"
-
+	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/index"
 )
 
 func TestWALCloseOnShutdown(t *testing.T) {
@@ -60,67 +60,73 @@ func TestWALDoubleClose(t *testing.T) {
 	assert.Error(t, err, "Double close should return error")
 }
 
-func TestRecoverySequence(t *testing.T) {
-	tempDir := t.TempDir()
-	snapPath := filepath.Join(tempDir, "snapshot.bin")
-	walPath := filepath.Join(tempDir, "test.wal")
+// newRecoveryTarget opens the WAL and engine the way main does, for a config
+// whose data and WAL paths live in a temp dir.
+func newRecoveryTarget(t *testing.T) (*config.Config, index.Engine) {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Storage.DataPath = filepath.Join(dir, "snapshot.bin")
+	cfg.Storage.WalPath = filepath.Join(dir, "test.wal")
+	return cfg, openEngine(t, cfg)
+}
 
-	// Setup: Create snapshot with 3 vectors
-	setupWal, err := index.NewWAL(filepath.Join(tempDir, "setup.wal"))
+func openEngine(t *testing.T, cfg *config.Config) index.Engine {
+	t.Helper()
+	wal, err := index.NewWAL(cfg.Storage.WalPath)
 	require.NoError(t, err)
-	setupIDMapper := core.NewIDMapper()
-	setupIdx := index.NewVectorIndex[[]float32](setupWal, nil, setupIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	t.Cleanup(func() { _ = wal.Close() })
+	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
+	require.NoError(t, err)
+	return engine
+}
+
+// TestRecoverySequence runs the real runRecovery: snapshot first, then the WAL
+// written after it.
+func TestRecoverySequence(t *testing.T) {
+	ctx := context.Background()
+	cfg, before := newRecoveryTarget(t)
 
 	for i := 1; i <= 3; i++ {
-		err = setupIdx.Insert(context.Background(), fmt.Sprintf("snap%d", i), []float32{float32(i)}, core.SparseVector{}, nil)
-		require.NoError(t, err)
+		require.NoError(t, before.Insert(ctx, fmt.Sprintf("snap%d", i), []float32{float32(i), 1}, core.SparseVector{}, nil))
 	}
-	err = setupIdx.SaveToFile(context.Background(), snapPath)
-	require.NoError(t, err)
-	setupWal.Close()
+	require.NoError(t, before.SaveToFile(ctx, cfg.Storage.DataPath)) // also clears the WAL
+	for i := 1; i <= 2; i++ {
+		require.NoError(t, before.Insert(ctx, fmt.Sprintf("wal%d", i), []float32{float32(i), 2}, core.SparseVector{}, nil))
+	}
 
-	// Create WAL with 2 more vectors
-	wal, err := index.NewWAL(walPath)
-	require.NoError(t, err)
-	err = wal.WriteEntry(context.Background(), &index.WALEntry{
-		Action: index.WALActionInsert,
-		ID:     "wal1",
-		Vector: []float32{4.0},
-	})
-	require.NoError(t, err)
-	err = wal.WriteEntry(context.Background(), &index.WALEntry{
-		Action: index.WALActionInsert,
-		ID:     "wal2",
-		Vector: []float32{5.0},
-	})
-	require.NoError(t, err)
-	wal.Close()
+	after := openEngine(t, cfg)
+	require.NoError(t, runRecovery(cfg, after))
 
-	// Recovery: Create new index
-	recoveryWal, err := index.NewWAL(walPath)
-	require.NoError(t, err)
-	defer recoveryWal.Close()
+	assert.Equal(t, 5, after.Len(), "3 from the snapshot plus 2 from the WAL")
+	for _, id := range []string{"snap1", "snap2", "snap3", "wal1", "wal2"} {
+		_, err := after.GetByID(ctx, id)
+		assert.NoError(t, err, "%s must be recovered", id)
+	}
+}
 
-	recoveryIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](recoveryWal, nil, recoveryIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+func TestRunRecovery_NoSnapshot_ReplaysWAL(t *testing.T) {
+	ctx := context.Background()
+	cfg, before := newRecoveryTarget(t)
+	require.NoError(t, before.Insert(ctx, "only-in-wal", []float32{1, 2}, core.SparseVector{}, nil))
 
-	// CORRECT sequence: LoadFromFile(DataPath) then ReplayWAL(WalPath)
-	err = recoveredIdx.LoadFromFile(context.Background(), snapPath) // Load snapshot
-	require.NoError(t, err)
+	after := openEngine(t, cfg)
+	require.NoError(t, runRecovery(cfg, after), "a missing snapshot is a fresh start, not an error")
+	assert.Equal(t, 1, after.Len())
+}
 
-	err = recoveredIdx.ReplayWAL(walPath) // Replay WAL
-	require.NoError(t, err)
+// A corrupt snapshot must stop startup. Carrying on would replay only the
+// WAL -- the writes since the last save -- and serve that as the whole index.
+func TestRunRecovery_CorruptSnapshot_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cfg, before := newRecoveryTarget(t)
+	require.NoError(t, before.Insert(ctx, "only-in-wal", []float32{1, 2}, core.SparseVector{}, nil))
+	require.NoError(t, os.WriteFile(cfg.Storage.DataPath, []byte("not a snapshot"), 0o600))
 
-	// Verify: Should have 5 vectors (3 from snapshot + 2 from WAL)
-	assert.Len(t, recoveredIdx.Store, 5, "Should recover all 5 vectors")
-	snap1ID, _ := recoveredIdx.IDMapper.ToUint32ID("snap1")
-	snap2ID, _ := recoveredIdx.IDMapper.ToUint32ID("snap2")
-	snap3ID, _ := recoveredIdx.IDMapper.ToUint32ID("snap3")
-	wal1ID, _ := recoveredIdx.IDMapper.ToUint32ID("wal1")
-	wal2ID, _ := recoveredIdx.IDMapper.ToUint32ID("wal2")
-	assert.Contains(t, recoveredIdx.Store, snap1ID)
-	assert.Contains(t, recoveredIdx.Store, snap2ID)
-	assert.Contains(t, recoveredIdx.Store, snap3ID)
-	assert.Contains(t, recoveredIdx.Store, wal1ID)
-	assert.Contains(t, recoveredIdx.Store, wal2ID)
+	after := openEngine(t, cfg)
+	err := runRecovery(cfg, after)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), cfg.Storage.DataPath, "the error must name the file to restore or delete")
+	assert.Equal(t, 0, after.Len(), "the WAL must not be replayed over a snapshot that failed to load")
 }

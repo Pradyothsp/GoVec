@@ -77,7 +77,12 @@ func main() {
 	}
 
 	// RECOVERY SEQUENCE
-	runRecovery(cfg, engine)
+	if err := runRecovery(cfg, engine); err != nil {
+		if closeErr := wal.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close WAL after recovery failure")
+		}
+		log.Fatal().Err(err).Msg("refusing to start") //nolint:gocritic // exitAfterDefer: WAL is explicitly closed above before fatal exit
+	}
 
 	// Start Background Snapshotting (The "Auto-Save")
 	startAutoSave(cfg, engine)
@@ -159,18 +164,18 @@ func startGRPCServer(cfg *config.Config, engine index.Engine) (*grpc.Server, err
 }
 
 // runRecovery handles the snapshot loading and WAL replay sequence.
-func runRecovery(cfg *config.Config, engine index.Engine) {
+//
+// A snapshot that exists but can't be loaded is an error, not a warning: the
+// WAL only holds writes since the last save, so replaying it alone would serve
+// a fraction of the data as if it were all of it. A missing snapshot is a
+// fresh start -- LoadFromFile returns nil for it.
+func runRecovery(cfg *config.Config, engine index.Engine) error {
 	// Step 1: Load the base snapshot from DataPath (GOB format)
 	log.Info().Str("path", cfg.Storage.DataPath).Msg("loading snapshot from disk")
 	if err := engine.LoadFromFile(context.Background(), cfg.Storage.DataPath); err != nil {
-		if os.IsNotExist(err) {
-			log.Info().Msg("no snapshot found, starting fresh")
-		} else {
-			log.Warn().Err(err).Msg("could not load snapshot")
-		}
-	} else {
-		log.Info().Int("vectors", engine.Len()).Msg("snapshot loaded")
+		return fmt.Errorf("load snapshot %s (restore a backup, or delete it to start empty): %w", cfg.Storage.DataPath, err)
 	}
+	log.Info().Int("vectors", engine.Len()).Msg("snapshot loaded")
 
 	// Step 2: Replay the WAL from WalPath (JSON format) to recover uncommitted changes
 	log.Info().Str("path", cfg.Storage.WalPath).Msg("replaying WAL")
@@ -179,6 +184,7 @@ func runRecovery(cfg *config.Config, engine index.Engine) {
 	} else {
 		log.Info().Int("vectors", engine.Len()).Msg("WAL replay complete")
 	}
+	return nil
 }
 
 // startAutoSave starts the background snapshotting ticker.
