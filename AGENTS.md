@@ -1,173 +1,133 @@
 # AGENTS.md
 
-This file provides guidance to agents (Claude, Gemini) and developers working on GoVec.
+Guidance for AI agents (Claude, Gemini) and contributors working in this repo. This file covers
+how the code is organized, the rules it follows, and the traps to avoid. Feature status and
+plans are in [docs/roadmap.md](docs/roadmap.md). User-facing API docs are in `README.md`.
 
-## Project Overview
+## What GoVec is (and isn't)
 
-GoVec is a high-performance vector database implemented in Go. It provides a REST API for storing and managing vector embeddings with associated metadata, supporting both float32 and int8 scalar quantization.
+A compact vector similarity search engine in Go: a REST API plus optional gRPC, float32 or int8
+storage, brute-force or HNSW indexes, and WAL plus snapshot persistence. It is meant to be small,
+production-quality code, not a Pinecone competitor. Use these limits when choosing a design:
 
-## Scope & Non-Goals
+- **Single-node, in-memory-first.** Don't add sharding, replication or multi-tenancy hooks.
+- **Small surface by design.** REST/gRPC, persistence, metadata filtering. No query language or
+  plugin system.
+- **"Lite" is the point.** When `govec-bench` (sibling repo) shows a gap to Chroma/Pinecone,
+  check `docs/roadmap.md` first. Some gaps are deliberately deferred or declined.
 
-GoVec started life as a planning doc for "go-vector-lite," with an explicit positioning: a **compact, high-performance vector similarity search engine** — inspired by Pinecone, Weaviate, and Qdrant, but deliberately smaller, easier to run, and aimed at ML apps, prototyping, and local semantic search, not at matching production-scale platforms feature-for-feature. The original goal was portfolio-grade, production-quality Go code demonstrating good engineering at small scale, not a Pinecone competitor.
+## Commands
 
-That framing sets real boundaries, not just aspirational ones:
-- **Single-node, in-memory-first.** Sharding and replication were scoped as "future scaling" from the start — never core.
-- **Small feature surface by design.** REST (+ optional gRPC), snapshot + WAL persistence, optional metadata filtering — not a query language, multi-tenancy, or a plugin ecosystem.
-- **"Lite" is the point, not a placeholder.** When comparing against Chroma/Pinecone-class systems (see the `govec-bench` sibling repo), read the results against this framing — closing every gap to those systems was never the goal, and some gaps (e.g. `SELECT-NEIGHBORS-HEURISTIC`, dense ID-indexed storage) are deliberately deferred rather than missed.
+| Command | Use |
+|---|---|
+| `task install-tools` | One-time setup: gotestsum, golangci-lint, govulncheck, swag, buf |
+| `task test` | Fast test run |
+| `task test:pkg PKG=internal/index` | Tests for one package |
+| `task test:all` | Race detector and coverage. Run before calling work done |
+| `task check` | vet, fmt, golangci-lint, govulncheck, buf lint |
+| `task fmt:fix` | Auto-fix formatting |
+| `task gen` | Regenerate Swagger (`build/swagger/`) and gRPC stubs (`gen/`) |
+| `task build` / `task run` | Build the binary / run the server on :8000 |
 
-## Getting Started
+`task run` writes `govec.wal` and `govec_data.bin` into the repo root, and `task clean` removes
+them. Don't commit them.
 
-### Prerequisites
-- **Go 1.26.0+**, **Task**, **gotestsum**, **golangci-lint**, **govulncheck**.
-- Install tools: `task install-tools`.
-
-### Quick Start
-```bash
-task deps           # Install dependencies
-task test           # Run tests
-task build          # Build the server
-task run            # Start server on http://localhost:8000
-```
-
-## Development Tooling
-
-- **Task**: Task runner (see `Taskfile.yaml`).
-- **gotestsum**: Enhanced test output and watch mode.
-- **golangci-lint**: Aggregated Go linter.
-- **govulncheck**: Vulnerability scanner.
-- **pre-commit**: Git hooks for hygiene and tooling.
-
-## Development Commands
-
-Run `task --list` to see all available commands.
-
-| Command | Description |
-|---------|-------------|
-| `task test` | Run tests with pretty output |
-| `task test:watch` | Auto re-run tests on file changes |
-| `task test:all` | Run tests with race detector and coverage |
-| `task check` | Run all static checks (lint, vet, fmt, vuln) |
-| `task build` | Build the server binary |
-| `task run` | Run the server |
-| `task clean` | Remove build artifacts |
-
-## Project Structure
+## Code map
 
 ```text
-govec/
-├── cmd/server/main.go       # Application entry point
-├── internal/
-│   ├── api/                 # HTTP layer (Gin)
-│   │   └── handlers/        # API endpoint logic
-│   ├── config/              # Configuration system (DDD)
-│   ├── core/                # Core domain logic & VectorIndex
-│   ├── hnsw/                # HNSW implementation
-│   ├── index/               # Engine factory & WAL
-│   └── test/                # Integration and E2E tests
-├── build/swagger/           # Generated API documentation
-└── config.yaml              # Default configuration
+cmd/server/main.go          wiring: config → index.NewEngine → REST router + optional gRPC server
+internal/
+  config/                   Config structs, YAML loader, GOVEC_* env overrides (env.go), validation
+  core/                     pure domain: models, similarity math, quantization, filters, metadata index
+  index/                    Engine interface + both engines, WAL, snapshots, input guards
+    engine.go               the Engine interface every transport talks to
+    factory.go              picks VectorIndex[T] (brute force) or HNSWIndex[T] from config
+    index.go / hnsw_index.go  the two engines
+    wal.go / persistence.go   durability: write-ahead log, atomic GOB snapshots
+    dimension_guard.go      input sentinels + IsInvalidVectorError
+    encode_guard.go         quantization preconditions (prepareForEncode)
+  hnsw/                     vendored fork of an upstream HNSW library, made generic over T
+  storage/                  mmap-backed store (unix, plus a stub for other platforms)
+  api/                      REST layer (Gin): router, handlers/, middleware/, response/
+  grpcserver/               gRPC layer; convert/ maps protobuf ↔ core types
+  requestid/                correlation-ID propagation shared by both transports
+  test/integration/         cross-package and end-to-end tests; testutil/ has shared helpers
+proto/                      protobuf source of truth for the gRPC API
+gen/                        generated gRPC code (do not edit)
+build/swagger/              generated OpenAPI docs (do not edit)
+docs/                       design notes, known issues, roadmap
 ```
 
-## Architecture
+Dependencies point inward: transports (`api`, `grpcserver`) → `index` → `core`. `core` imports
+no other package from this repo, and `index` never imports a transport. Keep it that way.
 
-### High-Level Structure
-GoVec uses a clean architecture with dependency injection and a factory pattern for engine creation.
+## Conventions
 
-**Dependency Flow:**
-`main.go` → `config` → `index.NewEngine` → `api.SetupRouter` → `handlers.NewVectorHandler`
+**Transports are thin and must agree.** REST and gRPC are two wire formats over one `Engine`. An
+operation must return the same result and status string over either one.
+`internal/test/integration/transport_parity_test.go` enforces this. If you add or change an
+operation, change both transports and extend the parity test.
 
-### Generic Engine & Quantization
-The engine uses Go generics (`VectorIndex[T]`) to support different vector types:
-- **float32**: High precision, 4 bytes/dim.
-- **int8 (Scalar)**: 4x memory reduction, <0.001 precision loss.
+**Classify errors where they originate.** The `index` layer defines sentinel errors and
+classifiers such as `IsInvalidVectorError`. Transports call the classifier to choose HTTP 400 or
+gRPC `InvalidArgument` over a 500. Don't make a transport `errors.Is` against index internals.
+Add the sentinel to the classifier instead.
 
-**Key Components:**
-- `internal/index/engine.go`: Common `Engine` interface.
-- `internal/index/factory.go`: Creates `VectorIndex[T]` (brute-force) or `HNSWIndex[T]` (ANN) based on configuration.
-- `internal/index/wal.go`: Write-ahead log for durability and recovery.
-- `internal/index/persistence.go`: Atomic snapshot saving/loading using GOB.
+**REST responses use the envelope.** Always write through `response.OK` / `response.Fail`
+(`{success, data, error}`). Never call `c.JSON` directly in a handler. Handlers carry swag
+annotations (`@Summary`, `@Router`, …). Run `task gen:swagger` after changing them.
 
-## Configuration
+**Generated code is regenerated, never hand-edited.** Change `proto/` and run `task gen:proto`.
+Change handler annotations and run `task gen:swagger`.
 
-GoVec uses YAML with environment variable overrides (prefix `GOVEC_`).
+**Config fields come in sets.** A new field needs a default in `config.go`, a check in
+`validation.go`, and a `GOVEC_*` override in `env.go`. Name the variable `GOVEC_` plus the YAML
+key, adding the section only when the key alone is ambiguous (`GOVEC_SERVER_PORT` vs
+`GOVEC_GRPC_PORT`). `TestLoadFromEnv_EveryFieldHasAnOverride` walks the struct by reflection and
+fails if any field has no override. Enum-like values use the typed constants
+(`config.QuantizationScalar`, `config.DistanceMetricCosine`) and never string literals.
 
-### Default `config.yaml`
-```yaml
-server:
-  port: 8000
-storage:
-  data_path: "./govec_data.bin"
-  wal_path: "./govec.wal"
-  auto_save_interval: 60s
-engine:
-  quantization: "none"      # "none" (float32) or "scalar" (int8)
-  distance_metric: "cosine" # "cosine" or "euclidean"
-```
+**Logging uses zerolog** (`github.com/rs/zerolog/log`). Don't use `fmt.Print*` or the stdlib
+`log` package.
 
-### Environment Variables
-Every field in `Config` has a `GOVEC_*` override — see `internal/config/loader.go` for the
-full list and README.md for it grouped by section. The name is `GOVEC_` plus the YAML key
-(`storage.wal_path` → `GOVEC_WAL_PATH`), with the section included only where the key alone
-would be ambiguous (`GOVEC_SERVER_PORT` vs `GOVEC_GRPC_PORT`).
+**Comments explain why.** Existing code documents the reason for non-obvious decisions, often
+naming the bug they prevent (see `encode_guard.go`, `dimension_guard.go`). Match that. Don't
+narrate what the code does line by line.
 
-**Adding a config field means adding its override too.** `TestLoadFromEnv_EveryFieldHasAnOverride`
-fails if you don't. The readers live in `internal/config/env.go`, so it is one line.
+## Testing
 
-## Current State & Roadmap
+- testify everywhere: `require` for preconditions that make the rest meaningless, `assert` for
+  the checks themselves. Integration suites use `testify/suite`.
+- Use `t.TempDir()` for any WAL or snapshot path. Never write into the repo.
+- Unit tests sit next to the code. Behaviour that crosses packages (persistence + recovery,
+  transports + engine) goes in `internal/test/integration/`.
+- Coverage target: ~100% for `internal/core` and `internal/config`.
+- Known, unfixed bugs get a regression test committed with `t.Skip("<link to doc>")`, so the
+  fix has a ready-made test to un-skip (example: `hnsw_filtered_search_test.go`).
+- Before adding a test, check that the behaviour isn't already covered. The suite has real
+  redundancy (see `docs/test-suite-review.md`).
 
-### Implemented
-- ✅ REST API (insert, search, delete, health) and optional gRPC server
-- ✅ Vector deletion (`DELETE /api/v1/vectors/:id`), upsert-on-insert, and reset (`POST /api/v1/admin/reset`)
-- ✅ Generic vector engine (`VectorIndex[T]`) over float32 and int8
-- ✅ Scalar (int8) quantization -- ~4x memory reduction
-- ✅ Approximate nearest neighbor search (HNSW) alongside brute-force linear scan
-- ✅ HNSW heuristic neighbor selection (`SELECT-NEIGHBORS-HEURISTIC`), with a distinct
-  `hnsw_ef_construction` separate from `hnsw_ef_search`
-- ✅ Concurrent-safe HNSW batch insert via round-based barrier parallelism
-  (`hnsw_batch_parallelism` / `hnsw_batch_parallel_threshold`): each round runs every item's
-  graph *search* concurrently, hits a `sync.WaitGroup` barrier, then replays every item's
-  graph *mutation* serially -- so no read ever overlaps a write, by construction
-- ✅ Cosine and Euclidean distance metrics, both index types
-- ✅ Metadata filtering in search (`engine.enable_metadata_index`) -- in-memory inverted index;
-  selective filters are pushed into graph traversal, non-selective ones post-filtered with over-fetch
-- ✅ Write-ahead log (WAL) and crash recovery
-- ✅ Atomic snapshot persistence (GOB encoding)
-- ✅ CI/CD with GitHub Actions (lint, test, vuln), multi-stage Dockerfile
+## Traps
 
-### Notes for deployers
-- `GOMEMLIMIT` (Go 1.19+, no code change) substantially cuts measured RAM under sustained load
-  at no latency cost. Deliberately not defaulted -- the right value is proportional to your
-  dataset size, not a universal constant.
+- **Don't delete `InvertedIndex` as dead code.** Its postings are maintained but not read yet.
+  It is the foundation for planned hybrid-search work (`docs/roadmap.md`). Snapshots don't store
+  it; every load path rebuilds it.
+- **HNSW graph mutation is single-writer.** Batch insert runs each round's graph *searches*
+  concurrently, waits at a `sync.WaitGroup` barrier, then applies the *mutations* serially, so
+  reads never overlap writes. Don't add concurrent mutation without reading the roadmap entry on
+  per-node locking. Its deadlock failure mode is invisible to `-race`.
+- **Scalar quantization assumes `[-1, 1]`.** `prepareForEncode` normalizes under cosine and
+  rejects out-of-range input under Euclidean. Route any new insert path through it, or vectors
+  get silently clamped and recall collapses.
+- **Filtered HNSW search can return fewer than `k`.** This is known and parked. See
+  `docs/hnsw-filtered-search-shortfall.md` before you touch filtering or "fix" a short result
+  in a test.
+- **`internal/hnsw` is a fork.** Keep changes there minimal and generic. GoVec-specific logic
+  belongs in `internal/index`.
 
-### Planned
-- ⏳ Product and Binary quantization. Not similarly-sized asks: PQ needs training/codebook
-  infrastructure that doesn't exist anywhere in this codebase; BQ is stateless, the same shape
-  as the scalar quantization that already ships.
-- ⏳ Full per-node-locking concurrent HNSW graph mutation (beyond the batch-scoped parallel
-  insert that ships today). Bigger payoff ceiling, bigger risk: hnswlib needed a dedicated
-  bug-fix PR for this exact design, and the failure mode (deadlock) isn't caught by `-race`,
-  only by hitting the wrong interleaving under load.
-- ⏳ Inverted-index-backed sparse scoring for hybrid search. Both engines keep a sparse
-  inverted index (`InvertedIndex`, posting lists maintained on insert/delete and rebuilt on
-  snapshot load), but **nothing reads the postings yet**: `computeSparseScores` scans every
-  node's sparse vector instead. The index is deliberately kept as the foundation for this
-  work -- don't delete it as dead code. Two problems it should solve:
-  - HNSW hybrid search computes sparse scores for all `n` documents, then uses only the
-    graph's ~`k` candidates, so every hybrid query is O(n) despite the O(log n) graph.
-  - HNSW hybrid search only reranks the dense candidates. A strong keyword match that isn't
-    close in meaning is never retrieved; full hybrid systems fetch candidates from both the
-    graph and the inverted index and merge them.
-- ❌ HNSW dense ID-indexed storage -- evaluated with real numbers (~11MB combined at 100k
-  vectors) and declined; not worth the implementation cost.
+## Before you finish
 
-## Testing & Workflow
-
-### Testing Standards
-- **Coverage**: Aim for 100% in `internal/core` and `internal/config`.
-- **Validation**: Use `task test:all` before any PR.
-- **Integration**: New features must include integration tests in `internal/test/integration`.
-
-### Before Committing
-1. Run `task check` to ensure linting and formatting pass.
-2. Run `task test` to verify logic.
-3. Build the project using `task build`.
+1. `task fmt:fix && task check`: lint, vet, vuln and proto lint must be clean.
+2. `task test:all`: tests pass under `-race`.
+3. `task build`.
+4. Commit messages follow the `commit-message-conventions` skill (`.agents/skills/`).
