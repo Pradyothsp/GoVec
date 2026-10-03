@@ -5,8 +5,8 @@ quantization, hybrid dense + sparse search, and crash-safe persistence, served o
 gRPC from a single static binary.
 
 [![CI](https://github.com/Pradyothsp/govec/actions/workflows/go.yml/badge.svg)](https://github.com/Pradyothsp/govec/actions/workflows/go.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/Pradyothsp/govec.svg)](https://pkg.go.dev/github.com/Pradyothsp/govec)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Pradyothsp/govec)](https://goreportcard.com/report/github.com/Pradyothsp/govec)
+[![Release](https://img.shields.io/github/v/release/Pradyothsp/govec?sort=semver)](https://github.com/Pradyothsp/govec/releases)
+[![Go version](https://img.shields.io/github/go-mod/go-version/Pradyothsp/govec)](go.mod)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 GoVec is inspired by Qdrant, Weaviate and Pinecone, but deliberately smaller. It targets
