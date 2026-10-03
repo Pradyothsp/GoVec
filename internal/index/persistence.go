@@ -103,7 +103,7 @@ func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
 	header := SnapshotHeader{
 		Version:        snapshotVersion,
 		Quantization:   quantType,
-		DistanceMetric: "cosine",
+		DistanceMetric: idx.distanceMetric,
 	}
 	if err := encoder.Encode(header); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
@@ -166,7 +166,7 @@ func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 	header := SnapshotHeader{
 		Version:        snapshotVersion,
 		Quantization:   quantType,
-		DistanceMetric: "cosine",
+		DistanceMetric: idx.distanceMetric,
 		Mmap:           true,
 	}
 	if err := encoder.Encode(header); err != nil {
@@ -237,6 +237,9 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 	}
 	if header.Quantization != expectedQuant {
 		return fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
+	}
+	if header.DistanceMetric != idx.distanceMetric {
+		return fmt.Errorf("snapshot distance metric mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", idx.distanceMetric, header.DistanceMetric)
 	}
 
 	if err := idx.IDMapper.DecodeGOB(decoder); err != nil {
