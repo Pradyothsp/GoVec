@@ -478,6 +478,22 @@ func (idx *VectorIndex[T]) addToInvertedIndex(docID uint32, sparse core.SparseVe
 	}
 }
 
+// rebuildInvertedIndex recomputes every posting list from the sparse vectors
+// in idx.Store, discarding whatever the inverted index held before.
+// MUST be called with idx.mu.Lock() held.
+func (idx *VectorIndex[T]) rebuildInvertedIndex() {
+	if idx.InvertedIndex == nil {
+		return // Hybrid search disabled
+	}
+
+	// A fresh map rather than clear(): nothing outside the index should hold
+	// the old one, but a new map makes that not matter.
+	idx.InvertedIndex = make(map[uint32][]core.Posting)
+	for internalID, node := range idx.Store {
+		idx.addToInvertedIndex(internalID, node.Sparse)
+	}
+}
+
 // removeFromInvertedIndex removes all postings for a document from the inverted index.
 // MUST be called with idx.mu.Lock() held.
 func (idx *VectorIndex[T]) removeFromInvertedIndex(docID uint32, sparse core.SparseVector) {
