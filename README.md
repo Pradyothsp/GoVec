@@ -11,8 +11,8 @@ gRPC from a single static binary.
 
 GoVec is inspired by Qdrant, Weaviate and Pinecone, but deliberately smaller. It targets
 prototyping, local semantic search, and ML apps that need vector search on a single node,
-without running a distributed platform. It starts in about 10 ms, and its query latency is on par
-with Chroma and Qdrant at the same recall (see [Performance](#performance)).
+without running a distributed platform. It starts in under 10 ms, and at the same recall as
+Chroma and Qdrant it answers queries faster than either (see [Performance](#performance)).
 
 ## Ecosystem
 
@@ -27,8 +27,8 @@ with Chroma and Qdrant at the same recall (see [Performance](#performance)).
 - **Two index types.** HNSW for approximate nearest-neighbour search, using the paper's
   heuristic neighbour selection and separate `ef_construction` / `ef_search` knobs. Exact
   brute-force scan for small collections.
-- **Scalar quantization.** Optional int8 storage cuts memory about 4x in theory; measured at
-  -43% RAM and -58% disk at 100k vectors. Vectors are range-checked before encoding, so
+- **Scalar quantization.** Optional int8 storage stores vectors in a quarter of the space;
+  measured at -61% disk and -26% RAM at 100k vectors. Vectors are range-checked before encoding, so
   quantization can't silently corrupt them.
 - **Hybrid search.** Combine a dense embedding with a sparse keyword vector in one query.
 - **Metadata filtering.** Exact-match filters on arbitrary JSON metadata, with an optional
@@ -196,24 +196,27 @@ with no latency cost. It isn't set by default because the right value depends on
 
 ## Performance
 
-Measured with [govec-bench](https://github.com/Pradyothsp/govec-bench), all four systems in the
-same session. Each ran in Docker capped at 2 CPU / 2 GB, on SIFT10K (128-dim), with HNSW
-`M=16, ef_construction=200, ef_search=50`. Memory was measured at 100k vectors.
+Measured with [govec-bench](https://github.com/Pradyothsp/govec-bench) (October 2026), all four
+systems in the same session, each in Docker capped at 2 CPU / 2 GB. The dataset is SIFT10K
+(128-dim), with HNSW `M=16, ef_construction=200, ef_search=50`. Memory was measured at 100k
+vectors. Latencies are medians across 3–4 repeated runs.
 
 | | GoVec | GoVec (int8) | Chroma | Qdrant |
 |---|---:|---:|---:|---:|
-| Query latency, k=10 (mean) | 1.46 ms | **1.35 ms** | 2.50 ms | 2.01 ms |
-| Single insert (mean) | 2.28 ms | **1.98 ms** | 11.59 ms | 3.32 ms |
-| Batch insert, per vector | 0.57 ms | 0.42 ms | **0.36 ms** | 1.25 ms |
-| Recall@10 | 99.1% | 93.8% | 99.2% | **99.4%** |
-| Cold start (mean) | 10.9 ms | **10.7 ms** | 85.8 ms | 29.5 ms |
-| RAM, 100k vectors | 246 MB | 145 MB | **109 MB** | 127 MB |
-| Disk, 100k vectors | 119 MB | **47 MB** | 87 MB | 231 MB |
+| Query latency, k=10 (mean) | **1.17 ms** | 1.27 ms | 3.00 ms | 2.46 ms |
+| Single insert (mean) | 2.25 ms | **2.14 ms** | 8.04 ms | 2.26 ms |
+| Batch insert, per vector | 0.38 ms | 0.28 ms | **0.24 ms** | 0.96 ms |
+| Recall@10 | **99.2%** | 93.9% | **99.2%** | **99.2%** |
+| Cold start (p50) | 7.6 ms | **7.5 ms** | 60.4 ms | 12.9 ms |
+| RAM, 100k vectors | 232 MB | 173 MB | **107 MB** | 111 MB |
+| Disk, 100k vectors | 118 MB | **47 MB** | 87 MB | 231 MB |
 
-At the same recall as Chroma, GoVec answers queries about 1.7x faster, inserts single vectors
-about 5x faster, and starts about 8x faster. Chroma is ahead on batch-insert throughput and
-RAM. GoVec's HNSW stores neighbour lists as pointers rather than flat ID arrays, which costs
-memory. Full methodology and raw results are in the govec-bench repo.
+At identical recall, GoVec had the fastest queries in every run: about 2.5x faster than Chroma
+and 2x faster than Qdrant at the median. It inserts single vectors about 3.5x faster than
+Chroma, on par with Qdrant, and starts about 8x faster than Chroma. Chroma leads on
+batch-insert throughput and RAM. GoVec's HNSW stores neighbour lists as pointers rather than
+flat ID arrays, which costs memory. Full methodology and raw results are in the govec-bench
+repo.
 
 ## Status and limitations
 
