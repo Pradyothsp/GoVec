@@ -490,11 +490,11 @@ func (s *HNSWScalarIntegrationSuite) TestHNSW_Scalar_SearchAccuracy_VsFloat32() 
 // These run on both suites through base-struct promotion.
 // =============================================================================
 
-// TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored verifies that SaveToFile
-// correctly serialises the InvertedIndex (when EnableHybridSearch=true) and
-// LoadFromFile correctly restores it, so hybrid search produces the expected
-// ranking after a reload.
-func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
+// TestHNSW_SaveLoad_HybridRankingSurvives verifies that each document's sparse
+// vector survives SaveToFile/LoadFromFile, so hybrid search ranks the same
+// after a reload. Sparse scores come from the stored sparse vectors, not the
+// InvertedIndex postings, which nothing reads yet.
+func (s *hnswSuiteBase) TestHNSW_SaveLoad_HybridRankingSurvives() {
 	dir := s.T().TempDir()
 	walPath := dir + "/hybrid.wal"
 	snapPath := dir + "/hybrid.bin"
@@ -511,11 +511,11 @@ func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
 	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
 	s.Require().NoError(err)
 
-	// doc1: strong dense AND strong sparse on token 10 → must rank first in hybrid search
+	// doc1: close dense match with a strong sparse hit on token 10
 	s.Require().NoError(engine.Insert(context.Background(), "doc1", []float32{1, 0, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{5.0},
 	}, nil))
-	// doc2: slightly weaker dense, no sparse
+	// doc2: the exact dense match for the query below, no sparse
 	s.Require().NoError(engine.Insert(context.Background(), "doc2", []float32{0.9, 0.1, 0, 0}, core.SparseVector{}, nil))
 	// doc3: orthogonal, no sparse
 	s.Require().NoError(engine.Insert(context.Background(), "doc3", []float32{0, 1, 0, 0}, core.SparseVector{}, nil))
@@ -534,19 +534,20 @@ func (s *hnswSuiteBase) TestHNSW_InvertedIndex_SaveLoad_HybridSearchRestored() {
 	s.Require().NoError(recoveryEngine.LoadFromFile(context.Background(), snapPath))
 	s.Equal(3, recoveryEngine.Len())
 
-	// Hybrid search: sparse query on token 10 should boost doc1 to the top
+	// The dense query is doc2's own vector, so doc2 wins on dense score alone.
+	// doc1 can only rank first if its sparse vector survived the reload.
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{3.0}}
-	results, err := recoveryEngine.Search(context.Background(), []float32{1, 0, 0, 0}, sparseQuery, 3, nil)
+	results, err := recoveryEngine.Search(context.Background(), []float32{0.9, 0.1, 0, 0}, sparseQuery, 3, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 3)
 	s.Equal("doc1", results[0].ID,
-		"doc1 must rank first after reload: InvertedIndex correctly persisted and restored")
+		"doc1's sparse vector must survive the reload and outrank doc2's dense match")
 }
 
-// TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex verifies that ReplayWAL
-// correctly rebuilds the InvertedIndex from sparse-vector WAL entries, so hybrid
-// search works correctly on an engine recovered from WAL alone (no snapshot).
-func (s *hnswSuiteBase) TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex() {
+// TestHNSW_WALReplay_HybridRankingSurvives verifies that ReplayWAL restores
+// each document's sparse vector from its WAL entry, so hybrid search ranks the
+// same on an engine recovered from the WAL alone (no snapshot).
+func (s *hnswSuiteBase) TestHNSW_WALReplay_HybridRankingSurvives() {
 	dir := s.T().TempDir()
 	walPath := dir + "/sparse.wal"
 
@@ -584,13 +585,14 @@ func (s *hnswSuiteBase) TestHNSW_WALReplay_SparseVectors_RebuildInvertedIndex() 
 	s.Require().NoError(recoveryEngine.ReplayWAL(walPath))
 	s.Equal(3, recoveryEngine.Len())
 
-	// Hybrid search must work — InvertedIndex rebuilt by insertInternal during replay
+	// The dense query is doc2's own vector, so doc2 wins on dense score alone.
+	// doc1 can only rank first if replay restored its sparse vector.
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{3.0}}
-	results, err := recoveryEngine.Search(context.Background(), []float32{1, 0, 0, 0}, sparseQuery, 3, nil)
+	results, err := recoveryEngine.Search(context.Background(), []float32{0.9, 0.1, 0, 0}, sparseQuery, 3, nil)
 	s.Require().NoError(err)
 	s.Require().Len(results, 3)
 	s.Equal("doc1", results[0].ID,
-		"doc1 must rank first: sparse InvertedIndex rebuilt correctly during WAL replay")
+		"replay must restore doc1's sparse vector so it outranks doc2's dense match")
 }
 
 // TestHNSW_Metadata_GOBRoundTrip_PreservesTypes verifies that all common metadata

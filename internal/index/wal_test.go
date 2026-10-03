@@ -2,6 +2,8 @@ package index
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,6 +302,7 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 
 	var wg sync.WaitGroup
 	numGoroutines := 50
+	errs := make(chan error, numGoroutines)
 	wg.Add(numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
@@ -307,15 +310,35 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 			defer wg.Done()
 			entry := WALEntry{
 				Action: WALActionInsert,
-				ID:     string(rune('a' + n)),
+				ID:     fmt.Sprintf("v%d", n),
 				Vector: []float32{float32(n), float32(n * 2)},
 			}
-			_ = wal.WriteEntry(context.Background(), &entry) //nolint:errcheck // test concurrency
+			errs <- wal.WriteEntry(context.Background(), &entry)
 		}(i)
 	}
 
 	wg.Wait()
-	// Test passes if no race conditions occur
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	// -race checks memory, not the file: also check every write landed on its
+	// own line, whole and exactly once.
+	data, err := os.ReadFile(walPath)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.Len(t, lines, numGoroutines)
+
+	seen := make(map[string]bool, numGoroutines)
+	for _, line := range lines {
+		var entry WALEntry
+		require.NoError(t, json.Unmarshal([]byte(line), &entry), "line is not a whole JSON entry: %q", line)
+		seen[entry.ID] = true
+	}
+	for i := 0; i < numGoroutines; i++ {
+		assert.True(t, seen[fmt.Sprintf("v%d", i)], "entry v%d is missing", i)
+	}
 }
 
 // TestReplayWAL_Variations consolidates replay test variations

@@ -558,17 +558,19 @@ func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnDelete(t *testing.T) {
 // Persistence/WAL verification: InvertedIndex and metadata GOB round-trip
 // =============================================================================
 
-// TestHNSWIndex_InvertedIndex_SaveLoad_HybridSearchRestored verifies that
-// InvertedIndex is serialised by SaveToFile and correctly restored by LoadFromFile,
-// so hybrid (dense+sparse) search continues to work on a freshly-loaded index.
-func TestHNSWIndex_InvertedIndex_SaveLoad_HybridSearchRestored(t *testing.T) {
+// TestHNSWIndex_SaveLoad_HybridRankingSurvives verifies that each
+// document's sparse vector survives SaveToFile/LoadFromFile, so hybrid search
+// ranks the same after a reload. Sparse scores come from the stored sparse
+// vectors, not the InvertedIndex postings (nothing reads those yet); the
+// postings rebuild is covered by rebuild_inverted_index_test.go.
+func TestHNSWIndex_SaveLoad_HybridRankingSurvives(t *testing.T) {
 	idx := newTestHNSWIndexWithHybrid(t)
 
-	// doc1: strong dense match AND strong sparse hit on term 10.
+	// doc1: close dense match with a strong sparse hit on term 10.
 	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
 		Indices: []uint32{10}, Values: []float32{10.0},
 	}, nil))
-	// doc2: nearly identical dense, but no sparse hit — should lose to doc1 after hybrid scoring.
+	// doc2: the exact dense match for the query below, with no sparse hit.
 	require.NoError(t, idx.Insert(context.Background(), "doc2", []float32{0.99, 0.1, 0}, core.SparseVector{}, nil))
 	// doc3: orthogonal to query, strong sparse on an unrelated term.
 	require.NoError(t, idx.Insert(context.Background(), "doc3", []float32{0, 1, 0}, core.SparseVector{
@@ -583,20 +585,19 @@ func TestHNSWIndex_InvertedIndex_SaveLoad_HybridSearchRestored(t *testing.T) {
 	require.NoError(t, idx2.LoadFromFile(context.Background(), path))
 	require.Equal(t, 3, idx2.Len())
 
-	// Sparse query targets term 10 — doc1 must rank first because its InvertedIndex
-	// entry boosted the hybrid score; if InvertedIndex were lost, doc1 and doc2
-	// would be tied on dense score alone.
+	// The dense query is doc2's own vector, so doc2 wins on dense score alone.
+	// doc1 can only rank first if its sparse vector survived the reload.
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
-	results, err := idx2.Search(context.Background(), []float32{1, 0, 0}, sparseQuery, 2, nil)
+	results, err := idx2.Search(context.Background(), []float32{0.99, 0.1, 0}, sparseQuery, 2, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
-	assert.Equal(t, "doc1", results[0].ID, "InvertedIndex must be restored: sparse boost must elevate doc1")
+	assert.Equal(t, "doc1", results[0].ID, "doc1's sparse vector must survive the reload and outrank doc2's dense match")
 }
 
-// TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex verifies that
-// replaying a WAL into a hybrid-enabled index reconstructs the InvertedIndex
-// from the sparse vectors stored in WAL entries.
-func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
+// TestHNSWIndex_WALReplay_HybridRankingSurvives verifies that replaying a WAL
+// restores each document's sparse vector from its WAL entry, so hybrid search
+// ranks the same on an index recovered from the WAL alone.
+func TestHNSWIndex_WALReplay_HybridRankingSurvives(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "hybrid_wal.wal")
 	wal, err := NewWAL(walPath)
 	require.NoError(t, err)
@@ -627,13 +628,13 @@ func TestHNSWIndex_WALReplay_SparseVectors_RebuildInvertedIndex(t *testing.T) {
 	require.NoError(t, recovered.ReplayWAL(walPath))
 	require.Equal(t, 2, recovered.Len(), "both docs must be recovered from WAL")
 
-	// Sparse query on term 10 must rank doc1 first — proving the InvertedIndex
-	// was rebuilt from the SparseVector fields in the replayed WAL entries.
+	// The dense query is doc2's own vector, so doc2 wins on dense score alone.
+	// doc1 can only rank first if replay restored its sparse vector.
 	sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{5.0}}
-	results, err := recovered.Search(context.Background(), []float32{1, 0, 0}, sparseQuery, 2, nil)
+	results, err := recovered.Search(context.Background(), []float32{0.99, 0.1, 0}, sparseQuery, 2, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
-	assert.Equal(t, "doc1", results[0].ID, "InvertedIndex must be rebuilt from WAL sparse vectors")
+	assert.Equal(t, "doc1", results[0].ID, "replay must restore doc1's sparse vector so it outranks doc2's dense match")
 }
 
 // TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability verifies that

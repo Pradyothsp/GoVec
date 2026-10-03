@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"math"
 	"os"
 	"testing"
 
@@ -216,14 +217,23 @@ func TestNewEngine_CompareQuantizationResults(t *testing.T) {
 		t.Fatalf("result count mismatch: float=%d, int8=%d", len(resultsFloat), len(resultsInt8))
 	}
 
-	t.Logf("Float32 results: %+v", resultsFloat)
-	t.Logf("Int8 results: %+v", resultsInt8)
-
-	// First result should be the same (most similar vector)
-	if resultsFloat[0].ID != resultsInt8[0].ID {
-		t.Logf("Warning: Top result differs - float=%s (score=%f), int8=%s (score=%f)",
-			resultsFloat[0].ID, resultsFloat[0].Score,
-			resultsInt8[0].ID, resultsInt8[0].Score)
+	// Match by ID, not rank: vec1 and vec2 score within 1e-5 under int8, so
+	// their order is left to the quantizer. Observed drift is about 0.008.
+	const tolerance = 0.02
+	int8Score := make(map[string]float32, len(resultsInt8))
+	for _, r := range resultsInt8 {
+		int8Score[r.ID] = r.Score
+	}
+	for _, r := range resultsFloat {
+		s, ok := int8Score[r.ID]
+		if !ok {
+			t.Errorf("%s is in the float32 results but not the int8 results", r.ID)
+		} else if diff := math.Abs(float64(r.Score - s)); diff > tolerance {
+			t.Errorf("%s: int8 score %.4f is %.4f from float32 score %.4f", r.ID, s, diff, r.Score)
+		}
+	}
+	if resultsInt8[2].ID != "vec3" {
+		t.Errorf("expected vec3 last under int8, got %s", resultsInt8[2].ID)
 	}
 }
 

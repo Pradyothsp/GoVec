@@ -268,8 +268,11 @@ func TestQuery_SuccessResponse(t *testing.T) {
 	assert.True(t, response["success"].(bool))
 	assert.Contains(t, response, "data")
 	results, ok := response["data"].([]interface{})
-	assert.True(t, ok)
-	assert.GreaterOrEqual(t, len(results), 0) // May be empty or have results
+	require.True(t, ok)
+	require.Len(t, results, 1, "the index holds one vector and k=5")
+	result, ok := results[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "vec1", result["id"])
 }
 
 // TestDelete_SuccessResponse tests the JSON response format for successful deletes

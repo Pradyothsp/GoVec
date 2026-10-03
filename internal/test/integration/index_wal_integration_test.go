@@ -133,8 +133,8 @@ func TestVectorIndex_Insert_ConcurrentWithReplay(t *testing.T) {
 	assert.NoError(t, replayErr, "ReplayWAL should not panic or error")
 	assert.NoError(t, insertErr, "Insert should not panic or error")
 
-	// Assert data integrity - all vectors should be present
-	assert.GreaterOrEqual(t, len(idx.Store), 10, "At least 10 vectors should be present")
+	// The replayed and inserted IDs are disjoint, so every one must be present.
+	assert.Equal(t, 20, idx.Len(), "all 10 replayed and 10 inserted vectors must be present")
 }
 
 // =============================================================================

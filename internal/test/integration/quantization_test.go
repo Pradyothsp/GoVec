@@ -4,6 +4,8 @@ import (
 	"context"
 	"math"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/config"
@@ -61,13 +63,15 @@ func TestScalarQuantization_EndToEnd(t *testing.T) {
 		t.Fatalf("expected 3 results, got %d", len(results))
 	}
 
-	// First result should be vec2 or vec1 (most similar)
-	firstID := results[0].ID
-	if firstID != "vec2" && firstID != "vec1" {
-		t.Logf("Warning: expected vec2 or vec1 as top result, got %s", firstID)
+	// vec1 and vec2 score within 1e-5 of each other, so their order is left
+	// to the quantizer; only that both beat vec3 is asserted.
+	topTwo := []string{results[0].ID, results[1].ID}
+	if !slices.Contains(topTwo, "vec1") || !slices.Contains(topTwo, "vec2") {
+		t.Errorf("expected vec1 and vec2 as the top two results, got %v", topTwo)
 	}
-
-	t.Logf("Search results: %+v", results)
+	if results[2].ID != "vec3" {
+		t.Errorf("expected vec3 third, got %s", results[2].ID)
+	}
 }
 
 func TestScalarQuantization_SearchAccuracy(t *testing.T) {
@@ -142,29 +146,44 @@ func TestScalarQuantization_SearchAccuracy(t *testing.T) {
 		t.Fatalf("Search (scalar) failed: %v", err)
 	}
 
-	// Compare results
-	t.Logf("None quantization results:")
-	for i, r := range resultsNone {
-		t.Logf("  %d. %s (score: %.4f)", i+1, r.ID, r.Score)
+	assertScalarMatchesFloat32(t, resultsNone, resultsScalar)
+}
+
+// scalarScoreTolerance is how far an int8 score may drift from its float32
+// score. Observed drift on these low-dimension vectors is about 0.005; a broken
+// quantizer is off by far more.
+const scalarScoreTolerance = 0.02
+
+// assertScalarMatchesFloat32 checks that int8 search approximates float32
+// search: the same IDs, each scored within scalarScoreTolerance, in the same
+// order wherever float32 separates them by more than that drift could flip.
+func assertScalarMatchesFloat32(t *testing.T, float32Results, scalarResults []index.SearchResult) {
+	t.Helper()
+	if len(float32Results) != len(scalarResults) {
+		t.Fatalf("result count differs: float32=%d, scalar=%d", len(float32Results), len(scalarResults))
 	}
 
-	t.Logf("Scalar quantization results:")
-	for i, r := range resultsScalar {
-		t.Logf("  %d. %s (score: %.4f)", i+1, r.ID, r.Score)
+	// Match by ID, not rank, so a reordered near-tie can't skip a comparison.
+	scalarScore := make(map[string]float32, len(scalarResults))
+	for _, r := range scalarResults {
+		scalarScore[r.ID] = r.Score
+	}
+	for _, r := range float32Results {
+		s, ok := scalarScore[r.ID]
+		if !ok {
+			t.Errorf("%s is in the float32 results but not the scalar results", r.ID)
+			continue
+		}
+		if diff := math.Abs(float64(r.Score - s)); diff > scalarScoreTolerance {
+			t.Errorf("%s: scalar score %.4f is %.4f from float32 score %.4f", r.ID, s, diff, r.Score)
+		}
 	}
 
-	// Top result should be the same (or very close)
-	if resultsNone[0].ID != resultsScalar[0].ID {
-		t.Logf("Warning: Top results differ - none=%s, scalar=%s", resultsNone[0].ID, resultsScalar[0].ID)
-	}
-
-	// Scores should be similar (allow some precision loss)
-	for i := 0; i < len(resultsNone); i++ {
-		if resultsNone[i].ID == resultsScalar[i].ID {
-			scoreDiff := math.Abs(float64(resultsNone[i].Score - resultsScalar[i].Score))
-			if scoreDiff > 0.1 {
-				t.Logf("Warning: Score diff for %s: %.4f", resultsNone[i].ID, scoreDiff)
-			}
+	// Two errors of up to the tolerance each can flip a pair closer than twice it.
+	for i := 0; i+1 < len(float32Results); i++ {
+		hi, lo := float32Results[i], float32Results[i+1]
+		if hi.Score-lo.Score > 2*scalarScoreTolerance && scalarScore[hi.ID] <= scalarScore[lo.ID] {
+			t.Errorf("scalar ranks %s above %s, but float32 separates them by %.4f", lo.ID, hi.ID, hi.Score-lo.Score)
 		}
 	}
 }
@@ -425,13 +444,17 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 		t.Fatalf("NewEngine (scalar) failed: %v", err)
 	}
 
-	// Loading should fail due to type mismatch
+	// Loading must be refused by the header check, not fail later in GOB
+	// decoding, so the user gets an error that says what to do.
 	err = engine2.LoadFromFile(context.Background(), dataPath)
 	if err == nil {
-		t.Log("Warning: LoadFromFile succeeded when type mismatch was expected")
-		t.Log("This suggests the snapshot format doesn't validate quantization type")
-	} else {
-		t.Logf("Expected error loading mismatched quantization: %v", err)
+		t.Fatal("LoadFromFile accepted a 'none' snapshot into a 'scalar' engine")
+	}
+	if !strings.Contains(err.Error(), "quantization mismatch") {
+		t.Fatalf("expected a quantization mismatch error, got: %v", err)
+	}
+	if engine2.Len() != 0 {
+		t.Fatalf("a refused snapshot must leave the engine empty, got %d vectors", engine2.Len())
 	}
 
 	// Clean up and start fresh (recommended workflow)
@@ -454,6 +477,4 @@ func TestQuantizationSwitch_RequiresDataDeletion(t *testing.T) {
 	if err := engine3.Insert(context.Background(), "vec1", vec, core.SparseVector{}, nil); err != nil {
 		t.Fatalf("Insert to fresh engine failed: %v", err)
 	}
-
-	t.Log("✅ Successfully created fresh database with new quantization type")
 }
