@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -132,6 +133,20 @@ func TestRunRecovery_CorruptSnapshot_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), cfg.Storage.DataPath, "the error must name the file to restore or delete")
 	assert.Equal(t, 0, after.Len(), "the WAL must not be replayed over a snapshot that failed to load")
+}
+
+// A WAL that can't be read to the end must stop startup too, as a corrupt
+// snapshot does: carrying on would drop every write after the failure point.
+func TestRunRecovery_UnreadableWAL_ReturnsError(t *testing.T) {
+	cfg, engine := newRecoveryTarget(t)
+	// A line longer than ReplayWAL's 4 MB buffer makes the scanner give up.
+	cfg.Storage.WalPath = filepath.Join(t.TempDir(), "unreadable.wal")
+	require.NoError(t, os.WriteFile(cfg.Storage.WalPath, bytes.Repeat([]byte("x"), 5<<20), 0o600))
+
+	err := runRecovery(cfg, engine)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), cfg.Storage.WalPath, "the error must name the WAL file")
 }
 
 func TestStartAutoSave_SavesUntilStopped(t *testing.T) {
