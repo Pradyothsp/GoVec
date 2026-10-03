@@ -68,20 +68,22 @@ func main() {
 	}(wal)
 
 	router := api.SetupRouter(engine, cfg.Server.APIKey, cfg.Storage.DataPath)
-	grpcSrv, err := startGRPCServer(cfg, engine)
-	if err != nil {
-		if closeErr := wal.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("failed to close WAL after gRPC startup failure")
-		}
-		log.Fatal().Err(err).Msg("failed to start gRPC server") //nolint:gocritic // exitAfterDefer: WAL is explicitly closed above before fatal exit
-	}
 
-	// RECOVERY SEQUENCE
+	// RECOVERY SEQUENCE -- before any server starts, so no request (REST or
+	// gRPC) ever sees a partly loaded index.
 	if err := runRecovery(cfg, engine); err != nil {
 		if closeErr := wal.Close(); closeErr != nil {
 			log.Error().Err(closeErr).Msg("failed to close WAL after recovery failure")
 		}
 		log.Fatal().Err(err).Msg("refusing to start") //nolint:gocritic // exitAfterDefer: WAL is explicitly closed above before fatal exit
+	}
+
+	grpcSrv, err := startGRPCServer(cfg, engine)
+	if err != nil {
+		if closeErr := wal.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close WAL after gRPC startup failure")
+		}
+		log.Fatal().Err(err).Msg("failed to start gRPC server")
 	}
 
 	// Start Background Snapshotting (The "Auto-Save")
