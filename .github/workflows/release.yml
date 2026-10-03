@@ -83,9 +83,9 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          docker run -d --name govec -p 8000:8000 "${IMAGE}:${VERSION}"
+          docker run -d --name govec -p 9697:9697 "${IMAGE}:${VERSION}"
           for _ in $(seq 1 30); do
-            curl -fsS http://localhost:8000/health && exit 0
+            curl -fsS http://localhost:9697/health && exit 0
             sleep 1
           done
           docker logs govec

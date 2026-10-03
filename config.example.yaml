@@ -13,7 +13,7 @@
 
 server:
   host: "" # Bind to all interfaces (0.0.0.0)
-  port: 8000 # HTTP server port
+  port: 9697 # HTTP server port
   shutdown_timeout: 10s       # Grace period for in-flight requests on SIGINT/SIGTERM
   read_header_timeout: 10s    # Max time to read request headers, guarding against Slowloris
   api_key: ""  # Optional: require Bearer token on all /api/v1/* routes
@@ -45,5 +45,5 @@ engine:
 
 grpc:
   enabled: false              # Set to true to start the gRPC server
-  port: 50051                 # gRPC listen port (must differ from HTTP port)
+  port: 9698                 # gRPC listen port (must differ from HTTP port)
   max_recv_msg_size_mb: 64    # Max incoming message size in MB

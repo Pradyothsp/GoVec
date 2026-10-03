@@ -30,7 +30,7 @@ Run `task --list` for the full set.
 
 | Command | What it does |
 |---|---|
-| `task run` | Start the server on `:8000` using `config.yaml` |
+| `task run` | Start the server on `:9697` using `config.yaml` |
 | `task build` | Build the `govec` binary |
 | `task test` | Run all tests |
 | `task test:pkg PKG=internal/index` | Test one package |

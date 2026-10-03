@@ -26,7 +26,7 @@ import (
 // @title           GoVec API
 // @version         1.0
 // @description     A vector database REST API for storing and querying vector embeddings.
-// @host            localhost:8000
+// @host            localhost:9697
 // @BasePath        /
 // @schemes         http
 //

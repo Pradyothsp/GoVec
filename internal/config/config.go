@@ -61,7 +61,7 @@ type EngineConfig struct {
 // GRPCConfig holds gRPC server configuration.
 type GRPCConfig struct {
 	Enabled          bool `yaml:"enabled"`              // default: false
-	Port             int  `yaml:"port"`                 // default: 50051
+	Port             int  `yaml:"port"`                 // default: 9698
 	MaxRecvMsgSizeMB int  `yaml:"max_recv_msg_size_mb"` // default: 64
 }
 
@@ -106,7 +106,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Host:              "",
-			Port:              8000,
+			Port:              9697,
 			ShutdownTimeout:   10 * time.Second,
 			ReadHeaderTimeout: 10 * time.Second,
 			LogLevel:          "info",
@@ -146,7 +146,7 @@ func DefaultConfig() *Config {
 		},
 		GRPC: GRPCConfig{
 			Enabled:          false,
-			Port:             50051,
+			Port:             9698,
 			MaxRecvMsgSizeMB: 64,
 		},
 	}

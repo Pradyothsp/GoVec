@@ -38,7 +38,7 @@ func main() {
 	// Configure zerolog for pretty console output in examples
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	baseURL := "http://localhost:8000/api/v1"
+	baseURL := "http://localhost:9697/api/v1"
 	log.Info().Msg("🚀 Starting Help Desk Demo...")
 
 	// 1. Ingest Knowledge Base (The "Training" Phase)

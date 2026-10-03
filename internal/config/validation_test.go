@@ -134,7 +134,7 @@ func TestValidateServerConfig(t *testing.T) {
 			name: "valid config",
 			cfg: ServerConfig{
 				Host:              "",
-				Port:              8000,
+				Port:              9697,
 				ShutdownTimeout:   10 * time.Second,
 				ReadHeaderTimeout: 10 * time.Second,
 			},
@@ -159,7 +159,7 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "negative shutdown timeout",
 			cfg: ServerConfig{
-				Port:              8000,
+				Port:              9697,
 				ShutdownTimeout:   -1 * time.Second,
 				ReadHeaderTimeout: 10 * time.Second,
 			},
@@ -169,7 +169,7 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "zero shutdown timeout is allowed",
 			cfg: ServerConfig{
-				Port:              8000,
+				Port:              9697,
 				ShutdownTimeout:   0,
 				ReadHeaderTimeout: 10 * time.Second,
 			},
@@ -178,7 +178,7 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "very short shutdown timeout is allowed",
 			cfg: ServerConfig{
-				Port:              8000,
+				Port:              9697,
 				ShutdownTimeout:   100 * time.Millisecond,
 				ReadHeaderTimeout: 10 * time.Second,
 			},
@@ -205,7 +205,7 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "zero read_header_timeout is invalid",
 			cfg: ServerConfig{
-				Port:              8000,
+				Port:              9697,
 				ReadHeaderTimeout: 0,
 			},
 			wantError: true,
@@ -214,7 +214,7 @@ func TestValidateServerConfig(t *testing.T) {
 		{
 			name: "negative read_header_timeout is invalid",
 			cfg: ServerConfig{
-				Port:              8000,
+				Port:              9697,
 				ReadHeaderTimeout: -1 * time.Second,
 			},
 			wantError: true,

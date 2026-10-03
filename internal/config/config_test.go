@@ -12,7 +12,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Server defaults
 	assert.Equal(t, "", cfg.Server.Host)
-	assert.Equal(t, 8000, cfg.Server.Port)
+	assert.Equal(t, 9697, cfg.Server.Port)
 	assert.Equal(t, 10*time.Second, cfg.Server.ShutdownTimeout)
 
 	// Storage defaults
@@ -31,8 +31,8 @@ func TestServerConfig_Address(t *testing.T) {
 		{
 			name:     "empty host binds to all interfaces",
 			host:     "",
-			port:     8000,
-			expected: ":8000",
+			port:     9697,
+			expected: ":9697",
 		},
 		{
 			name:     "localhost binding",

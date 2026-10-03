@@ -27,7 +27,7 @@ production-quality code, not a Pinecone competitor. Use these limits when choosi
 | `task check` | vet, fmt, golangci-lint, govulncheck, buf lint |
 | `task fmt:fix` | Auto-fix formatting |
 | `task gen` | Regenerate Swagger (`build/swagger/`) and gRPC stubs (`gen/`) |
-| `task build` / `task run` | Build the binary / run the server on :8000 |
+| `task build` / `task run` | Build the binary / run the server on :9697 |
 
 `task run` writes `govec.wal` and `govec_data.bin` into the repo root, and `task clean` removes
 them. Don't commit them.

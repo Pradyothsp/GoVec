@@ -9,7 +9,7 @@
         "contact": {},
         "version": "1.0"
     },
-    "host": "localhost:8000",
+    "host": "localhost:9697",
     "basePath": "/",
     "paths": {
         "/api/v1/admin/flush": {

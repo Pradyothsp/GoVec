@@ -56,13 +56,13 @@ WORKDIR /data
 ENV GOVEC_CONFIG_PATH=/app/config.yaml
 VOLUME /data
 
-EXPOSE 8000 50051
+EXPOSE 9697 9698
 
 # Run as non-root user
 USER nobody:nobody
 
 # Probes the default port; if you move the HTTP port with GOVEC_SERVER_PORT, set it here too.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -qO- "http://localhost:${GOVEC_SERVER_PORT:-8000}/health" >/dev/null || exit 1
+    CMD wget -qO- "http://localhost:${GOVEC_SERVER_PORT:-9697}/health" >/dev/null || exit 1
 
 CMD ["/app/govec"]

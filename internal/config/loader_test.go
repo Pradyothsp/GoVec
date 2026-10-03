@@ -27,7 +27,7 @@ func TestLoader_Load_WithMissingFile(t *testing.T) {
 	assert.NotNil(t, cfg)
 
 	// Should have default values
-	assert.Equal(t, 8000, cfg.Server.Port)
+	assert.Equal(t, 9697, cfg.Server.Port)
 	assert.Equal(t, "./govec_data.bin", cfg.Storage.DataPath)
 }
 
@@ -188,7 +188,7 @@ func TestLoader_Load_InvalidEnvironmentVariables(t *testing.T) {
 	assert.NotNil(t, cfg)
 
 	// Should fall back to default when env var is invalid
-	assert.Equal(t, 8000, cfg.Server.Port)
+	assert.Equal(t, 9697, cfg.Server.Port)
 }
 
 func TestLoader_Load_PartialYAML(t *testing.T) {

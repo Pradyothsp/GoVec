@@ -48,7 +48,7 @@ Chroma and Qdrant it answers queries faster than either (see [Performance](#perf
 With Docker:
 
 ```bash
-docker run -p 8000:8000 -v govec-data:/data ghcr.io/pradyothsp/govec:latest
+docker run -p 9697:9697 -v govec-data:/data ghcr.io/pradyothsp/govec:latest
 ```
 
 Or from source (Go 1.26+):
@@ -59,18 +59,18 @@ cd govec
 go run ./cmd/server
 ```
 
-The server listens on `http://localhost:8000`.
+The server listens on `http://localhost:9697`.
 
 ### Insert and search
 
 ```bash
 # Insert a vector with metadata
-curl -X POST http://localhost:8000/api/v1/vectors \
+curl -X POST http://localhost:9697/api/v1/vectors \
   -H "Content-Type: application/json" \
   -d '{"id": "doc-1", "vector": [0.1, 0.9, 0.2], "metadata": {"lang": "en", "year": 2024}}'
 
 # Insert several at once
-curl -X POST http://localhost:8000/api/v1/vectors/batch \
+curl -X POST http://localhost:9697/api/v1/vectors/batch \
   -H "Content-Type: application/json" \
   -d '{"vectors": [
         {"id": "doc-2", "vector": [0.8, 0.1, 0.3], "metadata": {"lang": "de"}},
@@ -78,7 +78,7 @@ curl -X POST http://localhost:8000/api/v1/vectors/batch \
       ]}'
 
 # Find the 2 nearest neighbours
-curl -X POST http://localhost:8000/api/v1/vectors/search \
+curl -X POST http://localhost:9697/api/v1/vectors/search \
   -H "Content-Type: application/json" \
   -d '{"vector": [0.1, 0.85, 0.15], "k": 2}'
 ```
@@ -96,7 +96,7 @@ curl -X POST http://localhost:8000/api/v1/vectors/search \
 Add a metadata filter (every key must match exactly):
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/vectors/search \
+curl -X POST http://localhost:9697/api/v1/vectors/search \
   -H "Content-Type: application/json" \
   -d '{"vector": [0.1, 0.85, 0.15], "k": 5, "filter": {"lang": "de"}}'
 ```
@@ -131,8 +131,8 @@ Every REST response uses the same envelope:
 | `POST` | `/api/v1/admin/flush` | Write a snapshot now |
 | `POST` | `/api/v1/admin/reset` | Delete all vectors |
 
-- **Swagger UI:** interactive docs at `http://localhost:8000/swagger/index.html`.
-- **gRPC:** set `grpc.enabled: true` to serve on port 50051. The service definition is in
+- **Swagger UI:** interactive docs at `http://localhost:9697/swagger/index.html`.
+- **gRPC:** set `grpc.enabled: true` to serve on port 9698. The service definition is in
   [`proto/govec/v1`](proto/govec/v1). It offers the same operations, plus client-streaming
   `BatchInsert`.
 - **Auth:** set `server.api_key`, and every `/api/v1/*` request must send
@@ -144,7 +144,7 @@ Every REST response uses the same envelope:
 
 GoVec reads `config.yaml` from the working directory, or the file named by `GOVEC_CONFIG_PATH`.
 In the Docker image, mount your own file at `/app/config.yaml`. All data lives in the `/data`
-volume, and gRPC needs `-p 50051:50051` once enabled.
+volume, and gRPC needs `-p 9698:9698` once enabled.
 Every field also has an environment variable, and the environment wins. The variable name is
 `GOVEC_` plus the YAML key (`storage.wal_path` → `GOVEC_WAL_PATH`). The section is included
 only where the key alone would be ambiguous (`GOVEC_SERVER_PORT` vs `GOVEC_GRPC_PORT`).
@@ -160,7 +160,7 @@ The settings you're most likely to change:
 | `storage.data_path` | `GOVEC_DATA_PATH` | `./govec_data.bin` | snapshot file |
 | `storage.wal_path` | `GOVEC_WAL_PATH` | `./govec.wal` | write-ahead log |
 | `server.api_key` | `GOVEC_API_KEY` | empty (auth off) | bearer token for `/api/v1/*` |
-| `grpc.enabled` | `GOVEC_GRPC_ENABLED` | `false` | serve gRPC on `grpc.port` (50051) |
+| `grpc.enabled` | `GOVEC_GRPC_ENABLED` | `false` | serve gRPC on `grpc.port` (9698) |
 
 [`config.example.yaml`](config.example.yaml) documents every option, including the HNSW tuning
 parameters (`hnsw_m`, `hnsw_ef_search`, `hnsw_ef_construction`).
