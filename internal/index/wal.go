@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -42,14 +43,19 @@ type WAL struct {
 	file *os.File
 }
 
-// NewWAL creates a new WAL instance at the specified filepath
-func NewWAL(filepath string) (*WAL, error) {
+// NewWAL creates a new WAL instance at the specified path, creating its
+// directory if needed.
+func NewWAL(walPath string) (*WAL, error) {
+	if err := os.MkdirAll(filepath.Dir(walPath), 0o750); err != nil { //nolint:gosec // 0o750 satisfies G301
+		return nil, fmt.Errorf("create WAL directory: %w", err)
+	}
+
 	// Open file in Append mode (create if not exists)
-	f, err := os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // WAL file permissions are intentionally 0o644
+	f, err := os.OpenFile(walPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // WAL file permissions are intentionally 0o644
 	if err != nil {
 		return nil, err
 	}
-	log.Info().Str("path", filepath).Msg("WAL opened")
+	log.Info().Str("path", walPath).Msg("WAL opened")
 	return &WAL{file: f}, nil
 }
 
@@ -127,8 +133,8 @@ func (w *WAL) Close() error {
 
 // ReplayWAL reads the WAL file and applies changes to the index.
 // Uses locking to ensure thread-safety during concurrent operations.
-func (idx *VectorIndex[T]) ReplayWAL(filepath string) error {
-	f, err := os.Open(filepath) //nolint:gosec // filepath comes from config, not user input
+func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
+	f, err := os.Open(walPath) //nolint:gosec // walPath comes from config, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil

@@ -129,7 +129,10 @@ func TestFlush_Success(t *testing.T) {
 
 func TestFlush_InvalidPath(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	h := NewSystemHandler(idx, "/nonexistent/dir/test.bin")
+	// A path under a regular file can't be created by anyone, root included.
+	notADir := filepath.Join(t.TempDir(), "a-file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+	h := NewSystemHandler(idx, filepath.Join(notADir, "test.bin"))
 
 	router := gin.New()
 	router.POST("/admin/flush", h.Flush)

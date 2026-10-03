@@ -261,11 +261,32 @@ func TestSaveToFile_InvalidPath(t *testing.T) {
 	idx := newTestIndex(t)
 	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple) //nolint:errcheck // test setup
 
-	// Try to save to invalid directory
-	invalidPath := "/nonexistent/invalid/path/test.bin"
-	err := idx.SaveToFile(context.Background(), invalidPath)
+	err := idx.SaveToFile(context.Background(), filepath.Join(uncreatableDir(t), "test.bin"))
 
 	assert.Error(t, err, "Should return error for invalid path")
+}
+
+// A snapshot path whose directory doesn't exist yet must not make every save
+// fail -- auto-save would log the same error every interval.
+func TestSaveToFile_CreatesParentDirectories(t *testing.T) {
+	engines := []struct {
+		name string
+		open func(t *testing.T) Engine
+	}{
+		{"brute", func(t *testing.T) Engine { return newTestIndex(t) }},
+		{"hnsw", func(t *testing.T) Engine { return newTestHNSWIndex(t) }},
+	}
+	for _, e := range engines {
+		t.Run(e.name, func(t *testing.T) {
+			ctx := context.Background()
+			idx := e.open(t)
+			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+
+			path := filepath.Join(t.TempDir(), "nested", "deep", "snapshot.bin")
+			require.NoError(t, idx.SaveToFile(ctx, path))
+			assert.FileExists(t, path)
+		})
+	}
 }
 
 // TestAtomicWrite_Verification verifies temp file cleanup after successful write

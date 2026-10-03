@@ -316,7 +316,7 @@ func TestHNSWIndex_SaveToFile_InvalidPath(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 
-	err := idx.SaveToFile(context.Background(), "/nonexistent/dir/hnsw.bin")
+	err := idx.SaveToFile(context.Background(), filepath.Join(uncreatableDir(t), "hnsw.bin"))
 	assert.Error(t, err)
 }
 

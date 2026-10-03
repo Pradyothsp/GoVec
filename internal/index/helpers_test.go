@@ -1,11 +1,24 @@
 package index
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/core"
 )
+
+// uncreatableDir returns a directory path that can never be created: its
+// parent is a regular file. Unlike "/nonexistent/...", this fails for every
+// user -- including root on a CI runner, who could create /nonexistent.
+func uncreatableDir(t testing.TB) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatalf("uncreatableDir: %v", err)
+	}
+	return filepath.Join(file, "dir")
+}
 
 // newTestIndex creates a VectorIndex backed by a temp WAL for testing.
 // The WAL file lives in t.TempDir() and is closed automatically on test cleanup.

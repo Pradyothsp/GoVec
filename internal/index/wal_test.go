@@ -30,20 +30,21 @@ func TestNewWAL(t *testing.T) {
 	assert.FileExists(t, walPath)
 }
 
+// A nested GOVEC_WAL_PATH must not fail startup just because its directory
+// doesn't exist yet -- the mmap store already creates its own directory.
 func TestNewWAL_CreatesParentDirectories(t *testing.T) {
-	tmpDir := t.TempDir()
-	nestedPath := filepath.Join(tmpDir, "nested", "deep", "path")
+	walPath := filepath.Join(t.TempDir(), "nested", "deep", "path", "test.wal")
 
-	// Create parent directories first (NewWAL doesn't create them)
-	err := os.MkdirAll(nestedPath, 0o755)
-	require.NoError(t, err)
-
-	walPath := filepath.Join(nestedPath, "test.wal")
 	wal, err := NewWAL(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
 	assert.FileExists(t, walPath)
+}
+
+func TestNewWAL_UncreatableParent_ReturnsError(t *testing.T) {
+	_, err := NewWAL(filepath.Join(uncreatableDir(t), "test.wal"))
+	assert.Error(t, err)
 }
 
 // TestWriteEntry_Variations consolidates all WriteEntry tests

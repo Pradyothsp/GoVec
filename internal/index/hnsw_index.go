@@ -538,6 +538,10 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 		return fmt.Errorf("unknown vector type")
 	}
 
+	if err := ensureParentDir(path); err != nil {
+		return err
+	}
+
 	var err error
 	if idx.vectorStore != nil {
 		err = idx.saveToFileMmap(path, quantType)

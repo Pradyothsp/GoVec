@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -49,6 +50,15 @@ type vectorNodeSnapshot struct {
 	Metadata   map[string]any
 }
 
+// ensureParentDir creates the directory a snapshot is written into, so a
+// nested data_path works on first save instead of failing every auto-save.
+func ensureParentDir(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // 0o750 satisfies G301
+		return fmt.Errorf("create snapshot directory: %w", err)
+	}
+	return nil
+}
+
 // SaveToFile serializes the index to a specific path.
 // When mmap is enabled (vectorStore != nil) the vectors stay in the mmap store
 // and the snapshot carries everything else; otherwise vectors are inline.
@@ -65,6 +75,10 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 		quantType = "scalar"
 	default:
 		return fmt.Errorf("unknown vector type")
+	}
+
+	if err := ensureParentDir(path); err != nil {
+		return err
 	}
 
 	var err error
