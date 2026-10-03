@@ -5,8 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -855,61 +853,21 @@ func (idx *HNSWIndex[T]) rebuildInvertedIndex() {
 	}
 }
 
-// ReplayWAL reads the WAL file and applies changes to the HNSW index.
-func (idx *HNSWIndex[T]) ReplayWAL(filepath string) error {
-	f, err := os.Open(filepath) //nolint:gosec // filepath comes from config, not user input
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close() //nolint:errcheck // read-only, close error not critical
-
-	scanner := bufio.NewScanner(f)
-	// Increase buffer to 4MB to handle large vector WAL entries (default 64KB is too small)
-	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
-	count := 0
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		var entry WALEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			log.Warn().Int("line", lineNum).Err(err).Msg("skipping malformed WAL entry")
-			continue
-		}
-
+// ReplayWAL reads the WAL file and applies changes to the HNSW index. See
+// replayWALFile for what counts as a torn write and what stops recovery.
+func (idx *HNSWIndex[T]) ReplayWAL(walPath string) error {
+	return replayWALFile(walPath, func(entry WALEntry) error {
+		idx.mu.Lock()
+		defer idx.mu.Unlock()
 		switch entry.Action {
 		case WALActionInsert:
-			idx.mu.Lock()
-			if err := idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta); err != nil {
-				log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay insert")
-				idx.mu.Unlock()
-				continue
-			}
-			idx.mu.Unlock()
-
+			return idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
 		case WALActionDelete:
-			idx.mu.Lock()
-			if err := idx.deleteInternal(entry.ID); err != nil {
-				if !errors.Is(err, core.ErrNotFound) {
-					log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay delete")
-				}
-				idx.mu.Unlock()
-				continue
-			}
-			idx.mu.Unlock()
+			return ignoreNotFound(idx.deleteInternal(entry.ID))
+		default:
+			return fmt.Errorf("unknown WAL action %q", entry.Action)
 		}
-		count++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("WAL scanner error at line %d: %w", lineNum, err)
-	}
-
-	log.Info().Int("count", count).Msg("WAL replay complete")
-	return nil
+	})
 }
 
 // Clear removes all vectors from the HNSW index, including ID mappings and the WAL,

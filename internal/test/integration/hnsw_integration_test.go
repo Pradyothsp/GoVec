@@ -414,13 +414,16 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_DeleteIsPreserved() {
 	}
 }
 
-func (s *hnswSuiteBase) TestHNSW_WALRecovery_CorruptWALSkipsEntry() {
+// A crash mid-write leaves a bad last line. Recovery cuts it off and keeps
+// every entry before it; a bad line anywhere else stops recovery (see
+// internal/index/wal_replay_policy_test.go).
+func (s *hnswSuiteBase) TestHNSW_WALRecovery_TornLastLineIsCutOff() {
 	vectors := generateTestVectors(5, 8)
 	for i, v := range vectors {
 		s.Require().NoError(s.engine.Insert(context.Background(), fmt.Sprintf("v%d", i), v, core.SparseVector{}, nil))
 	}
 
-	// Close WAL to flush writes, then append a corrupt JSON line
+	// Close WAL to flush writes, then append a torn last line
 	s.Require().NoError(s.wal.Close())
 	s.wal = nil
 
@@ -434,9 +437,11 @@ func (s *hnswSuiteBase) TestHNSW_WALRecovery_CorruptWALSkipsEntry() {
 	recoveryEngine, recoveryWal := newHNSWEngine(s.T(), recoveryDir, s.quant)
 	defer recoveryWal.Close() //nolint:errcheck // test cleanup
 
-	// Corrupt line is skipped with a warning; valid entries are recovered
 	s.Require().NoError(recoveryEngine.ReplayWAL(s.walPath))
-	s.Equal(5, recoveryEngine.Len(), "valid entries must be recovered despite corrupt WAL line")
+	s.Equal(5, recoveryEngine.Len(), "every entry before the torn line must be recovered")
+	data, err := os.ReadFile(s.walPath)
+	s.Require().NoError(err)
+	s.NotContains(string(data), "not valid json", "the torn line must be cut off the WAL")
 }
 
 // =============================================================================

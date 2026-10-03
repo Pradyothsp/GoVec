@@ -131,9 +131,40 @@ func (w *WAL) Close() error {
 	return w.file.Close()
 }
 
-// ReplayWAL reads the WAL file and applies changes to the index.
-// Uses locking to ensure thread-safety during concurrent operations.
+// ReplayWAL reads the WAL file and applies changes to the index. See
+// replayWALFile for what counts as a torn write and what stops recovery.
 func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
+	return replayWALFile(walPath, func(entry WALEntry) error {
+		idx.mu.Lock()
+		defer idx.mu.Unlock()
+		switch entry.Action {
+		case WALActionInsert:
+			return idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
+		case WALActionDelete:
+			return ignoreNotFound(idx.deleteInternal(entry.ID))
+		default:
+			return fmt.Errorf("unknown WAL action %q", entry.Action)
+		}
+	})
+}
+
+// maxWALLine is the longest WAL line replay will read: 4MB, well above any
+// realistic vector entry (the default 64KB is too small).
+const maxWALLine = 4 * 1024 * 1024
+
+// replayWALFile reads the WAL at walPath and calls apply for each entry, in
+// order. Recovery keeps the longest valid prefix of the log, as Redis and etcd
+// do:
+//
+//   - A missing file is an empty WAL.
+//   - A last line that is unterminated or isn't valid JSON is a write torn by a
+//     crash. It was never acknowledged, so it is cut off the file -- otherwise
+//     the next append would merge into it and be lost on the following replay.
+//   - A bad line before the end, or an entry apply rejects, is corruption.
+//     Replay stops with an error naming the line, and the file is left as found.
+//
+// A delete of an ID that doesn't exist is not an error: replay is idempotent.
+func replayWALFile(walPath string, apply func(WALEntry) error) error {
 	f, err := os.Open(walPath) //nolint:gosec // walPath comes from config, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -144,58 +175,79 @@ func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
 	defer f.Close() //nolint:errcheck // read-only operation, error on close is not critical
 
 	scanner := bufio.NewScanner(f)
-	// Increase buffer to 4MB to handle large vector WAL entries (default 64KB is too small)
-	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
-	count := 0
-	lineNum := 0 // Track line number for logging
+	scanner.Buffer(make([]byte, maxWALLine), maxWALLine)
+	scanner.Split(scanLinesKeepingNewline)
 
+	type badLine struct {
+		num    int
+		offset int64 // where the line starts, so a torn tail can be cut off
+		err    error
+	}
+	var (
+		bad     *badLine
+		offset  int64
+		lineNum int
+		count   int
+	)
 	for scanner.Scan() {
+		line := scanner.Bytes()
 		lineNum++
-		var entry WALEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			log.Warn().Int("line", lineNum).Err(err).Msg("skipping malformed WAL entry")
-			continue
+		// A bad line is only a torn write if nothing follows it.
+		if bad != nil {
+			return fmt.Errorf("WAL is corrupt at line %d, before its last line: %w", bad.num, bad.err)
 		}
 
-		switch entry.Action {
-		case WALActionInsert:
-			idx.mu.Lock()
-
-			err := idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
-			if err != nil {
-				log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay insert")
-				idx.mu.Unlock()
-				continue
-			}
-
-			idx.mu.Unlock()
-
-		case WALActionDelete:
-			idx.mu.Lock()
-
-			err := idx.deleteInternal(entry.ID)
-			if err != nil {
-				// Not found is OK during replay (idempotent)
-				if errors.Is(err, core.ErrNotFound) {
-					idx.mu.Unlock()
-					continue
-				}
-
-				log.Warn().Str("id", entry.ID).Int("line", lineNum).Err(err).Msg("failed to replay delete")
-				idx.mu.Unlock()
-				continue
-			}
-
-			idx.mu.Unlock()
+		lineStart := offset
+		offset += int64(len(line))
+		body, terminated := bytes.CutSuffix(line, []byte("\n"))
+		if !terminated {
+			bad = &badLine{num: lineNum, offset: lineStart, err: errors.New("unterminated line")}
+			continue
+		}
+		var entry WALEntry
+		if err := json.Unmarshal(body, &entry); err != nil {
+			bad = &badLine{num: lineNum, offset: lineStart, err: err}
+			continue
+		}
+		if err := apply(entry); err != nil {
+			return fmt.Errorf("WAL line %d: replay %s %q: %w", lineNum, entry.Action, entry.ID, err)
 		}
 		count++
 	}
-
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("WAL scanner error at line %d: %w", lineNum, err)
+		return fmt.Errorf("WAL read error after line %d: %w", lineNum, err)
+	}
+
+	if bad != nil {
+		if err := os.Truncate(walPath, bad.offset); err != nil {
+			return fmt.Errorf("cut torn last line %d off the WAL: %w", bad.num, err)
+		}
+		log.Warn().Int("line", bad.num).Int64("bytes", offset-bad.offset).Err(bad.err).
+			Msg("cut a torn last line off the WAL (a write interrupted by a crash)")
 	}
 
 	log.Info().Int("count", count).Msg("WAL replay complete")
-
 	return nil
+}
+
+// scanLinesKeepingNewline is bufio.ScanLines, except each token keeps its
+// trailing newline, so the caller can tell a complete last line from a torn
+// one and count bytes exactly.
+func scanLinesKeepingNewline(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i+1], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+// ignoreNotFound treats deleting a missing ID as success, which keeps WAL
+// replay idempotent.
+func ignoreNotFound(err error) error {
+	if errors.Is(err, core.ErrNotFound) {
+		return nil
+	}
+	return err
 }

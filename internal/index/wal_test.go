@@ -467,45 +467,6 @@ func TestReplayWAL_Variations(t *testing.T) {
 	}
 }
 
-// TestReplayWAL_ErrorHandling tests error cases
-// Note: ReplayWAL logs errors but continues processing (non-fatal)
-func TestReplayWAL_ErrorHandling(t *testing.T) {
-	tests := []struct {
-		name      string
-		setupData string
-	}{
-		{
-			name:      "malformed_json_logged",
-			setupData: `{"action":"INSERT","id":"test1"`,
-		},
-		{
-			name:      "partial_entry_processed",
-			setupData: `{"action":"INSERT","id":"vec1"}` + "\n",
-		},
-		{
-			name:      "unknown_action_logged",
-			setupData: `{"action":"UNKNOWN","id":"test"}` + "\n",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			walPath := filepath.Join(t.TempDir(), "test.wal")
-
-			// Write test data
-			err := os.WriteFile(walPath, []byte(tt.setupData), 0o600)
-			require.NoError(t, err)
-
-			// Create fresh index
-			idx := newTestIndex(t)
-
-			// Replay - errors are logged but not returned
-			err = idx.ReplayWAL(walPath)
-			assert.NoError(t, err, "ReplayWAL logs errors but doesn't fail")
-		})
-	}
-}
-
 // TestReplayWAL_ComplexSequence tests insert→update→delete chains
 func TestReplayWAL_ComplexSequence(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")

@@ -516,7 +516,9 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_InterleavedInsertsDeletes() {
 // D. Error Recovery Tests (2 tests)
 // =============================================================================
 
-func (s *WALRecoveryTestSuite) TestWALRecovery_CorruptedWALGracefulHandling() {
+// A crash mid-write leaves a bad last line; recovery cuts it off and keeps
+// every entry before it.
+func (s *WALRecoveryTestSuite) TestWALRecovery_TornLastLineIsCutOff() {
 	// Insert vec1-5
 	for i := 1; i <= 5; i++ {
 		payload := map[string]interface{}{
@@ -532,7 +534,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CorruptedWALGracefulHandling() {
 		s.Assert().Equal(http.StatusCreated, w.Code)
 	}
 
-	// Corrupt WAL
+	// Simulate a write torn by a crash: a bad last line
 	s.wal.Close()
 	f, err := os.OpenFile(s.walPath, os.O_APPEND|os.O_WRONLY, 0644)
 	s.Require().NoError(err)
@@ -540,7 +542,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CorruptedWALGracefulHandling() {
 	s.Require().NoError(err)
 	f.Close()
 
-	// Attempt insert after corruption (will fail)
+	// Reopen the WAL for appending, as main does before recovery
 	newWal, err := index.NewWAL(s.walPath)
 	s.Require().NoError(err)
 	s.wal = newWal
@@ -552,10 +554,12 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CorruptedWALGracefulHandling() {
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
-	s.Require().NoError(err, "Replay should not crash on corrupted WAL")
+	s.Require().NoError(err, "a torn last line is expected after a crash")
 
-	// Verify vec1-5 recovered (corrupted line skipped)
-	s.Assert().Len(recoveredIdx.Store, 5, "Valid entries should be recovered")
+	s.Assert().Len(recoveredIdx.Store, 5, "every entry before the torn line must be recovered")
+	data, err := os.ReadFile(s.walPath)
+	s.Require().NoError(err)
+	s.Assert().NotContains(string(data), "CORRUPTED DATA", "the torn line must be cut off the WAL")
 }
 
 func (s *WALRecoveryTestSuite) TestWALRecovery_MissingSnapshotButValidWAL() {
