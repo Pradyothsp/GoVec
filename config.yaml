@@ -21,8 +21,8 @@ server:
   pprof_addr: "localhost:6060" # Keep on loopback -- pprof exposes heap and goroutine state
 
 storage:
-  data_path: "./govec_data.bin"
-  wal_path: "./govec.wal"
+  data_path: "./govec_data.bin" # Snapshot file, written by auto-save and on shutdown
+  wal_path: "./govec.wal"     # Write-ahead log of changes since the last snapshot; replayed on startup
   auto_save_enabled: true     # Periodic snapshot. Note: a save takes the write lock for the whole
   auto_save_interval: 60s     # snapshot, briefly blocking queries -- disable it when benchmarking latency.
   enable_mmap: false          # Set to true to store vectors in OS-managed mmap files (requires dimensions > 0)
@@ -33,7 +33,7 @@ engine:
   quantization: "none"        # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
   distance_metric: "cosine"   # Options: "cosine", "euclidean"
   dimensions: 0               # Required when enable_mmap: true (e.g. 1536 for OpenAI embeddings). 0 = no upfront enforcement
-  enable_hybrid_search: true   # Enables the Inverted Index for Sparse Vectors
+  enable_hybrid_search: false  # Groundwork only: builds a sparse-vector index that search does not read yet
   enable_metadata_index: false # Enables in-memory inverted index for fast filtered search (brute & HNSW)
   # HNSW parameters (only used when index_type: "hnsw")
   hnsw_m: 16                  # Max connections per node (higher = better recall, more memory)
