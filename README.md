@@ -11,8 +11,9 @@ gRPC from a single static binary.
 
 GoVec is inspired by Qdrant, Weaviate and Pinecone, but deliberately smaller. It targets
 prototyping, local semantic search, and ML apps that need vector search on a single node,
-without running a distributed platform. It starts in under 10 ms, and at the same recall as
-Chroma and Qdrant it answers queries faster than either (see [Performance](#performance)).
+without running a distributed platform. It starts in about 12 ms, and at near-identical recall
+it answers queries about 1.6x faster than Chroma and on par with Qdrant (see
+[Performance](#performance)).
 
 ## Ecosystem
 
@@ -28,7 +29,7 @@ Chroma and Qdrant it answers queries faster than either (see [Performance](#perf
   heuristic neighbour selection and separate `ef_construction` / `ef_search` knobs. Exact
   brute-force scan for small collections.
 - **Scalar quantization.** Optional int8 storage stores vectors in a quarter of the space;
-  measured at -61% disk and -26% RAM at 100k vectors. Vectors are range-checked before encoding, so
+  measured at -61% disk and -31% RAM at 100k vectors. Vectors are range-checked before encoding, so
   quantization can't silently corrupt them.
 - **Hybrid search.** Combine a dense embedding with a sparse keyword vector in one query.
 - **Metadata filtering.** Exact-match filters on arbitrary JSON metadata, with an optional
@@ -198,27 +199,29 @@ with no latency cost. It isn't set by default because the right value depends on
 
 ## Performance
 
-Measured with [govec-bench](https://github.com/Pradyothsp/govec-bench) (October 2026), all four
-systems in the same session, each in Docker capped at 2 CPU / 2 GB. The dataset is SIFT10K
-(128-dim), with HNSW `M=16, ef_construction=200, ef_search=50`. Memory was measured at 100k
-vectors. Latencies are medians across 3–4 repeated runs.
+Measured with [govec-bench](https://github.com/Pradyothsp/govec-bench) (October 2026): pinned,
+published images of every database, run in the same session in Docker with 2 CPUs and 2 GB each.
+The dataset is SIFT10K (128-dim), with HNSW `M=16, ef_construction=200, ef_search=50`; memory was
+measured at 100k vectors. Latencies are medians across 3–4 repeated runs, and recall is graded
+against exact cosine neighbours.
 
 | | GoVec | GoVec (int8) | Chroma | Qdrant |
 |---|---:|---:|---:|---:|
-| Query latency, k=10 (mean) | **1.17 ms** | 1.27 ms | 3.00 ms | 2.46 ms |
-| Single insert (mean) | 2.25 ms | **2.14 ms** | 8.04 ms | 2.26 ms |
-| Batch insert, per vector | 0.38 ms | 0.28 ms | **0.24 ms** | 0.96 ms |
-| Recall@10 | **99.2%** | 93.9% | **99.2%** | **99.2%** |
-| Cold start (p50) | 7.6 ms | **7.5 ms** | 60.4 ms | 12.9 ms |
-| RAM, 100k vectors | 232 MB | 173 MB | **107 MB** | 111 MB |
-| Disk, 100k vectors | 118 MB | **47 MB** | 87 MB | 231 MB |
+| Query latency, k=10 (mean) | 1.54 ms | **1.35 ms** | 2.54 ms | 1.89 ms |
+| Single insert (mean) | 2.41 ms | **2.25 ms** | 11.76 ms | 2.42 ms |
+| Batch insert, per vector | 0.57 ms | 0.45 ms | **0.35 ms** | 1.21 ms |
+| Recall@1 | **99.0%** | 97.0% | **99.0%** | **99.0%** |
+| Recall@10 | 99.5% | 93.8% | **99.8%** | 99.7% |
+| Cold start (median) | **12.0 ms** | 14.6 ms | 129.9 ms | 22.6 ms |
+| RAM, 100k vectors | 252 MB | 173 MB | **109 MB** | 115 MB |
+| Disk, 100k vectors | 119 MB | **47 MB** | 87 MB | 231 MB |
 
-At identical recall, GoVec had the fastest queries in every run: about 2.5x faster than Chroma
-and 2x faster than Qdrant at the median. It inserts single vectors about 3.5x faster than
-Chroma, on par with Qdrant, and starts about 8x faster than Chroma. Chroma leads on
-batch-insert throughput and RAM. GoVec's HNSW stores neighbour lists as pointers rather than
-flat ID arrays, which costs memory. Full methodology and raw results are in the govec-bench
-repo.
+GoVec answered queries about 1.6x faster than Chroma in every run, and on par with Qdrant
+(faster at the median, slower in one run of four). It ties Qdrant on single inserts, about 5x
+faster than Chroma, and starts in about 12 ms. All three find 99% of true nearest neighbours at
+k=1; GoVec trails slightly at k=10. Chroma leads on batch-insert throughput and RAM; GoVec's HNSW
+stores neighbour lists as pointers rather than flat ID arrays, which costs memory. Methodology,
+run-to-run ranges and how to reproduce are in the govec-bench repo.
 
 ## Status and limitations
 
