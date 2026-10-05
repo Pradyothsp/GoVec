@@ -85,6 +85,25 @@ func TestCachedCosineDistanceFloat32_MatchesReference(t *testing.T) {
 	}
 }
 
+func TestEuclideanDistanceFloat32_MatchesReference(t *testing.T) {
+	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic test data
+	for _, dims := range []int{1, 3, 7, 8, 9, 15, 16, 17, 127, 128, 129, 1536, 1537, 3072} {
+		t.Run(fmt.Sprintf("d%d", dims), func(t *testing.T) {
+			for range 50 {
+				a, b := signedFloats(rng, dims), signedFloats(rng, dims)
+				var sum float64
+				for i := range a {
+					d := float64(a[i]) - float64(b[i])
+					sum += d * d
+				}
+
+				assert.InDelta(t, sum, SquaredEuclideanDistanceFloat32(a, b), 1e-5*sum)
+				assert.InDelta(t, math.Sqrt(sum), EuclideanDistanceFloat32(a, b), 1e-5*math.Sqrt(sum))
+			}
+		})
+	}
+}
+
 func TestCachedCosineDistanceFloat32_ExactCases(t *testing.T) {
 	a := []float32{0.5, -1, 2, 0, 3, -0.25, 1, 1, 4}
 	opposite := make([]float32, len(a))
@@ -115,6 +134,18 @@ func BenchmarkCachedCosineDistanceFloat32(b *testing.B) {
 		b.Run(fmt.Sprintf("d%d", dims), func(b *testing.B) {
 			for b.Loop() {
 				CachedCosineDistanceFloat32(x, nx, y, ny)
+			}
+		})
+	}
+}
+
+func BenchmarkSquaredEuclideanDistanceFloat32(b *testing.B) {
+	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic benchmark data
+	for _, dims := range []int{128, 1536} {
+		x, y := signedFloats(rng, dims), signedFloats(rng, dims)
+		b.Run(fmt.Sprintf("d%d", dims), func(b *testing.B) {
+			for b.Loop() {
+				SquaredEuclideanDistanceFloat32(x, y)
 			}
 		})
 	}

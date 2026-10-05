@@ -21,12 +21,7 @@ func CosineDistanceFloat32(a, b []float32) float32 {
 
 // EuclideanDistanceFloat32 computes the Euclidean distance between two float32 vectors.
 func EuclideanDistanceFloat32(a, b []float32) float32 {
-	var sum float32
-	for i := range a {
-		diff := a[i] - b[i]
-		sum += diff * diff
-	}
-	return float32(math.Sqrt(float64(sum)))
+	return float32(math.Sqrt(float64(core.SquaredEuclideanFloat32(a, b))))
 }
 
 // SquaredEuclideanDistanceFloat32 is EuclideanDistanceFloat32 without the
@@ -36,12 +31,7 @@ func EuclideanDistanceFloat32(a, b []float32) float32 {
 // every internal comparison -- only the k results a query actually returns
 // need the real value back, via FromSquaredEuclideanDistance.
 func SquaredEuclideanDistanceFloat32(a, b []float32) float32 {
-	var sum float32
-	for i := range a {
-		diff := a[i] - b[i]
-		sum += diff * diff
-	}
-	return sum
+	return core.SquaredEuclideanFloat32(a, b)
 }
 
 // FromSquaredEuclideanDistance converts a SquaredEuclideanDistanceFloat32/
