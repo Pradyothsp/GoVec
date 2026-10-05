@@ -101,6 +101,8 @@ narrate what the code does line by line.
 
 - testify everywhere: `require` for preconditions that make the rest meaningless, `assert` for
   the checks themselves. Integration suites use `testify/suite`.
+- Structure every test as Arrange / Act / Assert, each section marked with a `// Arrange`,
+  `// Act` or `// Assert` comment. In a table-driven test the markers go inside the `t.Run` body.
 - Use `t.TempDir()` for any WAL or snapshot path. Never write into the repo.
 - Unit tests sit next to the code. Behaviour that crosses packages (persistence + recovery,
   transports + engine) goes in `internal/test/integration/`.
