@@ -46,7 +46,7 @@ func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 		{"hnsw_mmap", func(t *testing.T, mmapDir string) hybridIndex {
 			return hnswHybrid{NewHNSWIndex[[]float32](
 				newTestWAL(t), make(map[uint32][]core.Posting), core.NewIDMapper(),
-				func(v []float32) []float32 { return v }, core.CosineSimilarity,
+				func(v []float32) []float32 { return v },
 				hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200,
 				core.NewMetadataIndex(), newTestMmapStore(t, mmapDir))}
 		}},

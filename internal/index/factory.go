@@ -187,7 +187,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			return nil, err
 		}
 		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
-			core.QuantizeVector, mathBlock.Int8Func, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
+			core.QuantizeVector, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
 			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
@@ -202,7 +202,7 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 		}
 		identityFunc := func(v []float32) []float32 { return v }
 		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
-			identityFunc, mathBlock.FloatFunc, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
+			identityFunc, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
 			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)

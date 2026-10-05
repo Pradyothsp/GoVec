@@ -119,7 +119,7 @@ func newSeededHNSWIndex(t *testing.T, withMetaIndex bool) *HNSWIndex[[]float32] 
 		metaIndex = core.NewMetadataIndex()
 	}
 	idx := NewHNSWIndex[[]float32](newTestWAL(t), nil, core.NewIDMapper(),
-		func(v []float32) []float32 { return v }, core.CosineSimilarity,
+		func(v []float32) []float32 { return v },
 		hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, metaIndex, nil)
 	idx.graph.Rng = rand.New(rand.NewSource(1))
 	return idx

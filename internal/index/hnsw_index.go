@@ -23,7 +23,6 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	records[T]
 	graph *hnsw.Graph[uint32, T]
 
-	distanceFunc               func(T, T) (float32, error)
 	hnswDistFunc               hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
 	hnswPrecompute             func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
 	hnswCachedDistance         func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
@@ -44,7 +43,6 @@ func NewHNSWIndex[T hnsw.VectorType](
 	invertedIndex map[uint32][]core.Posting,
 	idMapper *core.IDMapper,
 	encodeFunc func([]float32) T,
-	distanceFunc func(T, T) (float32, error),
 	hnswDistFunc hnsw.DistanceFunc[T],
 	// hnswPrecompute/hnswCachedDistance are the optional cache-aware pair
 	// (see hnsw.Graph.Precompute's doc comment) -- nil together for a
@@ -73,7 +71,6 @@ func NewHNSWIndex[T hnsw.VectorType](
 			encodeFunc:    encodeFunc,
 			vectorStore:   vectorStore,
 		},
-		distanceFunc:        distanceFunc,
 		hnswDistFunc:        hnswDistFunc,
 		hnswPrecompute:      hnswPrecompute,
 		hnswCachedDistance:  hnswCachedDistance,
