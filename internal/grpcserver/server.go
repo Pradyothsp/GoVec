@@ -52,11 +52,34 @@ func (s *GoVecServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.In
 	return &pb.InsertResponse{Status: "inserted"}, nil
 }
 
-// BatchInsert handles a client-streaming batch of insert requests.
+// batchChunk bounds how many streamed items are held before they go to the
+// engine. A stream has no overall size limit, unlike a REST request body.
+const batchChunk = 1000
+
+// BatchInsert handles a client-streaming batch of insert requests. Items go
+// to the engine as batches of up to batchChunk, each one WAL fsync, as a REST
+// batch does: inserting them one by one cost an fsync per vector.
 func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) error {
 	ctx := stream.Context()
 	var insertedCount int32
 	var batchErrors []*pb.BatchError
+	items := make([]index.BatchInsertItem, 0, batchChunk)
+
+	flush := func() error {
+		if len(items) == 0 {
+			return nil
+		}
+		failures, err := s.engine.BatchInsert(ctx, items)
+		if err != nil {
+			return status.Errorf(codes.Internal, "batch insert failed: %v", err)
+		}
+		for _, f := range failures {
+			batchErrors = append(batchErrors, &pb.BatchError{Id: f.ID, Error: f.Err.Error()})
+		}
+		insertedCount += int32(len(items) - len(failures)) //nolint:gosec // at most batchChunk
+		items = items[:0]
+		return nil
+	}
 
 	for {
 		req, err := stream.Recv()
@@ -67,13 +90,20 @@ func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) erro
 			return status.Errorf(codes.Internal, "stream recv error: %v", err)
 		}
 
-		sparse := convert.ProtoToSparse(req.Sparse)
-		meta := convert.ProtoToMeta(req.Metadata)
-		if err := s.engine.Insert(ctx, req.Id, req.Vector, sparse, meta); err != nil {
-			batchErrors = append(batchErrors, &pb.BatchError{Id: req.Id, Error: err.Error()})
-			continue
+		items = append(items, index.BatchInsertItem{
+			ID:     req.Id,
+			Vector: req.Vector,
+			Sparse: convert.ProtoToSparse(req.Sparse),
+			Meta:   convert.ProtoToMeta(req.Metadata),
+		})
+		if len(items) == batchChunk {
+			if err := flush(); err != nil {
+				return err
+			}
 		}
-		insertedCount++
+	}
+	if err := flush(); err != nil {
+		return err
 	}
 
 	return stream.SendAndClose(&pb.BatchInsertResponse{
