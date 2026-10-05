@@ -364,8 +364,9 @@ func (h *Graph[K, V]) Import(r io.Reader) error {
 }
 
 // ExportTopology writes the graph structure (parameters + edges) to w without
-// embedding node vectors.  This is used with the mmap storage backend where
-// vectors live in mmap-backed files rather than in the GOB snapshot.
+// embedding node vectors. GoVec's snapshots store each vector once, outside
+// the graph (inline in a node record, or in the mmap store), and supply them
+// back through ImportTopology's lookup.
 //
 // Format (version 2):
 //
@@ -419,7 +420,7 @@ func (h *Graph[K, V]) ExportTopology(w io.Writer) error {
 }
 
 // ImportTopology reads a topology-only graph export (version 2) from r, calling
-// lookupVec for each node key to retrieve its mmap-backed vector.
+// lookupVec for each node key to retrieve its vector.
 // lookupVec must return (vector, true) for every key that appears in the export;
 // a missing key causes a descriptive error.
 func (h *Graph[K, V]) ImportTopology(r io.Reader, lookupVec func(K) (V, bool)) error {

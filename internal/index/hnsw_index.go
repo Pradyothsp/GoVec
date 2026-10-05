@@ -2,7 +2,6 @@ package index
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/gob"
 	"fmt"
@@ -540,12 +539,7 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 		return err
 	}
 
-	var err error
-	if idx.vectorStore != nil {
-		err = idx.saveToFileMmap(path, quantType)
-	} else {
-		err = idx.saveToFileHeap(path, quantType)
-	}
+	err := idx.saveSnapshot(path, quantType)
 
 	if err == nil {
 		zerolog.Ctx(ctx).Info().
@@ -557,112 +551,55 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	return err
 }
 
-// saveToFileHeap writes a snapshot with the vectors inline (embedded in the GOB stream).
+// saveSnapshot writes the snapshot (layout in snapshot_stream.go) and
+// publishes it. The graph goes in as topology only: every vector is already in
+// a node record, or in the mmap store.
 // PRECONDITION: idx.mu.Lock() held.
-func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
-	tmpPath := path + ".tmp"
-	f, err := os.Create(tmpPath) //nolint:gosec // path from operator config
+func (idx *HNSWIndex[T]) saveSnapshot(path, quantType string) error {
+	if idx.vectorStore != nil {
+		// The vectors live only in the mmap store, so they must be on disk before
+		// publishSnapshot lets the WAL go.
+		if err := idx.vectorStore.Sync(); err != nil {
+			return fmt.Errorf("mmap sync: %w", err)
+		}
+	}
+
+	w, err := newSnapshotWriter(path)
 	if err != nil {
 		return err
 	}
-
-	encoder := gob.NewEncoder(f)
 
 	header := SnapshotHeader{
 		Version:        snapshotVersion,
 		Quantization:   quantType,
 		DistanceMetric: idx.distanceMetric,
 		IndexType:      "hnsw",
+		Mmap:           idx.vectorStore != nil,
 	}
-	if err := encoder.Encode(header); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+	if err := w.enc.Encode(header); err != nil {
+		w.abort()
 		return err
 	}
-	if err := idx.IDMapper.EncodeGOB(encoder); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+	if err := idx.IDMapper.EncodeGOB(w.enc); err != nil {
+		w.abort()
 		return err
 	}
-	if err := encoder.Encode(idx.metadata); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-
-	var graphBuf bytes.Buffer
-	if err := idx.graph.Export(&graphBuf); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return fmt.Errorf("failed to export HNSW graph: %w", err)
-	}
-	if err := encoder.Encode(graphBuf.Bytes()); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+	if err := writeNodeRecords(w.enc, idx.metadata, idx.vectorStore == nil); err != nil {
+		w.abort()
 		return err
 	}
 
-	return publishSnapshot(f, tmpPath, path, idx.wal)
-}
-
-// saveToFileMmap writes a snapshot without vectors: topology-only graph bytes + vectorNodeSnapshot list.
-// PRECONDITION: idx.mu.Lock() held.
-func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
-	if err := idx.vectorStore.Sync(); err != nil {
-		return fmt.Errorf("mmap sync: %w", err)
-	}
-	// Build vector-free snapshots.
-	snapshots := make([]vectorNodeSnapshot, 0, len(idx.metadata))
-	for _, node := range idx.metadata {
-		snapshots = append(snapshots, vectorNodeSnapshot{
-			InternalID: node.InternalID,
-			ExternalID: node.ExternalID,
-			Sparse:     node.Sparse,
-			Metadata:   node.Metadata,
-		})
-	}
-
-	// Topology-only graph bytes (no vector data).
-	var topoBytes bytes.Buffer
-	if err := idx.graph.ExportTopology(&topoBytes); err != nil {
+	topology := newGobChunkWriter(w.enc)
+	if err := idx.graph.ExportTopology(topology); err != nil {
+		w.abort()
 		return fmt.Errorf("failed to export HNSW topology: %w", err)
 	}
-
-	tmpPath := path + ".tmp"
-	f, err := os.Create(tmpPath) //nolint:gosec // path from operator config
-	if err != nil {
+	if err := topology.Close(); err != nil {
+		w.abort()
 		return err
 	}
 
-	encoder := gob.NewEncoder(f)
-	header := SnapshotHeader{
-		Version:        snapshotVersion,
-		Quantization:   quantType,
-		DistanceMetric: idx.distanceMetric,
-		IndexType:      "hnsw",
-		Mmap:           true,
-	}
-	if err := encoder.Encode(header); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := idx.IDMapper.EncodeGOB(encoder); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := encoder.Encode(snapshots); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := encoder.Encode(topoBytes.Bytes()); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return publishSnapshot(f, tmpPath, path, idx.wal)
+	return w.publish(idx.wal)
 }
 
 // LoadFromFile reads the HNSW index from a snapshot file.
@@ -696,6 +633,9 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	if header.IndexType != "hnsw" {
 		return fmt.Errorf("snapshot was created with brute-force index. Delete data files or change index_type to 'brute' in config")
 	}
+	if err := checkSnapshotVersion(header); err != nil {
+		return err
+	}
 
 	var expectedQuant string
 	switch any(*new(T)).(type) {
@@ -717,21 +657,28 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 		return fmt.Errorf("failed to decode IDMapper: %w", err)
 	}
 
+	if header.Mmap && idx.vectorStore == nil {
+		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
+	}
+	var mmapStore *storage.MmapStore
 	if header.Mmap {
-		err = idx.loadFromFileMmap(decoder)
-	} else {
-		// Metadata map contains inline vectors.
-		if err := decoder.Decode(&idx.metadata); err != nil {
-			return fmt.Errorf("failed to decode metadata: %w", err)
-		}
+		mmapStore = idx.vectorStore
+	}
+	if err := readNodeRecords(decoder, idx.metadata, mmapStore); err != nil {
+		return err
+	}
 
-		var graphBytes []byte
-		if err := decoder.Decode(&graphBytes); err != nil {
-			return fmt.Errorf("failed to decode HNSW graph bytes: %w", err)
+	lookupVec := func(key uint32) (T, bool) {
+		node, ok := idx.metadata[key]
+		if !ok {
+			var zero T
+			return zero, false
 		}
-		if err := idx.graph.Import(bufio.NewReader(bytes.NewReader(graphBytes))); err != nil {
-			return fmt.Errorf("failed to import HNSW graph: %w", err)
-		}
+		return node.Vector, true
+	}
+	topology := bufio.NewReaderSize(newGobChunkReader(decoder), snapshotChunkSize)
+	if err := idx.graph.ImportTopology(topology, lookupVec); err != nil {
+		return fmt.Errorf("failed to import HNSW topology: %w", err)
 	}
 
 	if idx.metaIndex != nil {
@@ -748,57 +695,6 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	}
 
 	return err
-}
-
-// loadFromFileMmap reconstructs the index from an mmap-backed snapshot.
-// PRECONDITION: idx.mu.Lock() held; IDMapper already decoded.
-func (idx *HNSWIndex[T]) loadFromFileMmap(decoder *gob.Decoder) error {
-	if idx.vectorStore == nil {
-		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
-	}
-
-	var snapshots []vectorNodeSnapshot
-	if err := decoder.Decode(&snapshots); err != nil {
-		return fmt.Errorf("failed to decode mmap snapshots: %w", err)
-	}
-
-	// Reconstruct metadata with mmap-backed vectors.
-	for _, snap := range snapshots {
-		vec, ok := getFromMmapStore[T](idx.vectorStore, snap.InternalID)
-		if !ok {
-			return fmt.Errorf("mmap slot missing for internalID %d (externalID %q)", snap.InternalID, snap.ExternalID)
-		}
-		idx.metadata[snap.InternalID] = &core.VectorNode[T]{
-			InternalID: snap.InternalID,
-			ExternalID: snap.ExternalID,
-			Vector:     vec,
-			Sparse:     snap.Sparse,
-			Metadata:   snap.Metadata,
-		}
-	}
-
-	// Decode topology bytes and import graph with mmap-backed vectors.
-	var topoBytes []byte
-	if err := decoder.Decode(&topoBytes); err != nil {
-		return fmt.Errorf("failed to decode HNSW topology bytes: %w", err)
-	}
-
-	lookupVec := func(key uint32) (T, bool) {
-		node, ok := idx.metadata[key]
-		if !ok {
-			var zero T
-			return zero, false
-		}
-		return node.Vector, true
-	}
-	if err := idx.graph.ImportTopology(bufio.NewReader(bytes.NewReader(topoBytes)), lookupVec); err != nil {
-		return fmt.Errorf("failed to import HNSW topology: %w", err)
-	}
-
-	if idx.metaIndex != nil {
-		idx.rebuildMetaIndex()
-	}
-	return nil
 }
 
 // rebuildMetaIndex reconstructs the MetadataIndex from the current metadata map.

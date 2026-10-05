@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/storage"
 )
 
 func init() {
@@ -24,32 +25,22 @@ func init() {
 
 // SnapshotHeader contains metadata about the snapshot file format
 type SnapshotHeader struct {
-	Version        int    // snapshotVersion at save time; recorded, never branched on at load
+	Version        int    // snapshotVersion at save time; a load rejects any other
 	Quantization   string // "none" or "scalar"
 	DistanceMetric string // "cosine", etc.
 	IndexType      string // "" or "brute" = VectorIndex; "hnsw" = HNSWIndex
 	Mmap           bool   // vectors live in the mmap store, not inline in the snapshot
 }
 
-// snapshotVersion is written into every snapshot header so a file records
-// which format produced it. Load paths deliberately ignore it: they branch on
-// IndexType and Mmap.
-const snapshotVersion = 1
+// snapshotVersion is written into every snapshot header, and a load rejects
+// any other (checkSnapshotVersion). 2: streamed records, HNSW topology only
+// (snapshot_stream.go). 1: each section as one gob value, vectors twice for HNSW.
+const snapshotVersion = 2
 
 // The inverted index is never written to a snapshot. It is derived data --
 // every posting comes from a node's sparse vector, which the snapshot does
 // store -- so each load path rebuilds it instead. A saved copy could only
 // disagree with the store it was derived from.
-
-// vectorNodeSnapshot is a vector-free snapshot of a VectorNode used when mmap
-// is enabled.  The Vector field is intentionally omitted: vectors live in the
-// mmap store and are restored by reading from that store at load time.
-type vectorNodeSnapshot struct {
-	InternalID uint32
-	ExternalID string
-	Sparse     core.SparseVector
-	Metadata   map[string]any
-}
 
 // ensureParentDir creates the directory a snapshot is written into, so a
 // nested data_path works on first save instead of failing every auto-save.
@@ -148,12 +139,7 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 		return err
 	}
 
-	var err error
-	if idx.vectorStore != nil {
-		err = idx.saveToFileMmap(path, quantType)
-	} else {
-		err = idx.saveToFileHeap(path, quantType)
-	}
+	err := idx.saveSnapshot(path, quantType)
 
 	if err == nil {
 		zerolog.Ctx(ctx).Info().
@@ -165,88 +151,42 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	return err
 }
 
-// saveToFileHeap writes a snapshot with the vectors inline.
-// PRECONDITION: idx.mu.Lock() held.
-func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
-	tmpPath := path + ".tmp"
-	f, err := os.Create(tmpPath) //nolint:gosec // path from operator config
+// saveSnapshot writes the snapshot (layout in snapshot_stream.go) and
+// publishes it. PRECONDITION: idx.mu.Lock() held.
+func (idx *VectorIndex[T]) saveSnapshot(path, quantType string) error {
+	if idx.vectorStore != nil {
+		// The vectors live only in the mmap store, so they must be on disk before
+		// publishSnapshot lets the WAL go.
+		if err := idx.vectorStore.Sync(); err != nil {
+			return fmt.Errorf("mmap sync: %w", err)
+		}
+	}
+
+	w, err := newSnapshotWriter(path)
 	if err != nil {
 		return err
 	}
 
-	encoder := gob.NewEncoder(f)
 	header := SnapshotHeader{
 		Version:        snapshotVersion,
 		Quantization:   quantType,
 		DistanceMetric: idx.distanceMetric,
+		Mmap:           idx.vectorStore != nil,
 	}
-	if err := encoder.Encode(header); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+	if err := w.enc.Encode(header); err != nil {
+		w.abort()
 		return err
 	}
-	if err := idx.IDMapper.EncodeGOB(encoder); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
+	if err := idx.IDMapper.EncodeGOB(w.enc); err != nil {
+		w.abort()
 		return err
 	}
-	if err := encoder.Encode(idx.Store); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return publishSnapshot(f, tmpPath, path, idx.wal)
-}
-
-// saveToFileMmap writes a snapshot without vectors; they stay in the mmap store.
-// PRECONDITION: idx.mu.Lock() held.
-func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
-	// The vectors live only in the mmap store, so they must be on disk before
-	// publishSnapshot lets the WAL go.
-	if err := idx.vectorStore.Sync(); err != nil {
-		return fmt.Errorf("mmap sync: %w", err)
-	}
-
-	// Build vector-free snapshots.
-	snapshots := make([]vectorNodeSnapshot, 0, len(idx.Store))
-	for _, node := range idx.Store {
-		snapshots = append(snapshots, vectorNodeSnapshot{
-			InternalID: node.InternalID,
-			ExternalID: node.ExternalID,
-			Sparse:     node.Sparse,
-			Metadata:   node.Metadata,
-		})
-	}
-
-	tmpPath := path + ".tmp"
-	f, err := os.Create(tmpPath) //nolint:gosec // path from operator config
-	if err != nil {
+	if err := writeNodeRecords(w.enc, idx.Store, idx.vectorStore == nil); err != nil {
+		w.abort()
 		return err
 	}
 
-	encoder := gob.NewEncoder(f)
-	header := SnapshotHeader{
-		Version:        snapshotVersion,
-		Quantization:   quantType,
-		DistanceMetric: idx.distanceMetric,
-		Mmap:           true,
-	}
-	if err := encoder.Encode(header); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := idx.IDMapper.EncodeGOB(encoder); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := encoder.Encode(snapshots); err != nil {
-		_ = f.Close()          //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return publishSnapshot(f, tmpPath, path, idx.wal)
+	return w.publish(idx.wal)
 }
 
 // LoadFromFile reads the index from disk.
@@ -279,6 +219,9 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 	if header.IndexType == "hnsw" {
 		return fmt.Errorf("snapshot was created with HNSW index. Delete data files or change index_type to 'hnsw' in config")
 	}
+	if err := checkSnapshotVersion(header); err != nil {
+		return err
+	}
 
 	var expectedQuant string
 	switch any(*new(T)).(type) {
@@ -300,60 +243,15 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 		return fmt.Errorf("failed to decode IDMapper: %w", err)
 	}
 
-	if header.Mmap {
-		// Vectors live in the mmap store, not in the GOB stream.
-		err = idx.loadFromFileMmap(decoder)
-	} else {
-		// Vectors are inline in the store.
-		if err := decoder.Decode(&idx.Store); err != nil {
-			return fmt.Errorf("failed to decode store: %w", err)
-		}
-
-		if idx.metaIndex != nil {
-			idx.metaIndex.Clear()
-			for internalID, node := range idx.Store {
-				idx.metaIndex.Add(internalID, node.Metadata)
-			}
-		}
-
-		idx.rebuildInvertedIndex()
-	}
-
-	if err == nil {
-		zerolog.Ctx(ctx).Info().
-			Str("path", path).
-			Int("vectors", len(idx.Store)).
-			Dur("duration", time.Since(start)).
-			Msg("snapshot loaded from disk")
-	}
-
-	return err
-}
-
-// loadFromFileMmap reconstructs the Store from mmap-backed snapshots.
-// PRECONDITION: idx.mu.Lock() held; IDMapper already decoded.
-func (idx *VectorIndex[T]) loadFromFileMmap(decoder *gob.Decoder) error {
-	if idx.vectorStore == nil {
+	if header.Mmap && idx.vectorStore == nil {
 		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
 	}
-
-	var snapshots []vectorNodeSnapshot
-	if err := decoder.Decode(&snapshots); err != nil {
-		return fmt.Errorf("failed to decode mmap snapshots: %w", err)
+	var mmapStore *storage.MmapStore
+	if header.Mmap {
+		mmapStore = idx.vectorStore
 	}
-
-	for _, snap := range snapshots {
-		vec, ok := getFromMmapStore[T](idx.vectorStore, snap.InternalID)
-		if !ok {
-			return fmt.Errorf("mmap slot missing for internalID %d (externalID %q)", snap.InternalID, snap.ExternalID)
-		}
-		idx.Store[snap.InternalID] = &core.VectorNode[T]{
-			InternalID: snap.InternalID,
-			ExternalID: snap.ExternalID,
-			Vector:     vec,
-			Sparse:     snap.Sparse,
-			Metadata:   snap.Metadata,
-		}
+	if err := readNodeRecords(decoder, idx.Store, mmapStore); err != nil {
+		return err
 	}
 
 	if idx.metaIndex != nil {
@@ -365,5 +263,13 @@ func (idx *VectorIndex[T]) loadFromFileMmap(decoder *gob.Decoder) error {
 
 	idx.rebuildInvertedIndex()
 
-	return nil
+	if err == nil {
+		zerolog.Ctx(ctx).Info().
+			Str("path", path).
+			Int("vectors", len(idx.Store)).
+			Dur("duration", time.Since(start)).
+			Msg("snapshot loaded from disk")
+	}
+
+	return err
 }
