@@ -5,41 +5,24 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
-	"sort"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
-// HNSWIndex is a thread-safe vector index backed by an HNSW graph for approximate nearest neighbor search.
-// T is the vector storage type ([]float32 or []int8). Dual storage is used: the HNSW graph holds
-// vectors for fast search; the metadata map holds full node data (sparse vectors, external ID, metadata).
+// HNSWIndex is a thread-safe vector index backed by an HNSW graph for
+// approximate nearest neighbor search. T is the vector storage type ([]float32
+// or []int8). Everything about storing a record is in the embedded records;
+// HNSWIndex adds the graph, kept in step with the records on every insert and
+// delete, and searches it.
 type HNSWIndex[T hnsw.VectorType] struct {
-	graph         *hnsw.Graph[uint32, T]
-	metadata      map[uint32]*core.VectorNode[T]
-	metaIndex     *core.MetadataIndex // inverted index over metadata fields for O(1) allowlist computation
-	InvertedIndex map[uint32][]core.Posting
-	IDMapper      *core.IDMapper
+	records[T]
+	graph *hnsw.Graph[uint32, T]
 
-	// Engine config metadata — set by factory after construction
-	quantization   string
-	indexType      string
-	distanceMetric string
-	dimensions     int // 0 until first insert; set lazily under mu.Lock()
-	// configuredDimensions is engine.dimensions from config, 0 when unset.
-	// Kept apart from dimensions so Clear can tell a width the operator chose
-	// from one the index happened to learn, and release only the latter.
-	configuredDimensions int
-
-	mu                         sync.RWMutex
-	wal                        *WAL
-	encodeFunc                 func([]float32) T
 	distanceFunc               func(T, T) (float32, error)
 	hnswDistFunc               hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
 	hnswPrecompute             func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
@@ -51,40 +34,6 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	hnswEfConstruction         int                                                          // stored for Clear() graph reset
 	hnswBatchParallelism       int                                                          // stored for Clear() graph reset
 	hnswBatchParallelThreshold int                                                          // stored for Clear() graph reset
-	vectorStore                *storage.MmapStore                                           // nil when mmap is disabled
-}
-
-// GetByID returns a vector by ID.
-func (idx *HNSWIndex[T]) GetByID(_ context.Context, id string) (*VectorRecord, error) {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-
-	internalID, err := idx.IDMapper.ToUint32ID(id)
-	if err != nil {
-		return nil, core.ErrNotFound
-	}
-
-	node, ok := idx.metadata[internalID]
-	if !ok {
-		return nil, core.ErrNotFound
-	}
-
-	var vec []float32
-	switch v := any(node.Vector).(type) {
-	case []float32:
-		vec = v
-	case []int8:
-		vec = core.DequantizeVector(v)
-	default:
-		return nil, fmt.Errorf("unsupported vector type %T", node.Vector)
-	}
-
-	return &VectorRecord{
-		ID:           node.ExternalID,
-		Vector:       vec,
-		SparseVector: sparseOrNil(node.Sparse),
-		Metadata:     node.Metadata,
-	}, nil
 }
 
 // NewHNSWIndex creates an empty HNSWIndex ready for use.
@@ -113,24 +62,17 @@ func NewHNSWIndex[T hnsw.VectorType](
 	metaIndex *core.MetadataIndex,
 	vectorStore *storage.MmapStore,
 ) *HNSWIndex[T] {
-	g := hnsw.NewGraph[uint32, T]()
-	g.M = m
-	g.EfSearch = efSearch
-	g.EfConstruction = efConstruction
-	g.Distance = hnswDistFunc
-	g.Precompute = hnswPrecompute
-	g.CachedDistance = hnswCachedDistance
-	g.SquaredDistance = hnswSquaredDistance
-	g.FromSquaredDistance = hnswFromSquared
-
-	return &HNSWIndex[T]{
-		graph:               g,
-		metadata:            make(map[uint32]*core.VectorNode[T]),
-		metaIndex:           metaIndex,
-		InvertedIndex:       invertedIndex,
-		IDMapper:            idMapper,
-		wal:                 wal,
-		encodeFunc:          encodeFunc,
+	idx := &HNSWIndex[T]{
+		records: records[T]{
+			Store:         make(map[uint32]*core.VectorNode[T]),
+			InvertedIndex: invertedIndex,
+			IDMapper:      idMapper,
+			metaIndex:     metaIndex,
+			indexType:     "hnsw",
+			wal:           wal,
+			encodeFunc:    encodeFunc,
+			vectorStore:   vectorStore,
+		},
 		distanceFunc:        distanceFunc,
 		hnswDistFunc:        hnswDistFunc,
 		hnswPrecompute:      hnswPrecompute,
@@ -140,28 +82,39 @@ func NewHNSWIndex[T hnsw.VectorType](
 		hnswM:               m,
 		hnswEfSearch:        efSearch,
 		hnswEfConstruction:  efConstruction,
-		vectorStore:         vectorStore,
 	}
+	idx.graph = idx.newGraph()
+	return idx
+}
+
+// newGraph builds an empty graph from the index's settings.
+func (idx *HNSWIndex[T]) newGraph() *hnsw.Graph[uint32, T] {
+	g := hnsw.NewGraph[uint32, T]()
+	g.M = idx.hnswM
+	g.EfSearch = idx.hnswEfSearch
+	g.EfConstruction = idx.hnswEfConstruction
+	g.Distance = idx.hnswDistFunc
+	g.Precompute = idx.hnswPrecompute
+	g.CachedDistance = idx.hnswCachedDistance
+	g.SquaredDistance = idx.hnswSquaredDistance
+	g.FromSquaredDistance = idx.hnswFromSquared
+	g.BatchParallelism = idx.hnswBatchParallelism
+	g.BatchParallelThreshold = idx.hnswBatchParallelThreshold
+	return g
+}
+
+// setBatchParallelism sets how batch inserts parallelise graph construction,
+// now and after a Clear.
+func (idx *HNSWIndex[T]) setBatchParallelism(parallelism, threshold int) {
+	idx.hnswBatchParallelism = parallelism
+	idx.hnswBatchParallelThreshold = threshold
+	idx.graph.BatchParallelism = parallelism
+	idx.graph.BatchParallelThreshold = threshold
 }
 
 // Insert adds or updates a vector in the index with thread-safety.
 func (idx *HNSWIndex[T]) Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	err := idx.wal.WriteEntry(ctx, &WALEntry{
-		Action: WALActionInsert,
-		ID:     id,
-		Vector: vec,
-		Sparse: sparse,
-		Meta:   meta,
-	})
-	if err != nil {
-		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
-		return err
-	}
-
-	return idx.insertInternal(id, vec, sparse, meta)
+	return idx.insert(ctx, id, vec, sparse, meta, idx.insertInternal)
 }
 
 // BatchInsert adds or updates multiple vectors with a single WAL fsync for the
@@ -175,61 +128,35 @@ func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertIte
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	entries := make([]*WALEntry, len(items))
-	for i, item := range items {
-		entries[i] = &WALEntry{
-			Action: WALActionInsert,
-			ID:     item.ID,
-			Vector: item.Vector,
-			Sparse: item.Sparse,
-			Meta:   item.Meta,
-		}
-	}
-
-	if err := idx.wal.WriteEntries(ctx, entries); err != nil {
-		zerolog.Ctx(ctx).Error().Err(err).Int("count", len(items)).Msg("failed to write WAL batch")
+	if err := idx.logBatch(ctx, items); err != nil {
 		return nil, err
 	}
 
 	var failures []BatchInsertError
 
-	// pendingByID collects every successfully bookkept item's graph node,
-	// keyed by internalID -- an intra-batch duplicate external ID always
-	// resolves to the same internalID (IDMapper.GetOrCreate is a pure
-	// function of the string), so a repeat here naturally overwrites to
-	// last-wins, replicating today's exact net behavior without needing a
-	// separate dedup pass. order preserves first-seen position so the
-	// eventual graph.Add call sees a deterministic node order.
+	// pendingByID collects every stored item's graph node, keyed by
+	// internalID: an intra-batch duplicate external ID always resolves to the
+	// same internalID, so a repeat overwrites to last-wins. order preserves
+	// first-seen position so graph.Add sees a deterministic node order.
+	//
+	// Each item is put in the records immediately, not deferred: a duplicate
+	// ID's second occurrence must see the first's record to replace its index
+	// entries. Only the graph mutation is deferred, into one graph.Add below.
 	pendingByID := make(map[uint32]hnsw.Node[uint32, T], len(items))
 	order := make([]uint32, 0, len(items))
 
 	for _, item := range items {
-		internalID, encoded, err := idx.bookkeepInsert(item.ID, item.Vector, item.Sparse, item.Meta)
+		node, err := idx.putAndDetach(item.ID, item.Vector, item.Sparse, item.Meta)
 		if err != nil {
 			zerolog.Ctx(ctx).Error().Err(err).Str("id", item.ID).Msg("failed to apply batch insert item")
 			failures = append(failures, BatchInsertError{ID: item.ID, Err: err})
 			continue
 		}
 
-		if _, dup := pendingByID[internalID]; !dup {
-			order = append(order, internalID)
+		if _, dup := pendingByID[node.InternalID]; !dup {
+			order = append(order, node.InternalID)
 		}
-		pendingByID[internalID] = hnsw.MakeNode[uint32, T](internalID, encoded)
-
-		// Published immediately, not deferred to the end: bookkeepInsert's
-		// own inverted-index/metaIndex/upsert-pre-delete logic reads
-		// idx.metadata to decide "does this key already have old content to
-		// replace" -- an intra-batch duplicate ID's second occurrence needs
-		// to see the first occurrence's data here to get that right. Only
-		// the graph mutation itself is deferred, batched into the one
-		// idx.graph.Add call below.
-		idx.metadata[internalID] = &core.VectorNode[T]{
-			InternalID: internalID,
-			ExternalID: item.ID,
-			Vector:     encoded,
-			Sparse:     item.Sparse,
-			Metadata:   item.Meta,
-		}
+		pendingByID[node.InternalID] = hnsw.MakeNode[uint32, T](node.InternalID, node.Vector)
 	}
 
 	if len(order) == 0 {
@@ -245,101 +172,32 @@ func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertIte
 	return failures, nil
 }
 
-// insertInternal performs the core insert logic without WAL writes, used by
-// Insert() (a single item, so bookkeepInsert's upsert pre-delete plus this
-// method's own graph.Add call always resolve to Graph's serial path
-// anyway -- see resolveParallelism) and by ReplayWAL.
+// insertInternal applies an insert without writing it to the WAL, used by
+// Insert and by ReplayWAL.
 // PRECONDITION: idx.mu.Lock() must be held by caller.
 func (idx *HNSWIndex[T]) insertInternal(id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
-	internalID, encoded, err := idx.bookkeepInsert(id, vec, sparse, meta)
+	node, err := idx.putAndDetach(id, vec, sparse, meta)
 	if err != nil {
 		return err
 	}
-
-	idx.graph.Add(hnsw.MakeNode[uint32, T](internalID, encoded))
-
-	idx.metadata[internalID] = &core.VectorNode[T]{
-		InternalID: internalID,
-		ExternalID: id,
-		Vector:     encoded,
-		Sparse:     sparse,
-		Metadata:   meta,
-	}
-
+	idx.graph.Add(hnsw.MakeNode[uint32, T](node.InternalID, node.Vector))
 	return nil
 }
 
-// bookkeepInsert performs every non-graph step of inserting a vector:
-// resolving/creating its internal ID, updating the inverted index and
-// MetadataIndex, dimension tracking, encoding, mmap storage, and the upsert
-// pre-delete (removing any existing graph node for this key so the caller's
-// subsequent graph.Add call inserts fresh rather than colliding). It
-// deliberately does not call idx.graph.Add or write idx.metadata itself --
-// both stay the caller's responsibility, so BatchInsert can defer every
-// item's graph.Add into a single batched call instead of one per item.
-// PRECONDITION: idx.mu.Lock() held by caller.
-func (idx *HNSWIndex[T]) bookkeepInsert(id string, vec []float32, sparse core.SparseVector, meta map[string]any) (internalID uint32, encoded T, err error) {
-	// Reject a vector that can't be compared against the rest of the index,
-	// before any mutation below -- GetOrCreate allocates a permanent internal
-	// ID, and the index updates that follow are not rolled back on a later
-	// error.
-	if dimErr := validateVectorDims(vec, idx.dimensions); dimErr != nil {
-		return 0, encoded, dimErr
-	}
-
-	internalID, err = idx.IDMapper.GetOrCreate(id)
+// putAndDetach stores a record (records.put) and, when it replaces one, takes
+// the old node out of the graph, ready for the caller's graph.Add. graph.Add's
+// built-in delete-on-update operates inside the layer-iteration loop and can
+// leave layers in a stale state when the only node is deleted mid-loop.
+// PRECONDITION: idx.mu.Lock() held.
+func (idx *HNSWIndex[T]) putAndDetach(id string, vec []float32, sparse core.SparseVector, meta map[string]any) (*core.VectorNode[T], error) {
+	node, replaced, err := idx.put(id, vec, sparse, meta)
 	if err != nil {
-		return 0, encoded, err
+		return nil, err
 	}
-
-	if idx.InvertedIndex != nil {
-		if existingNode, exists := idx.metadata[internalID]; exists {
-			idx.removeFromInvertedIndex(internalID, existingNode.Sparse)
-		}
-		idx.addToInvertedIndex(internalID, sparse)
+	if replaced {
+		idx.graph.Delete(node.InternalID)
 	}
-
-	// Update MetadataIndex when enabled.
-	if idx.metaIndex != nil {
-		if existingNode, exists := idx.metadata[internalID]; exists {
-			idx.metaIndex.Remove(internalID, existingNode.Metadata)
-		}
-		idx.metaIndex.Add(internalID, meta)
-	}
-
-	// Track dimensions from the first vector seen
-	if idx.dimensions == 0 && len(vec) > 0 {
-		idx.dimensions = len(vec)
-	}
-
-	encodeInput, err := prepareForEncode(vec, idx.quantization, idx.distanceMetric)
-	if err != nil {
-		return 0, encoded, err
-	}
-	encoded = idx.encodeFunc(encodeInput)
-
-	// When mmap is enabled, persist the encoded bytes and replace encoded with
-	// the mmap-backed slice.  Both the graph node (Node.Value) and the metadata
-	// map (VectorNode.Vector) will alias the same mmap memory — no heap copy.
-	if idx.vectorStore != nil {
-		mmapVec, err := putToMmapStore(idx.vectorStore, internalID, encoded)
-		if err != nil {
-			return 0, encoded, fmt.Errorf("mmap store put: %w", err)
-		}
-		encoded = mmapVec
-	} else {
-		encoded = storedCopy(encoded)
-	}
-
-	// For updates (re-using the same internalID), explicitly remove the node
-	// from the graph before the caller re-adds it. graph.Add's built-in
-	// delete-on-update operates inside the layer-iteration loop and can
-	// leave layers in a stale state when the only node is deleted mid-loop.
-	if _, exists := idx.metadata[internalID]; exists {
-		idx.graph.Delete(internalID)
-	}
-
-	return internalID, encoded, nil
+	return node, nil
 }
 
 // Search finds the k nearest neighbors to the query vector using HNSW approximate search.
@@ -347,44 +205,23 @@ func (idx *HNSWIndex[T]) bookkeepInsert(id string, vec []float32, sparse core.Sp
 //   - Selective filters (≤50% match): allowlist pushed into graph traversal + scaled efSearch.
 //   - Non-selective filters (>50% match): post-filter with mild over-fetch.
 //
-// When hybrid search is enabled, dense and sparse scores are combined with alpha=0.7.
+// With a sparse query and hybrid search on, scores blend dense and sparse
+// similarity (see records.scorer).
 func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery core.SparseVector, k int, filters map[string]interface{}) ([]SearchResult, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	// Checked before the empty-graph short-circuit below so both engines
-	// reject a bad query identically, rather than one erroring and the other
-	// quietly returning no results.
-	if err := validateVectorDims(query, idx.dimensions); err != nil {
+	encodedQuery, err := idx.encodeQuery(query)
+	if err != nil {
 		return nil, err
 	}
-
 	if idx.graph.Len() == 0 {
 		return nil, nil
 	}
 
-	encodeInput, err := prepareForEncode(query, idx.quantization, idx.distanceMetric)
-	if err != nil {
-		return nil, err
-	}
-	encodedQuery := idx.encodeFunc(encodeInput)
-
-	useHybridSearch := idx.InvertedIndex != nil && !sparseQuery.IsEmpty()
-	const alpha = 0.7
-
-	var sparseScores map[uint32]float32
-	if useHybridSearch {
-		sparseScores = idx.computeSparseScores(sparseQuery)
-	}
-
-	// Compute allowlist via MetadataIndex — O(1) lookup, no scanning.
-	// Falls back to post-filter-only when MetadataIndex is disabled (nil).
-	var allowlist map[uint32]struct{}
-	if filters != nil && idx.metaIndex != nil {
-		allowlist = idx.metaIndex.Allowlist(filters)
-		if len(allowlist) == 0 {
-			return nil, nil // short-circuit: no documents match the filter
-		}
+	allowlist, indexed := idx.filterAllowlist(filters)
+	if indexed && len(allowlist) == 0 {
+		return nil, nil // no documents match the filter
 	}
 
 	// Choose search strategy based on filter selectivity.
@@ -394,7 +231,7 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 	var graphAllowlist map[uint32]struct{}
 	scaledEf := 0 // 0 → graph uses its configured default
 
-	if allowlist != nil {
+	if indexed {
 		selectivity := float64(len(allowlist)) / float64(idx.graph.Len())
 		if selectivity > selectivityThreshold {
 			// Non-selective: most docs match, post-filter is cheap enough.
@@ -411,40 +248,18 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 		}
 	}
 
+	score := idx.scorer(sparseQuery)
 	candidates := idx.graph.SearchWithDistance(encodedQuery, fetchCount, graphAllowlist, scaledEf)
 	results := make([]SearchResult, 0, len(candidates))
-
 	for _, candidate := range candidates {
-		node, ok := idx.metadata[candidate.Key]
-		if !ok {
-			// Graph and metadata can be briefly inconsistent during a concurrent delete.
+		node, ok := idx.Store[candidate.Key]
+		if !ok || !core.MatchFilter(node.Metadata, filters) {
 			continue
 		}
-
-		if !core.MatchFilter(node.Metadata, filters) {
-			continue
-		}
-
-		denseScore := idx.distanceToScore(candidate.Distance)
-
-		var finalScore float32
-		if useHybridSearch {
-			finalScore = alpha*denseScore + (1-alpha)*sparseScores[candidate.Key]
-		} else {
-			finalScore = denseScore
-		}
-		results = append(results, SearchResult{ID: node.ExternalID, Score: finalScore, Meta: node.Metadata})
+		results = append(results, SearchResult{ID: node.ExternalID, Score: score(candidate.Key, idx.distanceToScore(candidate.Distance)), Meta: node.Metadata})
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-
-	if k > 0 && len(results) > k {
-		results = results[:k]
-	}
-
-	return results, nil
+	return rankTop(results, k), nil
 }
 
 // distanceToScore converts a graph distance into a "higher = closer" score, matching
@@ -462,71 +277,14 @@ func (idx *HNSWIndex[T]) distanceToScore(distance float32) float32 {
 
 // Delete removes a vector from the index by ID.
 func (idx *HNSWIndex[T]) Delete(ctx context.Context, id string) (bool, error) {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	internalID, err := idx.IDMapper.ToUint32ID(id)
-	if err != nil {
-		return false, nil
-	}
-
-	_, exists := idx.metadata[internalID]
-	if !exists {
-		return false, nil
-	}
-
-	err = idx.wal.WriteEntry(ctx, &WALEntry{
-		Action: WALActionDelete,
-		ID:     id,
-	})
-	if err != nil {
-		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
-		return false, err
-	}
-
-	if err := idx.deleteInternal(id); err != nil {
-		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to delete vector")
-		return false, err
-	}
-
-	return true, nil
+	return idx.delete(ctx, id, idx.deleteInternal)
 }
 
-// deleteInternal performs the core delete logic without WAL writes.
+// deleteInternal applies a delete without writing it to the WAL, taking the
+// node out of the graph too.
 // PRECONDITION: idx.mu.Lock() must be held by caller.
 func (idx *HNSWIndex[T]) deleteInternal(id string) error {
-	internalID, err := idx.IDMapper.ToUint32ID(id)
-	if err != nil {
-		return core.ErrNotFound
-	}
-
-	node, exists := idx.metadata[internalID]
-	if !exists {
-		return core.ErrNotFound
-	}
-
-	if idx.InvertedIndex != nil {
-		idx.removeFromInvertedIndex(internalID, node.Sparse)
-	}
-
-	idx.graph.Delete(internalID)
-	delete(idx.metadata, internalID)
-	if idx.metaIndex != nil {
-		idx.metaIndex.Remove(internalID, node.Metadata)
-	}
-
-	return idx.IDMapper.Delete(id)
-}
-
-func (idx *HNSWIndex[T]) snapshotContents() snapshotContents[T] {
-	return snapshotContents[T]{
-		indexType:      "hnsw",
-		distanceMetric: idx.distanceMetric,
-		dimensions:     idx.dimensions,
-		idMapper:       idx.IDMapper,
-		nodes:          idx.metadata,
-		vectorStore:    idx.vectorStore,
-	}
+	return idx.remove(id, func(internalID uint32) { idx.graph.Delete(internalID) })
 }
 
 // SaveToFile serializes the HNSW index to a snapshot file. The graph goes in
@@ -579,7 +337,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 		idx.dimensions = dims
 
 		lookupVec := func(key uint32) (T, bool) {
-			node, ok := idx.metadata[key]
+			node, ok := idx.Store[key]
 			if !ok {
 				var zero T
 				return zero, false
@@ -596,10 +354,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 		return err
 	}
 
-	if idx.metaIndex != nil {
-		idx.rebuildMetaIndex()
-	}
-	idx.rebuildInvertedIndex()
+	idx.rebuildIndexes()
 
 	zerolog.Ctx(ctx).Info().
 		Str("path", path).
@@ -609,45 +364,9 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 	return nil
 }
 
-// rebuildMetaIndex reconstructs the MetadataIndex from the current metadata map.
-// Called after LoadFromFile since MetadataIndex is a derived, in-memory structure.
-// PRECONDITION: idx.mu.Lock() must be held by caller. idx.metaIndex must not be nil.
-func (idx *HNSWIndex[T]) rebuildMetaIndex() {
-	idx.metaIndex.Clear()
-	for internalID, node := range idx.metadata {
-		idx.metaIndex.Add(internalID, node.Metadata)
-	}
-}
-
-// rebuildInvertedIndex recomputes every posting list from the sparse vectors
-// in idx.metadata, discarding whatever the inverted index held before.
-// MUST be called with idx.mu.Lock() held.
-func (idx *HNSWIndex[T]) rebuildInvertedIndex() {
-	if idx.InvertedIndex == nil {
-		return // Hybrid search disabled
-	}
-
-	idx.InvertedIndex = make(map[uint32][]core.Posting)
-	for internalID, node := range idx.metadata {
-		idx.addToInvertedIndex(internalID, node.Sparse)
-	}
-}
-
-// ReplayWAL reads the WAL file and applies changes to the HNSW index. See
-// replayWALFile for what counts as a torn write and what stops recovery.
+// ReplayWAL reads the WAL file and applies changes to the HNSW index.
 func (idx *HNSWIndex[T]) ReplayWAL(walPath string) error {
-	return replayWALFile(walPath, func(entry WALEntry) error {
-		idx.mu.Lock()
-		defer idx.mu.Unlock()
-		switch entry.Action {
-		case WALActionInsert:
-			return idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
-		case WALActionDelete:
-			return ignoreNotFound(idx.deleteInternal(entry.ID))
-		default:
-			return fmt.Errorf("unknown WAL action %q", entry.Action)
-		}
-	})
+	return idx.replay(walPath, idx.insertInternal, idx.deleteInternal)
 }
 
 // Clear removes all vectors from the HNSW index, including ID mappings and the WAL,
@@ -655,117 +374,6 @@ func (idx *HNSWIndex[T]) ReplayWAL(walPath string) error {
 func (idx *HNSWIndex[T]) Clear() {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-
-	g := hnsw.NewGraph[uint32, T]()
-	g.M = idx.hnswM
-	g.EfSearch = idx.hnswEfSearch
-	g.EfConstruction = idx.hnswEfConstruction
-	g.Distance = idx.hnswDistFunc
-	g.Precompute = idx.hnswPrecompute
-	g.CachedDistance = idx.hnswCachedDistance
-	g.SquaredDistance = idx.hnswSquaredDistance
-	g.FromSquaredDistance = idx.hnswFromSquared
-	g.BatchParallelism = idx.hnswBatchParallelism
-	g.BatchParallelThreshold = idx.hnswBatchParallelThreshold
-	idx.graph = g
-
-	idx.metadata = make(map[uint32]*core.VectorNode[T])
-	if idx.metaIndex != nil {
-		idx.metaIndex.Clear()
-	}
-	if idx.InvertedIndex != nil {
-		idx.InvertedIndex = make(map[uint32][]core.Posting)
-	}
-	if idx.vectorStore != nil {
-		if err := idx.vectorStore.Reset(); err != nil {
-			// Log but don't propagate — in-memory state is already reset.
-			log.Error().Err(err).Msg("failed to reset mmap vector store")
-		}
-	}
-	if idx.IDMapper != nil {
-		idx.IDMapper.Clear()
-	}
-	if idx.wal != nil {
-		if err := idx.wal.Clear(); err != nil {
-			log.Error().Err(err).Msg("failed to clear WAL")
-		}
-	}
-
-	// See VectorIndex.Clear: an empty index has no width to enforce, so a
-	// learned one is released and a configured one kept.
-	idx.dimensions = idx.configuredDimensions
-}
-
-// Len returns the number of vectors in the HNSW index.
-func (idx *HNSWIndex[T]) Len() int {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-	return idx.graph.Len()
-}
-
-// Info returns engine configuration and runtime statistics.
-// NOTE: reads len(idx.metadata) directly to avoid re-acquiring mu (not re-entrant).
-func (idx *HNSWIndex[T]) Info() EngineInfo {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-	return EngineInfo{
-		Quantization:   idx.quantization,
-		IndexType:      idx.indexType,
-		DistanceMetric: idx.distanceMetric,
-		Dimensions:     idx.dimensions,
-		VectorCount:    len(idx.metadata),
-	}
-}
-
-// computeSparseScores computes sparse similarity scores for all documents.
-// MUST be called with idx.mu.RLock() held.
-func (idx *HNSWIndex[T]) computeSparseScores(sparseQuery core.SparseVector) map[uint32]float32 {
-	scores := make(map[uint32]float32)
-	for id, node := range idx.metadata {
-		if !node.Sparse.IsEmpty() {
-			score := core.SparseDotProduct(sparseQuery, node.Sparse)
-			if score > 0 {
-				scores[id] = score
-			}
-		}
-	}
-	return scores
-}
-
-// addToInvertedIndex adds postings for a document's sparse vector.
-// MUST be called with idx.mu.Lock() held.
-func (idx *HNSWIndex[T]) addToInvertedIndex(docID uint32, sparse core.SparseVector) {
-	if sparse.IsEmpty() {
-		return
-	}
-	for i := 0; i < len(sparse.Indices); i++ {
-		tokenID := sparse.Indices[i]
-		weight := sparse.Values[i]
-		idx.InvertedIndex[tokenID] = append(idx.InvertedIndex[tokenID], core.Posting{
-			DocID:  docID,
-			Weight: weight,
-		})
-	}
-}
-
-// removeFromInvertedIndex removes all postings for a document.
-// MUST be called with idx.mu.Lock() held.
-func (idx *HNSWIndex[T]) removeFromInvertedIndex(docID uint32, sparse core.SparseVector) {
-	if sparse.IsEmpty() {
-		return
-	}
-	for _, tokenID := range sparse.Indices {
-		postings := idx.InvertedIndex[tokenID]
-		filtered := make([]core.Posting, 0, len(postings))
-		for _, posting := range postings {
-			if posting.DocID != docID {
-				filtered = append(filtered, posting)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(idx.InvertedIndex, tokenID)
-		} else {
-			idx.InvertedIndex[tokenID] = filtered
-		}
-	}
+	idx.graph = idx.newGraph()
+	idx.clear()
 }

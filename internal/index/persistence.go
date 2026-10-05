@@ -276,16 +276,6 @@ func readSnapshotContents[T any](dec *gob.Decoder, c snapshotContents[T], config
 	return dims, nil
 }
 
-func (idx *VectorIndex[T]) snapshotContents() snapshotContents[T] {
-	return snapshotContents[T]{
-		distanceMetric: idx.distanceMetric,
-		dimensions:     idx.dimensions,
-		idMapper:       idx.IDMapper,
-		nodes:          idx.Store,
-		vectorStore:    idx.vectorStore,
-	}
-}
-
 // SaveToFile serializes the index to a specific path.
 // When mmap is enabled (vectorStore != nil) the vectors stay in the mmap store
 // and the snapshot carries everything else; otherwise vectors are inline.
@@ -329,13 +319,7 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) error 
 		return err
 	}
 
-	if idx.metaIndex != nil {
-		idx.metaIndex.Clear()
-		for internalID, node := range idx.Store {
-			idx.metaIndex.Add(internalID, node.Metadata)
-		}
-	}
-	idx.rebuildInvertedIndex()
+	idx.rebuildIndexes()
 
 	zerolog.Ctx(ctx).Info().
 		Str("path", path).

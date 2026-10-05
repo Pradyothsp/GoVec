@@ -84,9 +84,8 @@ func TestInsert_DimensionMismatch_DoesNotCorruptIndex(t *testing.T) {
 	assert.Equal(t, "good", results[0].ID)
 }
 
-// The HNSW engine tracks dimensions in bookkeepInsert rather than
-// insertInternal, so it needs its own coverage -- both Insert and BatchInsert
-// route through it.
+// The HNSW engine applies inserts through its own graph path, so it needs its
+// own coverage -- both Insert and BatchInsert.
 func TestHNSWInsert_DimensionMismatch_DoesNotCorruptIndex(t *testing.T) {
 	ctx := context.Background()
 	idx := newTestHNSWIndex(t)

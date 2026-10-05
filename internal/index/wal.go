@@ -129,23 +129,6 @@ func (w *WAL) Close() error {
 	return w.file.Close()
 }
 
-// ReplayWAL reads the WAL file and applies changes to the index. See
-// replayWALFile for what counts as a torn write and what stops recovery.
-func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
-	return replayWALFile(walPath, func(entry WALEntry) error {
-		idx.mu.Lock()
-		defer idx.mu.Unlock()
-		switch entry.Action {
-		case WALActionInsert:
-			return idx.insertInternal(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
-		case WALActionDelete:
-			return ignoreNotFound(idx.deleteInternal(entry.ID))
-		default:
-			return fmt.Errorf("unknown WAL action %q", entry.Action)
-		}
-	})
-}
-
 // replayWALFile reads the WAL at walPath and calls apply for each entry, in
 // order. Recovery keeps the longest valid prefix of the log, as Redis and etcd
 // do:

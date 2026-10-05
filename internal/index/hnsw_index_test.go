@@ -74,7 +74,7 @@ func TestHNSWIndex_Insert_Overwrite(t *testing.T) {
 	// Metadata should reflect the latest insert
 	internalID, err := idx.IDMapper.ToUint32ID("v1")
 	require.NoError(t, err)
-	assert.Equal(t, map[string]any{"version": 2}, idx.metadata[internalID].Metadata)
+	assert.Equal(t, map[string]any{"version": 2}, idx.Store[internalID].Metadata)
 }
 
 func TestHNSWIndex_Search_EmptyIndex(t *testing.T) {
@@ -109,7 +109,7 @@ func TestHNSWIndex_Delete_ExistingVector(t *testing.T) {
 	assert.Equal(t, 1, idx.Len())
 
 	// ID is gone from metadata and is tombstoned
-	assert.NotContains(t, idx.metadata, internalID)
+	assert.NotContains(t, idx.Store, internalID)
 	assert.True(t, idx.IDMapper.IsTombstone(internalID))
 }
 
@@ -412,7 +412,7 @@ func TestHNSWIndex_Clear(t *testing.T) {
 
 	idx.Clear()
 	assert.Equal(t, 0, idx.Len())
-	assert.Empty(t, idx.metadata)
+	assert.Empty(t, idx.Store)
 }
 
 // TestHNSWIndex_Clear_ResetsIDMapperAndWAL verifies Clear wipes ID mappings/tombstones

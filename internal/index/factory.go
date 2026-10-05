@@ -75,22 +75,14 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 		}
 		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, mathBlock.Int8Func, mmapStore)
 		idx.metaIndex = metaIndex
-		idx.quantization = string(cfg.Quantization)
-		idx.indexType = "brute"
-		idx.distanceMetric = string(cfg.DistanceMetric)
-		idx.dimensions = cfg.Dimensions
-		idx.configuredDimensions = cfg.Dimensions
+		idx.configure(&cfg)
 		return idx, nil
 
 	case config.QuantizationNone:
 		identityFunc := func(v []float32) []float32 { return v }
 		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, mathBlock.FloatFunc, mmapStore)
 		idx.metaIndex = metaIndex
-		idx.quantization = string(cfg.Quantization)
-		idx.indexType = "brute"
-		idx.distanceMetric = string(cfg.DistanceMetric)
-		idx.dimensions = cfg.Dimensions
-		idx.configuredDimensions = cfg.Dimensions
+		idx.configure(&cfg)
 		return idx, nil
 
 	default:
@@ -198,15 +190,8 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			core.QuantizeVector, mathBlock.Int8Func, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
 			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
-		idx.graph.BatchParallelism = batchParallelism
-		idx.graph.BatchParallelThreshold = batchParallelThreshold
-		idx.hnswBatchParallelism = batchParallelism
-		idx.hnswBatchParallelThreshold = batchParallelThreshold
-		idx.quantization = string(cfg.Quantization)
-		idx.indexType = "hnsw"
-		idx.distanceMetric = string(cfg.DistanceMetric)
-		idx.dimensions = cfg.Dimensions
-		idx.configuredDimensions = cfg.Dimensions
+		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
+		idx.configure(&cfg)
 		return idx, nil
 	}
 
@@ -220,15 +205,8 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 			identityFunc, mathBlock.FloatFunc, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
 			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
-		idx.graph.BatchParallelism = batchParallelism
-		idx.graph.BatchParallelThreshold = batchParallelThreshold
-		idx.hnswBatchParallelism = batchParallelism
-		idx.hnswBatchParallelThreshold = batchParallelThreshold
-		idx.quantization = string(cfg.Quantization)
-		idx.indexType = "hnsw"
-		idx.distanceMetric = string(cfg.DistanceMetric)
-		idx.dimensions = cfg.Dimensions
-		idx.configuredDimensions = cfg.Dimensions
+		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
+		idx.configure(&cfg)
 		return idx, nil
 	}
 

@@ -28,7 +28,7 @@ func TestInsert_Float32_StoresExactSizeCopy(t *testing.T) {
 			require.NoError(t, idx.Insert(context.Background(), "a", vec, core.SparseVector{}, nil))
 			id, err := idx.IDMapper.ToUint32ID("a")
 			require.NoError(t, err)
-			return idx.metadata[id].Vector
+			return idx.Store[id].Vector
 		},
 	}
 
