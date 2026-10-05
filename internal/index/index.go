@@ -130,9 +130,13 @@ func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
 	return idx.replay(walPath, idx.insertInternal, idx.deleteInternal)
 }
 
-// Clear removes all vectors from the index, including ID mappings and the WAL.
-func (idx *VectorIndex[T]) Clear() {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	idx.clear()
+// Reset removes every vector durably (see Engine.Reset).
+func (idx *VectorIndex[T]) Reset(ctx context.Context, snapshotPath string) error {
+	err := idx.reset(snapshotPath, func(path string) error {
+		return idx.writeSnapshot(path, idx.emptyContents())
+	}, nil)
+	if err == nil {
+		zerolog.Ctx(ctx).Info().Str("path", snapshotPath).Msg("index reset")
+	}
+	return err
 }

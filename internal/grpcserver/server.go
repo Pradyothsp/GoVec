@@ -208,8 +208,10 @@ func (s *GoVecServer) Flush(ctx context.Context, _ *pb.FlushRequest) (*pb.FlushR
 // Reset clears every vector from the index, mirroring REST's
 // POST /api/v1/admin/reset. Like the REST endpoint it only clears memory and
 // the WAL -- call Flush afterward if the empty state should survive a restart.
-func (s *GoVecServer) Reset(_ context.Context, _ *pb.ResetRequest) (*pb.ResetResponse, error) {
-	s.engine.Clear()
+func (s *GoVecServer) Reset(ctx context.Context, _ *pb.ResetRequest) (*pb.ResetResponse, error) {
+	if err := s.engine.Reset(ctx, s.dataPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "reset failed: %v", err)
+	}
 	return &pb.ResetResponse{Status: "reset"}, nil
 }
 

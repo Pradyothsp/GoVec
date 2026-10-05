@@ -85,14 +85,19 @@ func (h *SystemHandler) Flush(c *gin.Context) {
 // persist the cleared state to disk -- call Flush afterward if the reset
 // should survive a restart.
 //
-// @Summary      Clear all vectors from the index
+// @Summary      Remove all vectors from the index, durably
 // @Tags         system
 // @Produce      json
 // @Success      200  {object}  response.Response{data=object}
 // @Failure      401  {object}  response.ErrorResponse
+// @Failure      500  {object}  response.ErrorResponse
 // @Security     BearerAuth
 // @Router       /api/v1/admin/reset [post]
 func (h *SystemHandler) Reset(c *gin.Context) {
-	h.Engine.Clear()
+	if err := h.Engine.Reset(c.Request.Context(), h.DataPath); err != nil {
+		zerolog.Ctx(c.Request.Context()).Error().Err(err).Msg("failed to reset index")
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	response.OK(c, http.StatusOK, gin.H{"status": "reset"})
 }

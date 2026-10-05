@@ -354,7 +354,7 @@ func (s *MmapStore) Count() uint64 {
 }
 
 // Reset closes and deletes all chunk files, then re-initializes the store.
-// Used by Clear() to wipe all mmap data after the in-memory structures are reset.
+// Used by Reset to wipe all mmap data, after the empty snapshot is published.
 func (s *MmapStore) Reset() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

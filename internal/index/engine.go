@@ -47,8 +47,11 @@ type Engine interface {
 	// ReplayWAL replays the write-ahead log to recover uncommitted changes
 	ReplayWAL(path string) error
 
-	// Clear removes all vectors from the index
-	Clear()
+	// Reset removes every vector durably: an empty snapshot replaces the one
+	// at snapshotPath and the WAL is truncated before memory is cleared, so a
+	// restart comes back empty and a failed reset changes nothing. With no
+	// snapshotPath, only memory and the WAL are cleared.
+	Reset(ctx context.Context, snapshotPath string) error
 
 	// Len returns the number of vectors in the index
 	Len() int

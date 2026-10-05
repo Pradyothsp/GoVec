@@ -395,10 +395,10 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-// TestClear_ResetsIDMapperAndWAL verifies Clear empties the store and also
+// TestReset_ResetsIDMapperAndWAL verifies Reset empties the store and also
 // wipes ID mappings and truncates the WAL -- separate state that is easy to
 // forget to reset -- and that the index is usable afterwards.
-func TestClear_ResetsIDMapperAndWAL(t *testing.T) {
+func TestReset_ResetsIDMapperAndWAL(t *testing.T) {
 	ctx := context.Background()
 	for _, e := range bothEngines {
 		t.Run(e.name, func(t *testing.T) {
@@ -411,21 +411,21 @@ func TestClear_ResetsIDMapperAndWAL(t *testing.T) {
 			require.NoError(t, err)
 			info, err := os.Stat(walPath)
 			require.NoError(t, err)
-			require.Positive(t, info.Size(), "WAL should have entries before Clear")
+			require.Positive(t, info.Size(), "WAL should have entries before Reset")
 
 			// Act
-			idx.Clear()
+			require.NoError(t, idx.Reset(ctx, ""))
 
 			// Assert
 			assert.Empty(t, r.Store)
 			assert.Equal(t, 0, idx.Len())
-			assert.Equal(t, 0, r.IDMapper.Count(), "IDMapper should have no active mappings after Clear")
-			assert.Equal(t, uint32(0), r.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Clear")
+			assert.Equal(t, 0, r.IDMapper.Count(), "IDMapper should have no active mappings after Reset")
+			assert.Equal(t, uint32(0), r.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Reset")
 			info, err = os.Stat(walPath)
 			require.NoError(t, err)
-			assert.Zero(t, info.Size(), "WAL should be truncated after Clear")
+			assert.Zero(t, info.Size(), "WAL should be truncated after Reset")
 
-			// Re-inserting after a full Clear may reuse ID 0 -- safe here because
+			// Re-inserting after a full Reset may reuse ID 0 -- safe here because
 			// the entire collection was wiped alongside it, unlike a plain Delete.
 			require.NoError(t, idx.Insert(ctx, "v3", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 			newID, err := r.IDMapper.ToUint32ID("v3")

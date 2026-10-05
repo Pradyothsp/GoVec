@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -170,7 +171,9 @@ func TestRejectedWrite_NeverReachesTheWAL(t *testing.T) {
 		// The first item sets an empty index's width, so the second is too
 		// narrow even though the index had no width when the batch began.
 		"batch whose first item sets the width": func(e Engine) error {
-			e.Clear()
+			if err := e.Reset(ctx, ""); err != nil {
+				return err
+			}
 			_, err := e.BatchInsert(ctx, []BatchInsertItem{{ID: "first", Vector: []float32{1, 0, 0}}, {ID: "bad", Vector: []float32{1, 2}}})
 			return err
 		},
@@ -192,5 +195,64 @@ func TestRejectedWrite_NeverReachesTheWAL(t *testing.T) {
 				assert.Equal(t, idx.Len(), restarted.Len(), "replay must rebuild exactly what was accepted")
 			})
 		}
+	}
+}
+
+// TestReset_SurvivesRestart: a reset is durable. It used to clear memory and
+// the WAL but leave the snapshot, so a restart brought the deleted vectors
+// back -- and if vectors of a new width had been inserted since, replay
+// failed and the server would not start.
+func TestReset_SurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange: a saved 3-d index.
+			idx, r := e.open(t)
+			snapPath := filepath.Join(t.TempDir(), "snap.bin")
+			require.NoError(t, idx.Insert(ctx, "old", []float32{1, 0, 0}, core.SparseVector{}, nil))
+			require.NoError(t, idx.SaveToFile(ctx, snapPath))
+
+			// Act: reset, switch to 2-d vectors, then restart.
+			require.NoError(t, idx.Reset(ctx, snapPath))
+			require.NoError(t, idx.Insert(ctx, "new", []float32{0, 1}, core.SparseVector{}, nil))
+			restarted, _ := e.open(t)
+			loadErr := restarted.LoadFromFile(ctx, snapPath)
+			replayErr := restarted.ReplayWAL(r.wal.file.Name())
+
+			// Assert
+			require.NoError(t, loadErr)
+			require.NoError(t, replayErr, "vectors inserted after a reset must replay")
+			assert.Equal(t, 1, restarted.Len())
+			_, err := restarted.GetByID(ctx, "old")
+			assert.ErrorIs(t, err, core.ErrNotFound, "a reset vector must not come back")
+			assert.Equal(t, 2, restarted.Info().Dimensions)
+		})
+	}
+}
+
+// TestReset_FailedSnapshot_ChangesNothing: the empty snapshot is written
+// before memory is cleared, so a reset that can't write it leaves the index,
+// the snapshot and the WAL as they were.
+func TestReset_FailedSnapshot_ChangesNothing(t *testing.T) {
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange: a directory where the snapshot's temporary file goes
+			// makes the write fail, even as root.
+			idx, r := e.open(t)
+			require.NoError(t, idx.Insert(ctx, "kept", []float32{1, 0, 0}, core.SparseVector{}, nil))
+			snapPath := filepath.Join(t.TempDir(), "snap.bin")
+			require.NoError(t, os.Mkdir(snapPath+".tmp", 0o750))
+
+			// Act
+			err := idx.Reset(ctx, snapPath)
+
+			// Assert
+			require.Error(t, err)
+			assert.Equal(t, 1, idx.Len(), "a failed reset must not clear memory")
+			info, statErr := os.Stat(r.wal.file.Name())
+			require.NoError(t, statErr)
+			assert.Positive(t, info.Size(), "a failed reset must not truncate the WAL")
+		})
 	}
 }

@@ -309,7 +309,44 @@ func (r *records[T]) remove(id string, detach func(internalID uint32)) error {
 	return r.IDMapper.Delete(id)
 }
 
-// clear empties the records, both indexes, the mmap store and the WAL.
+// reset is Engine.Reset for both engines. The empty state reaches disk first
+// -- writeEmpty publishes an empty snapshot, which truncates the WAL last --
+// and only then is memory cleared, with clearEngine for engine-specific
+// state. A reset used to clear memory and the WAL but leave the snapshot, so a
+// restart brought the deleted vectors back.
+func (r *records[T]) reset(snapshotPath string, writeEmpty func(path string) error, clearEngine func()) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if snapshotPath != "" {
+		if err := writeEmpty(snapshotPath); err != nil {
+			return fmt.Errorf("write empty snapshot: %w", err)
+		}
+	} else if r.wal != nil {
+		if err := r.wal.Clear(); err != nil {
+			return err
+		}
+	}
+
+	if clearEngine != nil {
+		clearEngine()
+	}
+	r.clear()
+	return nil
+}
+
+// emptyContents is the snapshot of a reset index: no records, a fresh ID
+// mapping, and only a configured width.
+func (r *records[T]) emptyContents() snapshotContents[T] {
+	contents := r.snapshotContents()
+	contents.nodes = map[uint32]*core.VectorNode[T]{}
+	contents.idMapper = core.NewIDMapper()
+	contents.dimensions = r.configuredDimensions
+	return contents
+}
+
+// clear empties the records, both indexes and the mmap store. The WAL is
+// reset's to truncate: only after the empty state is on disk.
 // PRECONDITION: r.mu.Lock() held.
 func (r *records[T]) clear() {
 	r.Store = make(map[uint32]*core.VectorNode[T])
@@ -327,11 +364,6 @@ func (r *records[T]) clear() {
 	}
 	if r.IDMapper != nil {
 		r.IDMapper.Clear()
-	}
-	if r.wal != nil {
-		if err := r.wal.Clear(); err != nil {
-			log.Error().Err(err).Msg("failed to clear WAL")
-		}
 	}
 
 	// An empty index has no width to enforce. Keeping a learned one here left

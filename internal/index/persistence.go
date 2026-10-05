@@ -284,11 +284,7 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	w, err := startSnapshot(path, idx.snapshotContents())
-	if err != nil {
-		return err
-	}
-	if err := w.publish(idx.wal); err != nil {
+	if err := idx.writeSnapshot(path, idx.snapshotContents()); err != nil {
 		return err
 	}
 
@@ -298,6 +294,16 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 		Dur("duration", time.Since(start)).
 		Msg("snapshot saved to disk")
 	return nil
+}
+
+// writeSnapshot writes contents as the snapshot at path and publishes it.
+// PRECONDITION: idx.mu.Lock() held.
+func (idx *VectorIndex[T]) writeSnapshot(path string, contents snapshotContents[T]) error {
+	w, err := startSnapshot(path, contents)
+	if err != nil {
+		return err
+	}
+	return w.publish(idx.wal)
 }
 
 // LoadFromFile reads the index from disk.

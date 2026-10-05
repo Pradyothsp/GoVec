@@ -23,16 +23,16 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	records[T]
 	graph *hnsw.Graph[uint32, T]
 
-	hnswDistFunc               hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset
-	hnswPrecompute             func(v T) float64                                            // stored for Clear() graph reset; nil for metrics with nothing to cache
-	hnswCachedDistance         func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for Clear() graph reset; nil alongside hnswPrecompute
-	hnswSquaredDistance        hnsw.DistanceFunc[T]                                         // stored for Clear() graph reset; nil for metrics with no cheaper ranking equivalent
-	hnswFromSquared            func(rank float32) float32                                   // stored for Clear() graph reset; nil alongside hnswSquaredDistance
-	hnswM                      int                                                          // stored for Clear() graph reset
-	hnswEfSearch               int                                                          // stored for Clear() graph reset
-	hnswEfConstruction         int                                                          // stored for Clear() graph reset
-	hnswBatchParallelism       int                                                          // stored for Clear() graph reset
-	hnswBatchParallelThreshold int                                                          // stored for Clear() graph reset
+	hnswDistFunc               hnsw.DistanceFunc[T]                                         // stored for the graph rebuilt by Reset
+	hnswPrecompute             func(v T) float64                                            // stored for the graph rebuilt by Reset; nil for metrics with nothing to cache
+	hnswCachedDistance         func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for the graph rebuilt by Reset; nil alongside hnswPrecompute
+	hnswSquaredDistance        hnsw.DistanceFunc[T]                                         // stored for the graph rebuilt by Reset; nil for metrics with no cheaper ranking equivalent
+	hnswFromSquared            func(rank float32) float32                                   // stored for the graph rebuilt by Reset; nil alongside hnswSquaredDistance
+	hnswM                      int                                                          // stored for the graph rebuilt by Reset
+	hnswEfSearch               int                                                          // stored for the graph rebuilt by Reset
+	hnswEfConstruction         int                                                          // stored for the graph rebuilt by Reset
+	hnswBatchParallelism       int                                                          // stored for the graph rebuilt by Reset
+	hnswBatchParallelThreshold int                                                          // stored for the graph rebuilt by Reset
 }
 
 // NewHNSWIndex creates an empty HNSWIndex ready for use.
@@ -101,7 +101,7 @@ func (idx *HNSWIndex[T]) newGraph() *hnsw.Graph[uint32, T] {
 }
 
 // setBatchParallelism sets how batch inserts parallelise graph construction,
-// now and after a Clear.
+// now and after a Reset.
 func (idx *HNSWIndex[T]) setBatchParallelism(parallelism, threshold int) {
 	idx.hnswBatchParallelism = parallelism
 	idx.hnswBatchParallelThreshold = threshold
@@ -291,21 +291,7 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	w, err := startSnapshot(path, idx.snapshotContents())
-	if err != nil {
-		return err
-	}
-
-	topology := newGobChunkWriter(w.enc)
-	if err := idx.graph.ExportTopology(topology); err != nil {
-		w.abort()
-		return fmt.Errorf("failed to export HNSW topology: %w", err)
-	}
-	if err := topology.Close(); err != nil {
-		w.abort()
-		return err
-	}
-	if err := w.publish(idx.wal); err != nil {
+	if err := idx.writeSnapshot(path, idx.snapshotContents(), idx.graph); err != nil {
 		return err
 	}
 
@@ -315,6 +301,27 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 		Dur("duration", time.Since(start)).
 		Msg("HNSW snapshot saved to disk")
 	return nil
+}
+
+// writeSnapshot writes contents and graph's topology as the snapshot at path
+// and publishes it.
+// PRECONDITION: idx.mu.Lock() held.
+func (idx *HNSWIndex[T]) writeSnapshot(path string, contents snapshotContents[T], graph *hnsw.Graph[uint32, T]) error {
+	w, err := startSnapshot(path, contents)
+	if err != nil {
+		return err
+	}
+
+	topology := newGobChunkWriter(w.enc)
+	if err := graph.ExportTopology(topology); err != nil {
+		w.abort()
+		return fmt.Errorf("failed to export HNSW topology: %w", err)
+	}
+	if err := topology.Close(); err != nil {
+		w.abort()
+		return err
+	}
+	return w.publish(idx.wal)
 }
 
 // LoadFromFile reads the HNSW index from a snapshot file.
@@ -365,11 +372,14 @@ func (idx *HNSWIndex[T]) ReplayWAL(walPath string) error {
 	return idx.replay(walPath, idx.insertInternal, idx.deleteInternal)
 }
 
-// Clear removes all vectors from the HNSW index, including ID mappings and the WAL,
-// recreating the graph with the same parameters.
-func (idx *HNSWIndex[T]) Clear() {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	idx.graph = idx.newGraph()
-	idx.clear()
+// Reset removes every vector durably (see Engine.Reset), recreating the graph
+// with the same parameters.
+func (idx *HNSWIndex[T]) Reset(ctx context.Context, snapshotPath string) error {
+	err := idx.reset(snapshotPath, func(path string) error {
+		return idx.writeSnapshot(path, idx.emptyContents(), idx.newGraph())
+	}, func() { idx.graph = idx.newGraph() })
+	if err == nil {
+		zerolog.Ctx(ctx).Info().Str("path", snapshotPath).Msg("HNSW index reset")
+	}
+	return err
 }

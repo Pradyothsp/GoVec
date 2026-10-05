@@ -106,7 +106,7 @@ func (w *WAL) WriteEntries(_ context.Context, entries []*WALEntry) error {
 	return w.file.Sync()
 }
 
-// Clear wipes the WAL (used after a successful Snapshot)
+// Clear wipes the WAL, once a snapshot or reset has made its entries redundant.
 func (w *WAL) Clear() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

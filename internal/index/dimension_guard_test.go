@@ -183,7 +183,7 @@ func TestSearch_IndexWithNoWidthYet_AcceptsAnyQuery(t *testing.T) {
 // nothing left to be consistent with. Keeping it left an *empty* index
 // rejecting every vector of a different size, so switching embedding models
 // after a reset needed a server restart.
-func TestClear_LearnedWidth_IsReleased(t *testing.T) {
+func TestReset_LearnedWidth_IsReleased(t *testing.T) {
 	ctx := context.Background()
 	for _, e := range bothEngines {
 		t.Run(e.name, func(t *testing.T) {
@@ -193,10 +193,10 @@ func TestClear_LearnedWidth_IsReleased(t *testing.T) {
 			require.Equal(t, 3, idx.Info().Dimensions)
 
 			// Act
-			idx.Clear()
+			require.NoError(t, idx.Reset(ctx, ""))
 
 			// Assert
-			assert.Equal(t, 0, idx.Info().Dimensions, "a cleared index reports no width")
+			assert.Equal(t, 0, idx.Info().Dimensions, "a reset index reports no width")
 			assert.NoError(t, idx.Insert(ctx, "five", []float32{1, 2, 3, 4, 5}, core.SparseVector{}, nil),
 				"an empty index must accept a vector of any width")
 		})
@@ -205,7 +205,7 @@ func TestClear_LearnedWidth_IsReleased(t *testing.T) {
 
 // A width the operator set in config is not the index's to forget -- mmap
 // sizing depends on it, and it is the whole point of setting it.
-func TestClear_ConfiguredWidth_Survives(t *testing.T) {
+func TestReset_ConfiguredWidth_Survives(t *testing.T) {
 	ctx := context.Background()
 	for _, e := range bothEngines {
 		t.Run(e.name, func(t *testing.T) {
@@ -215,7 +215,7 @@ func TestClear_ConfiguredWidth_Survives(t *testing.T) {
 			r.configuredDimensions = 3
 
 			// Act
-			idx.Clear()
+			require.NoError(t, idx.Reset(ctx, ""))
 
 			// Assert
 			assert.Equal(t, 3, idx.Info().Dimensions)

@@ -76,7 +76,7 @@ const docTemplate = `{
                 "tags": [
                     "system"
                 ],
-                "summary": "Clear all vectors from the index",
+                "summary": "Remove all vectors from the index, durably",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -98,6 +98,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/response.ErrorResponse"
                         }
