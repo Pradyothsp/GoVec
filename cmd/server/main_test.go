@@ -139,7 +139,7 @@ func TestRunRecovery_CorruptSnapshot_ReturnsError(t *testing.T) {
 // snapshot does: carrying on would drop every write after the failure point.
 func TestRunRecovery_UnreadableWAL_ReturnsError(t *testing.T) {
 	cfg, engine := newRecoveryTarget(t)
-	// A line longer than ReplayWAL's 4 MB buffer makes the scanner give up.
+	// Not a GoVec WAL at all: replay must refuse it, not cut it off as torn.
 	cfg.Storage.WalPath = filepath.Join(t.TempDir(), "unreadable.wal")
 	require.NoError(t, os.WriteFile(cfg.Storage.WalPath, bytes.Repeat([]byte("x"), 5<<20), 0o600))
 

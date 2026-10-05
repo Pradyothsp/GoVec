@@ -2,11 +2,9 @@ package index
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -50,6 +48,18 @@ func TestNewWAL_UncreatableParent_ReturnsError(t *testing.T) {
 }
 
 // TestWriteEntry_Variations consolidates all WriteEntry tests
+// readWALEntries reads a WAL back through replay, so tests check what was
+// written rather than how the format spells it.
+func readWALEntries(t *testing.T, path string) []WALEntry {
+	t.Helper()
+	var entries []WALEntry
+	require.NoError(t, replayWALFile(path, func(e WALEntry) error {
+		entries = append(entries, e)
+		return nil
+	}))
+	return entries
+}
+
 func TestWriteEntry_Variations(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -65,9 +75,11 @@ func TestWriteEntry_Variations(t *testing.T) {
 				Meta:   fixtures.MetaSimple,
 			},
 			verify: func(t *testing.T, path string) {
-				data, _ := os.ReadFile(path) //nolint:errcheck // test verification
-				assert.Contains(t, string(data), `"action":"INSERT"`)
-				assert.Contains(t, string(data), `"id":"vec1"`)
+				entries := readWALEntries(t, path)
+				require.Len(t, entries, 1)
+				assert.Equal(t, WALActionInsert, entries[0].Action)
+				assert.Equal(t, "vec1", entries[0].ID)
+				assert.Equal(t, fixtures.Vec3dSimple, entries[0].Vector)
 			},
 		},
 		{
@@ -77,9 +89,9 @@ func TestWriteEntry_Variations(t *testing.T) {
 				ID:     "vec2",
 			},
 			verify: func(t *testing.T, path string) {
-				data, _ := os.ReadFile(path) //nolint:errcheck // test verification
-				assert.Contains(t, string(data), `"action":"DELETE"`)
-				assert.Contains(t, string(data), `"id":"vec2"`)
+				entries := readWALEntries(t, path)
+				require.Len(t, entries, 1)
+				assert.Equal(t, WALEntry{Action: WALActionDelete, ID: "vec2"}, entries[0])
 			},
 		},
 		{
@@ -90,8 +102,14 @@ func TestWriteEntry_Variations(t *testing.T) {
 				Vector: fixtures.Vec1536d,
 			},
 			verify: func(t *testing.T, path string) {
-				info, _ := os.Stat(path) //nolint:errcheck // test verification
-				assert.Greater(t, info.Size(), int64(1000), "Large vector should produce substantial entry")
+				entries := readWALEntries(t, path)
+				require.Len(t, entries, 1)
+				assert.Equal(t, fixtures.Vec1536d, entries[0].Vector)
+
+				// Raw float32s plus a small frame, not 12 characters of text per number.
+				info, err := os.Stat(path)
+				require.NoError(t, err)
+				assert.Less(t, info.Size(), int64(1536*4+64))
 			},
 		},
 		{
@@ -107,10 +125,13 @@ func TestWriteEntry_Variations(t *testing.T) {
 				},
 			},
 			verify: func(t *testing.T, path string) {
-				data, _ := os.ReadFile(path) //nolint:errcheck // test verification
-				assert.Contains(t, string(data), "测试")
-				// JSON escapes & as \u0026
-				assert.Contains(t, string(data), "symbols")
+				entries := readWALEntries(t, path)
+				require.Len(t, entries, 1)
+				assert.Equal(t, map[string]any{
+					"unicode": "测试",
+					"symbols": "!@#$%^&*()",
+					"quotes":  `"nested"quotes"`,
+				}, entries[0].Meta)
 			},
 		},
 	}
@@ -155,11 +176,13 @@ func TestWriteEntry_MultipleEntries(t *testing.T) {
 
 	_ = wal.Close() //nolint:errcheck // test cleanup
 
-	// Verify all entries written
-	data, err := os.ReadFile(walPath)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), `"id":"v1"`)
-	assert.Contains(t, string(data), `"id":"v2"`)
+	// Verify all entries written, in order
+	got := readWALEntries(t, walPath)
+	require.Len(t, got, len(entries))
+	for i := range entries {
+		assert.Equal(t, entries[i].ID, got[i].ID)
+		assert.Equal(t, entries[i].Action, got[i].Action)
+	}
 }
 
 func TestWAL_WriteEntries_WritesAllEntriesInOneSync(t *testing.T) {
@@ -179,16 +202,11 @@ func TestWAL_WriteEntries_WritesAllEntriesInOneSync(t *testing.T) {
 
 	// No extra fsync needed to observe the data -- WriteEntries syncs internally,
 	// so it should already be on disk without a Close().
-	data, err := os.ReadFile(walPath)
-	require.NoError(t, err)
-
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	require.Len(t, lines, 3, "each entry should be its own line, in order")
-	assert.Contains(t, lines[0], `"id":"v1"`)
-	assert.Contains(t, lines[0], `"action":"INSERT"`)
-	assert.Contains(t, lines[1], `"id":"v2"`)
-	assert.Contains(t, lines[2], `"id":"v1"`)
-	assert.Contains(t, lines[2], `"action":"DELETE"`)
+	got := readWALEntries(t, walPath)
+	require.Len(t, got, 3, "each entry should be its own record, in order")
+	for i, want := range entries {
+		assert.Equal(t, *want, got[i])
+	}
 }
 
 func TestWAL_WriteEntries_EmptySliceIsNoop(t *testing.T) {
@@ -323,17 +341,13 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// -race checks memory, not the file: also check every write landed on its
-	// own line, whole and exactly once.
-	data, err := os.ReadFile(walPath)
-	require.NoError(t, err)
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	require.Len(t, lines, numGoroutines)
+	// -race checks memory, not the file: also check every write landed as its
+	// own record, whole and exactly once.
+	entries := readWALEntries(t, walPath)
+	require.Len(t, entries, numGoroutines)
 
 	seen := make(map[string]bool, numGoroutines)
-	for _, line := range lines {
-		var entry WALEntry
-		require.NoError(t, json.Unmarshal([]byte(line), &entry), "line is not a whole JSON entry: %q", line)
+	for _, entry := range entries {
 		seen[entry.ID] = true
 	}
 	for i := 0; i < numGoroutines; i++ {

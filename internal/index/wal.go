@@ -2,11 +2,12 @@ package index
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -65,14 +66,12 @@ func (w *WAL) WriteEntry(_ context.Context, entry *WALEntry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Encode to JSON
-	encoded, err := json.Marshal(entry)
+	record, err := appendWALRecord(nil, entry)
 	if err != nil {
 		return err
 	}
 
-	// Add newline so we can read it line-by-line later
-	if _, err = w.file.Write(append(encoded, '\n')); err != nil {
+	if _, err = w.file.Write(record); err != nil {
 		return err
 	}
 	return w.file.Sync()
@@ -80,7 +79,7 @@ func (w *WAL) WriteEntry(_ context.Context, entry *WALEntry) error {
 
 // WriteEntries saves multiple operations to disk as a single durable unit: one
 // buffered write plus one fsync for the whole batch, instead of one fsync per
-// entry. All entries are marshaled into memory first, so a marshal failure on
+// entry. All entries are encoded into memory first, so an encoding failure on
 // any entry aborts before anything touches the file — the WAL is left exactly
 // as it was, never containing a partial batch.
 // ctx is accepted for API consistency and future use (e.g. deadline-aware writes).
@@ -89,20 +88,18 @@ func (w *WAL) WriteEntries(_ context.Context, entries []*WALEntry) error {
 		return nil
 	}
 
-	var buf bytes.Buffer
+	var buf []byte
 	for _, entry := range entries {
-		b, err := json.Marshal(entry)
-		if err != nil {
+		var err error
+		if buf, err = appendWALRecord(buf, entry); err != nil {
 			return err
 		}
-		buf.Write(b)
-		buf.WriteByte('\n')
 	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if _, err := w.file.Write(buf.Bytes()); err != nil {
+	if _, err := w.file.Write(buf); err != nil {
 		return err
 	}
 	return w.file.Sync()
@@ -148,20 +145,20 @@ func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
 	})
 }
 
-// maxWALLine is the longest WAL line replay will read: 4MB, well above any
-// realistic vector entry (the default 64KB is too small).
-const maxWALLine = 4 * 1024 * 1024
-
 // replayWALFile reads the WAL at walPath and calls apply for each entry, in
 // order. Recovery keeps the longest valid prefix of the log, as Redis and etcd
 // do:
 //
 //   - A missing file is an empty WAL.
-//   - A last line that is unterminated or isn't valid JSON is a write torn by a
-//     crash. It was never acknowledged, so it is cut off the file -- otherwise
-//     the next append would merge into it and be lost on the following replay.
-//   - A bad line before the end, or an entry apply rejects, is corruption.
-//     Replay stops with an error naming the line, and the file is left as found.
+//   - A bad record -- incomplete, failing its CRC, zero-filled, or garbage --
+//     with no valid record anywhere after it is a write torn by a crash. It
+//     was never acknowledged, so it is cut off the file; otherwise the next
+//     append would follow it and be lost on the following replay. Garbage
+//     counts too: some filesystems leave stale bytes at the end of a file
+//     after a crash, and refusing to start over those would be worse.
+//   - A bad record with a valid one after it is corruption, as is an entry
+//     apply rejects. Replay stops with an error naming the record, and the
+//     file is left as found.
 //
 // A delete of an ID that doesn't exist is not an error: replay is idempotent.
 func replayWALFile(walPath string, apply func(WALEntry) error) error {
@@ -174,73 +171,138 @@ func replayWALFile(walPath string, apply func(WALEntry) error) error {
 	}
 	defer f.Close() //nolint:errcheck // read-only operation, error on close is not critical
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, maxWALLine), maxWALLine)
-	scanner.Split(scanLinesKeepingNewline)
-
-	type badLine struct {
-		num    int
-		offset int64 // where the line starts, so a torn tail can be cut off
-		err    error
+	info, err := f.Stat()
+	if err != nil {
+		return err
 	}
+	size := info.Size()
+	r := bufio.NewReaderSize(f, 1<<20)
+
+	if size > 0 {
+		first, err := r.Peek(1)
+		if err != nil {
+			return fmt.Errorf("WAL read error: %w", err)
+		}
+		if first[0] == '{' {
+			return errLegacyWAL
+		}
+	}
+
 	var (
-		bad     *badLine
-		offset  int64
-		lineNum int
-		count   int
+		offset int64
+		count  int
+		header = make([]byte, walFrameHeaderLen)
+		buf    []byte
 	)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		lineNum++
-		// A bad line is only a torn write if nothing follows it.
-		if bad != nil {
-			return fmt.Errorf("WAL is corrupt at line %d, before its last line: %w", bad.num, bad.err)
+	for record := 1; offset < size; record++ {
+		// badRecord handles a record at offset that can't be read: a torn tail
+		// if no valid record follows it, corruption otherwise. Its header can't
+		// be trusted, so neither can its length: look for a valid record at
+		// every byte after its start. Only this failure path reads the rest of
+		// the file into memory.
+		badRecord := func(reason string) error {
+			rest, err := readFrom(walPath, offset)
+			if err != nil {
+				return fmt.Errorf("WAL read error at record %d: %w", record, err)
+			}
+			if containsValidRecord(rest[1:]) {
+				return fmt.Errorf("WAL is corrupt at record %d (byte %d), before its end: %s", record, offset, reason)
+			}
+			// Nothing valid at all, from the first byte: only cut it if it looks
+			// like a WAL whose first write was torn (it starts like a record, or
+			// it's zero-filled). Anything else isn't a GoVec WAL -- wal_path may
+			// name the wrong file -- and must not be truncated.
+			if offset == 0 && rest[0] != walRecordVersion && !isAllZero(rest) {
+				return fmt.Errorf("file doesn't look like a GoVec WAL (first byte 0x%02x); left as found", rest[0])
+			}
+			if err := os.Truncate(walPath, offset); err != nil {
+				return fmt.Errorf("cut torn last record %d off the WAL: %w", record, err)
+			}
+			log.Warn().Int("record", record).Int64("bytes", size-offset).Str("reason", reason).
+				Msg("cut a torn last record off the WAL (a write interrupted by a crash)")
+			return nil
 		}
 
-		lineStart := offset
-		offset += int64(len(line))
-		body, terminated := bytes.CutSuffix(line, []byte("\n"))
-		if !terminated {
-			bad = &badLine{num: lineNum, offset: lineStart, err: errors.New("unterminated line")}
-			continue
+		if _, err := io.ReadFull(r, header); err != nil {
+			return badRecord("incomplete record header")
 		}
-		var entry WALEntry
-		if err := json.Unmarshal(body, &entry); err != nil {
-			bad = &badLine{num: lineNum, offset: lineStart, err: err}
-			continue
+		version := header[0]
+		length := int64(binary.LittleEndian.Uint32(header[1:5]))
+		checksum := binary.LittleEndian.Uint32(header[5:9])
+		end := offset + walFrameHeaderLen + length
+		if version != walRecordVersion || length == 0 || length > maxWALRecord || end > size {
+			return badRecord(fmt.Sprintf("bad record header (version %d, length %d)", version, length))
+		}
+
+		if int64(cap(buf)) < length {
+			buf = make([]byte, length)
+		}
+		payload := buf[:length]
+		if _, err := io.ReadFull(r, payload); err != nil {
+			return fmt.Errorf("WAL read error at record %d: %w", record, err)
+		}
+		if crc32.Checksum(payload, walCRCTable) != checksum {
+			return badRecord("CRC mismatch")
+		}
+
+		entry, err := decodeWALPayload(payload)
+		if err != nil {
+			return fmt.Errorf("WAL record %d: %w", record, err)
 		}
 		if err := apply(entry); err != nil {
-			return fmt.Errorf("WAL line %d: replay %s %q: %w", lineNum, entry.Action, entry.ID, err)
+			return fmt.Errorf("WAL record %d: replay %s %q: %w", record, entry.Action, entry.ID, err)
 		}
-		count++
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("WAL read error after line %d: %w", lineNum, err)
-	}
 
-	if bad != nil {
-		if err := os.Truncate(walPath, bad.offset); err != nil {
-			return fmt.Errorf("cut torn last line %d off the WAL: %w", bad.num, err)
-		}
-		log.Warn().Int("line", bad.num).Int64("bytes", offset-bad.offset).Err(bad.err).
-			Msg("cut a torn last line off the WAL (a write interrupted by a crash)")
+		offset = end
+		count++
 	}
 
 	log.Info().Int("count", count).Msg("WAL replay complete")
 	return nil
 }
 
-// scanLinesKeepingNewline is bufio.ScanLines, except each token keeps its
-// trailing newline, so the caller can tell a complete last line from a torn
-// one and count bytes exactly.
-func scanLinesKeepingNewline(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		return i + 1, data[:i+1], nil
+// readFrom returns the file's bytes from offset to its end.
+func readFrom(path string, offset int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // path comes from config, not user input
+	if err != nil {
+		return nil, err
 	}
-	if atEOF && len(data) > 0 {
-		return len(data), data, nil
+	defer f.Close() //nolint:errcheck // read-only operation, error on close is not critical
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
 	}
-	return 0, nil, nil
+	return io.ReadAll(f)
+}
+
+// isAllZero reports whether b holds only zero bytes: the tail a filesystem
+// can leave when a crash extends a file without writing its contents.
+func isAllZero(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// containsValidRecord reports whether a complete record with a matching CRC
+// starts at any byte of b.
+func containsValidRecord(b []byte) bool {
+	for i := 0; i+walFrameHeaderLen <= len(b); i++ {
+		if b[i] != walRecordVersion {
+			continue
+		}
+		length := int(binary.LittleEndian.Uint32(b[i+1:]))
+		end := i + walFrameHeaderLen + length
+		if length == 0 || length > maxWALRecord || end > len(b) {
+			continue
+		}
+		if crc32.Checksum(b[i+walFrameHeaderLen:end], walCRCTable) == binary.LittleEndian.Uint32(b[i+5:]) {
+			return true
+		}
+	}
+	return false
 }
 
 // ignoreNotFound treats deleting a missing ID as success, which keeps WAL

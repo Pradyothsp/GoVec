@@ -1,9 +1,7 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,20 +32,14 @@ func TestVectorIndex_Insert_WritesToWAL(t *testing.T) {
 	err = idx.Insert(context.Background(), "vec1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, map[string]any{"label": "test"})
 	require.NoError(t, err)
 
-	// Read WAL file directly
-	data, err := os.ReadFile(walPath)
-	require.NoError(t, err)
+	// The WAL alone must reproduce the insert: replay it into a fresh index.
+	recovered := index.NewVectorIndex[[]float32](nil, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	require.NoError(t, recovered.ReplayWAL(walPath))
 
-	// Parse entry
-	var entry index.WALEntry
-	err = json.Unmarshal(data[:len(data)-1], &entry) // Strip newline
+	record, err := recovered.GetByID(context.Background(), "vec1")
 	require.NoError(t, err)
-
-	// Verify WAL contains correct data
-	assert.Equal(t, index.WALActionInsert, entry.Action)
-	assert.Equal(t, "vec1", entry.ID)
-	assert.Equal(t, []float32{1.0, 2.0, 3.0}, entry.Vector)
-	assert.Equal(t, "test", entry.Meta["label"])
+	assert.Equal(t, []float32{1.0, 2.0, 3.0}, record.Vector)
+	assert.Equal(t, "test", record.Metadata["label"])
 }
 
 func TestVectorIndex_Insert_WALFailurePreventMemoryUpdate(t *testing.T) {
@@ -157,20 +149,14 @@ func TestVectorIndex_Delete_WritesToWAL(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, deleted)
 
-	// Read WAL file
-	data, err := os.ReadFile(walPath)
-	require.NoError(t, err)
+	// The WAL alone must reproduce insert-then-delete: replayed into a fresh
+	// index, vec1 must be gone.
+	recovered := index.NewVectorIndex[[]float32](nil, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	require.NoError(t, recovered.ReplayWAL(walPath))
 
-	// Parse entries (should be INSERT + DELETE)
-	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-	assert.Len(t, lines, 2, "WAL should have INSERT + DELETE entries")
-
-	var deleteEntry index.WALEntry
-	err = json.Unmarshal(lines[1], &deleteEntry)
-	require.NoError(t, err)
-
-	assert.Equal(t, index.WALActionDelete, deleteEntry.Action)
-	assert.Equal(t, "vec1", deleteEntry.ID)
+	assert.Equal(t, 0, recovered.Len())
+	_, err = recovered.GetByID(context.Background(), "vec1")
+	assert.Error(t, err, "the delete must be in the WAL, after the insert")
 }
 
 func TestVectorIndex_Delete_WALFailurePreventsDelete(t *testing.T) {

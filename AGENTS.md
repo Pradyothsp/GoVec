@@ -43,7 +43,9 @@ internal/
     engine.go               the Engine interface every transport talks to
     factory.go              picks VectorIndex[T] (brute force) or HNSWIndex[T] from config
     index.go / hnsw_index.go  the two engines
-    wal.go / persistence.go   durability: write-ahead log, atomic GOB snapshots
+    wal.go / wal_record.go  write-ahead log: binary records (length + CRC-32C), replay rules
+    persistence.go          snapshot save/load, publishSnapshot (WAL truncated only after)
+    snapshot_stream.go      snapshot layout: streamed records, vectors once, HNSW topology only
     dimension_guard.go      input sentinels + IsInvalidVectorError
     encode_guard.go         quantization preconditions (prepareForEncode)
   hnsw/                     vendored fork of an upstream HNSW library, made generic over T
