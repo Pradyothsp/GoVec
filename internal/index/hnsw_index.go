@@ -328,6 +328,8 @@ func (idx *HNSWIndex[T]) bookkeepInsert(id string, vec []float32, sparse core.Sp
 			return 0, encoded, fmt.Errorf("mmap store put: %w", err)
 		}
 		encoded = mmapVec
+	} else {
+		encoded = storedCopy(encoded)
 	}
 
 	// For updates (re-using the same internalID), explicitly remove the node

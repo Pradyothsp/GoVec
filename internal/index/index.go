@@ -195,6 +195,8 @@ func (idx *VectorIndex[T]) insertInternal(id string, vec []float32, sparse core.
 			return fmt.Errorf("mmap store put: %w", err)
 		}
 		encoded = mmapVec
+	} else {
+		encoded = storedCopy(encoded)
 	}
 
 	// 5. Track dimensions from the first vector seen

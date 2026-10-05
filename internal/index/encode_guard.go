@@ -29,3 +29,24 @@ func prepareForEncode(vec []float32, quantization, distanceMetric string) ([]flo
 
 	return vec, nil
 }
+
+// storedCopy returns a vector the index can keep. A float32 vector passes
+// through encoding untouched, so without a copy the index would hold the
+// caller's slice: memory the caller still owns, with whatever spare capacity
+// JSON or protobuf decoding left in it -- 721 MB held for 614 MB of vectors at
+// 100k x 1536 (govec #13). int8 encoding already allocates an exact slice.
+func storedCopy[T any](encoded T) T {
+	v, ok := any(encoded).([]float32)
+	if !ok {
+		return encoded
+	}
+
+	// make + copy, not slices.Clone: Clone rounds capacity up to the
+	// allocator's size class.
+	owned := make([]float32, len(v))
+	copy(owned, v)
+	if out, ok := any(owned).(T); ok {
+		return out
+	}
+	return encoded
+}
