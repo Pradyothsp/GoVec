@@ -118,3 +118,31 @@ func TestSaveToFile_HNSW_WritesVectorsOnceAndStreams(t *testing.T) {
 	// allocation, so the bound leaves it room while still catching that.
 	assert.Less(t, allocRatio, 0.5, "a save should stream, not build the snapshot in memory")
 }
+
+func TestLoadedDimensions(t *testing.T) {
+	cases := []struct {
+		name                       string
+		saved, configured, current int
+		want                       int
+		wantErr                    bool
+	}{
+		{name: "learned width comes back", saved: 1536, want: 1536},
+		{name: "configured width that matches", saved: 1536, configured: 1536, current: 1536, want: 1536},
+		{name: "empty snapshot keeps the configured width", configured: 768, current: 768, want: 768},
+		{name: "empty snapshot, nothing configured: still unset", want: 0},
+		{name: "configured width that disagrees with the data", saved: 1536, configured: 768, current: 768, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := loadedDimensions(tc.saved, tc.configured, tc.current)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "snapshot dimensions mismatch")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

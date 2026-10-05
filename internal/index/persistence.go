@@ -30,6 +30,7 @@ type SnapshotHeader struct {
 	DistanceMetric string // "cosine", etc.
 	IndexType      string // "" or "brute" = VectorIndex; "hnsw" = HNSWIndex
 	Mmap           bool   // vectors live in the mmap store, not inline in the snapshot
+	Dimensions     int    // the index's width, configured or learned; 0 for an empty index that never had one
 }
 
 // snapshotVersion is written into every snapshot header, and a load rejects
@@ -117,6 +118,22 @@ func syncDir(dir string) error {
 	return d.Close()
 }
 
+// loadedDimensions decides an index's width after loading a snapshot that
+// recorded savedDims. A learned width has to come back with the data: without
+// it the restarted index takes its width from the next insert, whatever that
+// is, and one wrong-width vector gets every real insert and query rejected.
+// A configured width that disagrees with the data is an error, like a
+// quantization or metric mismatch.
+func loadedDimensions(savedDims, configuredDims, currentDims int) (int, error) {
+	if savedDims == 0 {
+		return currentDims, nil
+	}
+	if configuredDims > 0 && savedDims != configuredDims {
+		return 0, fmt.Errorf("snapshot dimensions mismatch: config expects %d but snapshot holds %d-dimensional vectors. Delete data files or change engine.dimensions", configuredDims, savedDims)
+	}
+	return savedDims, nil
+}
+
 // SaveToFile serializes the index to a specific path.
 // When mmap is enabled (vectorStore != nil) the vectors stay in the mmap store
 // and the snapshot carries everything else; otherwise vectors are inline.
@@ -172,6 +189,7 @@ func (idx *VectorIndex[T]) saveSnapshot(path, quantType string) error {
 		Quantization:   quantType,
 		DistanceMetric: idx.distanceMetric,
 		Mmap:           idx.vectorStore != nil,
+		Dimensions:     idx.dimensions,
 	}
 	if err := w.enc.Encode(header); err != nil {
 		w.abort()
@@ -238,6 +256,11 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 	if header.DistanceMetric != idx.distanceMetric {
 		return fmt.Errorf("snapshot distance metric mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", idx.distanceMetric, header.DistanceMetric)
 	}
+	dims, err := loadedDimensions(header.Dimensions, idx.configuredDimensions, idx.dimensions)
+	if err != nil {
+		return err
+	}
+	idx.dimensions = dims
 
 	if err := idx.IDMapper.DecodeGOB(decoder); err != nil {
 		return fmt.Errorf("failed to decode IDMapper: %w", err)

@@ -577,6 +577,7 @@ func (idx *HNSWIndex[T]) saveSnapshot(path, quantType string) error {
 		DistanceMetric: idx.distanceMetric,
 		IndexType:      "hnsw",
 		Mmap:           idx.vectorStore != nil,
+		Dimensions:     idx.dimensions,
 	}
 	if err := w.enc.Encode(header); err != nil {
 		w.abort()
@@ -654,6 +655,11 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	if header.DistanceMetric != idx.distanceMetric {
 		return fmt.Errorf("snapshot distance metric mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", idx.distanceMetric, header.DistanceMetric)
 	}
+	dims, err := loadedDimensions(header.Dimensions, idx.configuredDimensions, idx.dimensions)
+	if err != nil {
+		return err
+	}
+	idx.dimensions = dims
 
 	if err := idx.IDMapper.DecodeGOB(decoder); err != nil {
 		return fmt.Errorf("failed to decode IDMapper: %w", err)

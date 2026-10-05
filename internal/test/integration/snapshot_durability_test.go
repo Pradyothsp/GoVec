@@ -157,3 +157,50 @@ func TestRecovery_WALAlreadyInSnapshot_ReplaysToTheSameState(t *testing.T) {
 		})
 	}
 }
+
+// TestRecovery_LearnedDimension_SurvivesRestart covers an index whose width
+// was learned from its first insert (engine.dimensions: 0, the default). The
+// width must come back with the snapshot: otherwise the restarted index reports
+// dimensions 0, takes its width from the next insert whatever that is, and one
+// wrong-width vector then has every real insert and query rejected. Verified
+// live before the fix: a 3-dim insert into a reloaded 1536-dim index set its
+// width to 3.
+func TestRecovery_LearnedDimension_SurvivesRestart(t *testing.T) {
+	for _, indexType := range []config.IndexType{config.IndexTypeBrute, config.IndexTypeHNSW} {
+		t.Run(string(indexType), func(t *testing.T) {
+			ctx := context.Background()
+			dir := t.TempDir()
+			snapPath := filepath.Join(dir, "govec_data.bin")
+			walPath := filepath.Join(dir, "govec.wal")
+			engineCfg := config.EngineConfig{
+				Quantization:   config.QuantizationNone,
+				DistanceMetric: config.DistanceMetricCosine,
+				IndexType:      indexType,
+			}
+
+			start := func() (index.Engine, *index.WAL) {
+				t.Helper()
+				wal, err := index.NewWAL(walPath)
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = wal.Close() })
+				engine, err := index.NewEngine(engineCfg, config.StorageConfig{}, wal)
+				require.NoError(t, err)
+				return engine, wal
+			}
+
+			engine, wal := start()
+			require.NoError(t, engine.Insert(ctx, "a", []float32{1, 0, 0}, core.SparseVector{}, nil))
+			require.NoError(t, engine.Insert(ctx, "b", []float32{0, 1, 0}, core.SparseVector{}, nil))
+			require.NoError(t, engine.SaveToFile(ctx, snapPath))
+			require.NoError(t, wal.Close())
+
+			restarted, _ := start()
+			require.NoError(t, restarted.LoadFromFile(ctx, snapPath))
+			require.NoError(t, restarted.ReplayWAL(walPath))
+
+			assert.Equal(t, 3, restarted.Info().Dimensions, "the learned width must survive the restart")
+			err := restarted.Insert(ctx, "wrong", []float32{1, 2}, core.SparseVector{}, nil)
+			assert.ErrorIs(t, err, index.ErrDimensionMismatch, "a wrong-width insert after a restart must be rejected")
+		})
+	}
+}
