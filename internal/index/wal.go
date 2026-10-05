@@ -27,15 +27,16 @@ const (
 	WALActionDelete WALAction = "DELETE"
 )
 
-// WALEntry represents a single write-ahead log entry
-// Vector is always []float32 (canonical format from API), regardless of internal storage type
-// Sparse vector is stored in canonical format (uint32 indices + float32 values)
+// WALEntry is one write-ahead log entry, encoded as a binary record by
+// appendWALRecord. Vector is always []float32 (the API's canonical format),
+// whatever the index stores internally; Sparse is in canonical format too
+// (uint32 indices + float32 values).
 type WALEntry struct {
-	Action WALAction         `json:"action"`
-	ID     string            `json:"id"`
-	Vector []float32         `json:"vec,omitempty"`
-	Sparse core.SparseVector `json:"sparse,omitempty"`
-	Meta   map[string]any    `json:"meta,omitempty"`
+	Action WALAction
+	ID     string
+	Vector []float32
+	Sparse core.SparseVector
+	Meta   map[string]any
 }
 
 // WAL is a write-ahead log for durability

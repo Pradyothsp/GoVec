@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -237,34 +236,6 @@ func WriteWALEntry(t testing.TB, path string, entry *index.WALEntry) {
 	wal := NewWALWithPath(t, path)
 	err := wal.WriteEntry(context.Background(), entry)
 	require.NoError(t, err, "Failed to write WAL entry")
-}
-
-// ReadWALEntries reads all entries from a WAL file
-func ReadWALEntries(t testing.TB, path string) []index.WALEntry {
-	t.Helper()
-
-	file, err := os.Open(path) //nolint:gosec // path is test-controlled
-	require.NoError(t, err, "Failed to open WAL file")
-	defer file.Close() //nolint:errcheck // read-only test operation
-
-	var entries []index.WALEntry
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry index.WALEntry
-		err := json.Unmarshal(scanner.Bytes(), &entry)
-		require.NoError(t, err, "Failed to unmarshal WAL entry")
-		entries = append(entries, entry)
-	}
-	require.NoError(t, scanner.Err(), "Scanner error reading WAL")
-
-	return entries
-}
-
-// AssertWALContainsEntries verifies entry count
-func AssertWALContainsEntries(t testing.TB, path string, expectedCount int) {
-	t.Helper()
-	entries := ReadWALEntries(t, path)
-	assert.Len(t, entries, expectedCount, "WAL should contain %d entries", expectedCount)
 }
 
 // AssertWALEmpty verifies WAL file is empty (0 bytes)
