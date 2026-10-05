@@ -125,11 +125,10 @@ func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertIte
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	if err := idx.logBatch(ctx, items); err != nil {
+	accepted, failures, err := idx.logBatch(ctx, items)
+	if err != nil {
 		return nil, err
 	}
-
-	var failures []BatchInsertError
 
 	// pendingByID collects every stored item's graph node, keyed by
 	// internalID: an intra-batch duplicate external ID always resolves to the
@@ -142,7 +141,7 @@ func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertIte
 	pendingByID := make(map[uint32]hnsw.Node[uint32, T], len(items))
 	order := make([]uint32, 0, len(items))
 
-	for _, item := range items {
+	for _, item := range accepted {
 		node, err := idx.putAndDetach(item.ID, item.Vector, item.Sparse, item.Meta)
 		if err != nil {
 			zerolog.Ctx(ctx).Error().Err(err).Str("id", item.ID).Msg("failed to apply batch insert item")

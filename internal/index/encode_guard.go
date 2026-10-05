@@ -18,16 +18,22 @@ func prepareForEncode(vec []float32, quantization, distanceMetric string) ([]flo
 		return vec, nil
 	}
 
-	switch distanceMetric {
-	case string(config.DistanceMetricCosine):
-		return core.NormalizeVector(vec), nil
-	case string(config.DistanceMetricEuclidean):
-		if err := core.ValidateQuantizationRange(vec); err != nil {
-			return nil, err
-		}
+	if err := checkEncodable(vec, quantization, distanceMetric); err != nil {
+		return nil, err
 	}
-
+	if distanceMetric == string(config.DistanceMetricCosine) {
+		return core.NormalizeVector(vec), nil
+	}
 	return vec, nil
+}
+
+// checkEncodable reports whether prepareForEncode would reject vec, without
+// normalizing it: only scalar quantization under Euclidean can reject.
+func checkEncodable(vec []float32, quantization, distanceMetric string) error {
+	if quantization == string(config.QuantizationScalar) && distanceMetric == string(config.DistanceMetricEuclidean) {
+		return core.ValidateQuantizationRange(vec)
+	}
+	return nil
 }
 
 // storedCopy returns a vector the index can keep. A float32 vector passes

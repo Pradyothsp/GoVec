@@ -47,12 +47,12 @@ func (idx *VectorIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertI
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	if err := idx.logBatch(ctx, items); err != nil {
+	accepted, failures, err := idx.logBatch(ctx, items)
+	if err != nil {
 		return nil, err
 	}
 
-	var failures []BatchInsertError
-	for _, item := range items {
+	for _, item := range accepted {
 		if err := idx.insertInternal(item.ID, item.Vector, item.Sparse, item.Meta); err != nil {
 			zerolog.Ctx(ctx).Error().Err(err).Str("id", item.ID).Msg("failed to apply batch insert item")
 			failures = append(failures, BatchInsertError{ID: item.ID, Err: err})

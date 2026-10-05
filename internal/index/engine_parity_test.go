@@ -146,3 +146,51 @@ func TestSparseVector_Empty_MeansNone(t *testing.T) {
 		})
 	}
 }
+
+// TestRejectedWrite_NeverReachesTheWAL: an insert the index rejects must not
+// be logged. Replay treats an intact record it can't apply as corruption, so a
+// single rejected insert -- answered with a 400 -- used to stop the next
+// restart until a snapshot happened to clear the WAL.
+func TestRejectedWrite_NeverReachesTheWAL(t *testing.T) {
+	ctx := context.Background()
+	writes := map[string]func(Engine) error{
+		"wrong width": func(e Engine) error {
+			return e.Insert(ctx, "bad", []float32{1, 2}, core.SparseVector{}, nil)
+		},
+		"mismatched sparse vector": func(e Engine) error {
+			return e.Insert(ctx, "bad", []float32{0, 1, 0}, core.SparseVector{Indices: []uint32{1, 2}, Values: []float32{1}}, nil)
+		},
+		"batch with one bad item": func(e Engine) error {
+			failures, err := e.BatchInsert(ctx, []BatchInsertItem{{ID: "ok", Vector: []float32{0, 1, 0}}, {ID: "bad", Vector: []float32{1, 2}}})
+			if err == nil && len(failures) != 1 {
+				t.Errorf("want 1 failed item, got %d", len(failures))
+			}
+			return err
+		},
+		// The first item sets an empty index's width, so the second is too
+		// narrow even though the index had no width when the batch began.
+		"batch whose first item sets the width": func(e Engine) error {
+			e.Clear()
+			_, err := e.BatchInsert(ctx, []BatchInsertItem{{ID: "first", Vector: []float32{1, 0, 0}}, {ID: "bad", Vector: []float32{1, 2}}})
+			return err
+		},
+	}
+	for _, e := range bothEngines {
+		for name, write := range writes {
+			t.Run(e.name+"/"+name, func(t *testing.T) {
+				// Arrange
+				idx, r := e.open(t)
+				require.NoError(t, idx.Insert(ctx, "good", []float32{1, 0, 0}, core.SparseVector{}, nil))
+
+				// Act
+				_ = write(idx) //nolint:errcheck // single inserts are expected to fail
+				restarted, _ := e.open(t)
+				replayErr := restarted.ReplayWAL(r.wal.file.Name())
+
+				// Assert
+				require.NoError(t, replayErr, "the WAL must replay after a rejected write")
+				assert.Equal(t, idx.Len(), restarted.Len(), "replay must rebuild exactly what was accepted")
+			})
+		}
+	}
+}

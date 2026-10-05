@@ -107,12 +107,30 @@ func (r *records[T]) Info() EngineInfo {
 	}
 }
 
-// insert is Engine.Insert for both engines: the write goes to the WAL first,
-// then apply puts it in the index. Nothing is applied if the WAL write fails.
+// check rejects a write the index would refuse, before it reaches the WAL.
+// Replay treats an intact record it can't apply as corruption, so a rejected
+// write that was logged anyway stopped the next restart. width is the index's
+// width as of this write: a batch passes the width its earlier items set.
+func (r *records[T]) check(vec []float32, sparse core.SparseVector, width int) error {
+	if err := validateVectorDims(vec, width); err != nil {
+		return err
+	}
+	if err := validateSparse(sparse); err != nil {
+		return err
+	}
+	return checkEncodable(vec, r.quantization, r.distanceMetric)
+}
+
+// insert is Engine.Insert for both engines: the write is checked, goes to the
+// WAL, then apply puts it in the index. Nothing is logged or applied if the
+// check fails, and nothing is applied if the WAL write fails.
 func (r *records[T]) insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]any, apply func(string, []float32, core.SparseVector, map[string]any) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.check(vec, sparse, r.dimensions); err != nil {
+		return err
+	}
 	if err := r.wal.WriteEntry(ctx, &WALEntry{Action: WALActionInsert, ID: id, Vector: vec, Sparse: sparse, Meta: meta}); err != nil {
 		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return err
@@ -124,20 +142,32 @@ func (r *records[T]) insert(ctx context.Context, id string, vec []float32, spars
 	return nil
 }
 
-// logBatch writes a batch insert to the WAL with one fsync, before any of it
-// is applied. If it fails, the caller applies nothing: see WAL.WriteEntries
-// for the atomicity this relies on.
+// logBatch checks each item of a batch insert and writes the ones that pass
+// to the WAL with one fsync, before any is applied. It returns the items to
+// apply and the ones rejected. If the WAL write fails, the caller applies
+// nothing: see WAL.WriteEntries for the atomicity this relies on.
 // PRECONDITION: r.mu.Lock() held.
-func (r *records[T]) logBatch(ctx context.Context, items []BatchInsertItem) error {
-	entries := make([]*WALEntry, len(items))
-	for i, item := range items {
-		entries[i] = &WALEntry{Action: WALActionInsert, ID: item.ID, Vector: item.Vector, Sparse: item.Sparse, Meta: item.Meta}
+func (r *records[T]) logBatch(ctx context.Context, items []BatchInsertItem) (accepted []BatchInsertItem, failures []BatchInsertError, err error) {
+	accepted = make([]BatchInsertItem, 0, len(items))
+	entries := make([]*WALEntry, 0, len(items))
+	width := r.dimensions
+	for _, item := range items {
+		if err := r.check(item.Vector, item.Sparse, width); err != nil {
+			failures = append(failures, BatchInsertError{ID: item.ID, Err: err})
+			continue
+		}
+		if width == 0 {
+			width = len(item.Vector) // the first accepted item sets an empty index's width
+		}
+		accepted = append(accepted, item)
+		entries = append(entries, &WALEntry{Action: WALActionInsert, ID: item.ID, Vector: item.Vector, Sparse: item.Sparse, Meta: item.Meta})
 	}
+
 	if err := r.wal.WriteEntries(ctx, entries); err != nil {
-		zerolog.Ctx(ctx).Error().Err(err).Int("count", len(items)).Msg("failed to write WAL batch")
-		return err
+		zerolog.Ctx(ctx).Error().Err(err).Int("count", len(entries)).Msg("failed to write WAL batch")
+		return nil, nil, err
 	}
-	return nil
+	return accepted, failures, nil
 }
 
 // delete is Engine.Delete for both engines: false without touching the WAL if
