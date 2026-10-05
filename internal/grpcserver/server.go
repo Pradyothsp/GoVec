@@ -65,20 +65,26 @@ func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) erro
 	var batchErrors []*pb.BatchError
 	items := make([]index.BatchInsertItem, 0, batchChunk)
 
-	flush := func() error {
+	// flush applies the buffered items. If the chunk can't be logged, none of
+	// it is stored, but earlier chunks are: each of its items is reported as
+	// failed, so the response still says exactly what landed.
+	flush := func() {
 		if len(items) == 0 {
-			return nil
+			return
 		}
 		failures, err := s.engine.BatchInsert(ctx, items)
 		if err != nil {
-			return status.Errorf(codes.Internal, "batch insert failed: %v", err)
+			for _, item := range items {
+				batchErrors = append(batchErrors, &pb.BatchError{Id: item.ID, Error: err.Error()})
+			}
+			items = items[:0]
+			return
 		}
 		for _, f := range failures {
 			batchErrors = append(batchErrors, &pb.BatchError{Id: f.ID, Error: f.Err.Error()})
 		}
 		insertedCount += int32(len(items) - len(failures)) //nolint:gosec // at most batchChunk
 		items = items[:0]
-		return nil
 	}
 
 	for {
@@ -97,14 +103,10 @@ func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) erro
 			Meta:   convert.ProtoToMeta(req.Metadata),
 		})
 		if len(items) == batchChunk {
-			if err := flush(); err != nil {
-				return err
-			}
+			flush()
 		}
 	}
-	if err := flush(); err != nil {
-		return err
-	}
+	flush()
 
 	return stream.SendAndClose(&pb.BatchInsertResponse{
 		InsertedCount: insertedCount,

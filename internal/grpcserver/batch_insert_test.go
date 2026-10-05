@@ -2,6 +2,7 @@ package grpcserver_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -20,9 +21,11 @@ import (
 )
 
 // callCounter is a real engine that counts how a transport writes to it.
+// failBatch, if set, makes that batch call (1-based) fail as a WAL write would.
 type callCounter struct {
 	index.Engine
 	inserts, batches int
+	failBatch        int
 }
 
 func (c *callCounter) Insert(ctx context.Context, id string, vec []float32, sparse core.SparseVector, meta map[string]any) error {
@@ -32,6 +35,9 @@ func (c *callCounter) Insert(ctx context.Context, id string, vec []float32, spar
 
 func (c *callCounter) BatchInsert(ctx context.Context, items []index.BatchInsertItem) ([]index.BatchInsertError, error) {
 	c.batches++
+	if c.batches == c.failBatch {
+		return nil, errors.New("disk full")
+	}
 	return c.Engine.BatchInsert(ctx, items)
 }
 
@@ -92,4 +98,28 @@ func TestBatchInsert_LongStream_GoesInChunks(t *testing.T) {
 	assert.Equal(t, int32(n), resp.InsertedCount)
 	assert.Empty(t, resp.Errors)
 	assert.Equal(t, n, engine.Len())
+}
+
+// TestBatchInsert_FailedChunk_ReportsItsItems: when one chunk can't be logged,
+// the chunks before it are stored. The response must say so -- the stored
+// count, and each item of the failed chunk as an error -- not fail the whole
+// stream as if nothing landed.
+func TestBatchInsert_FailedChunk_ReportsItsItems(t *testing.T) {
+	// Arrange
+	const n = 1500 // a full first chunk of 1000, then a failing chunk of 500
+	engine := &callCounter{Engine: testutil.NewTestIndex(t), failBatch: 2}
+	stream, err := countingClient(t, engine).BatchInsert(context.Background())
+	require.NoError(t, err)
+	for i := range n {
+		require.NoError(t, stream.Send(&pb.InsertRequest{Id: fmt.Sprintf("v%d", i), Vector: []float32{1, float32(i), 0}}))
+	}
+
+	// Act
+	resp, err := stream.CloseAndRecv()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, int32(1000), resp.InsertedCount)
+	assert.Len(t, resp.Errors, 500)
+	assert.Equal(t, 1000, engine.Len())
 }
