@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -519,76 +518,27 @@ func (idx *HNSWIndex[T]) deleteInternal(id string) error {
 	return idx.IDMapper.Delete(id)
 }
 
-// SaveToFile serializes the HNSW index to a snapshot file.
-// When mmap is enabled the snapshot holds a topology-only graph and no vectors;
-// otherwise vectors are inline.
+func (idx *HNSWIndex[T]) snapshotContents() snapshotContents[T] {
+	return snapshotContents[T]{
+		indexType:      "hnsw",
+		distanceMetric: idx.distanceMetric,
+		dimensions:     idx.dimensions,
+		idMapper:       idx.IDMapper,
+		nodes:          idx.metadata,
+		vectorStore:    idx.vectorStore,
+	}
+}
+
+// SaveToFile serializes the HNSW index to a snapshot file. The graph goes in
+// as topology only, after the node records: every vector is already in a
+// record, or in the mmap store.
 func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	var quantType string
-	switch any(*new(T)).(type) {
-	case []float32:
-		quantType = "none"
-	case []int8:
-		quantType = "scalar"
-	default:
-		return fmt.Errorf("unknown vector type")
-	}
-
-	if err := ensureParentDir(path); err != nil {
-		return err
-	}
-
-	err := idx.saveSnapshot(path, quantType)
-
-	if err == nil {
-		zerolog.Ctx(ctx).Info().
-			Str("path", path).
-			Int("vectors", idx.graph.Len()).
-			Dur("duration", time.Since(start)).
-			Msg("HNSW snapshot saved to disk")
-	}
-	return err
-}
-
-// saveSnapshot writes the snapshot (layout in snapshot_stream.go) and
-// publishes it. The graph goes in as topology only: every vector is already in
-// a node record, or in the mmap store.
-// PRECONDITION: idx.mu.Lock() held.
-func (idx *HNSWIndex[T]) saveSnapshot(path, quantType string) error {
-	if idx.vectorStore != nil {
-		// The vectors live only in the mmap store, so they must be on disk before
-		// publishSnapshot lets the WAL go.
-		if err := idx.vectorStore.Sync(); err != nil {
-			return fmt.Errorf("mmap sync: %w", err)
-		}
-	}
-
-	w, err := newSnapshotWriter(path)
+	w, err := startSnapshot(path, idx.snapshotContents())
 	if err != nil {
-		return err
-	}
-
-	header := SnapshotHeader{
-		Version:        snapshotVersion,
-		Quantization:   quantType,
-		DistanceMetric: idx.distanceMetric,
-		IndexType:      "hnsw",
-		Mmap:           idx.vectorStore != nil,
-		Dimensions:     idx.dimensions,
-	}
-	if err := w.enc.Encode(header); err != nil {
-		w.abort()
-		return err
-	}
-	if err := idx.IDMapper.EncodeGOB(w.enc); err != nil {
-		w.abort()
-		return err
-	}
-	if err := writeNodeRecords(w.enc, idx.metadata, idx.vectorStore == nil); err != nil {
-		w.abort()
 		return err
 	}
 
@@ -601,92 +551,49 @@ func (idx *HNSWIndex[T]) saveSnapshot(path, quantType string) error {
 		w.abort()
 		return err
 	}
+	if err := w.publish(idx.wal); err != nil {
+		return err
+	}
 
-	return w.publish(idx.wal)
+	zerolog.Ctx(ctx).Info().
+		Str("path", path).
+		Int("vectors", idx.graph.Len()).
+		Dur("duration", time.Since(start)).
+		Msg("HNSW snapshot saved to disk")
+	return nil
 }
 
 // LoadFromFile reads the HNSW index from a snapshot file.
 // Handles both heap-backed and mmap-backed snapshots.
 // A missing file is not an error — the server starts with an empty index.
-func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err error) {
+func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	f, err := os.Open(path) //nolint:gosec // path from operator config
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	found, err := readSnapshotFile(path, func(dec *gob.Decoder) error {
+		dims, err := readSnapshotContents(dec, idx.snapshotContents(), idx.configuredDimensions)
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = cerr
+		idx.dimensions = dims
+
+		lookupVec := func(key uint32) (T, bool) {
+			node, ok := idx.metadata[key]
+			if !ok {
+				var zero T
+				return zero, false
+			}
+			return node.Vector, true
 		}
-	}()
-
-	decoder := gob.NewDecoder(f)
-
-	var header SnapshotHeader
-	if err := decoder.Decode(&header); err != nil {
-		return fmt.Errorf("failed to decode snapshot header: %w", err)
-	}
-
-	if header.IndexType != "hnsw" {
-		return fmt.Errorf("snapshot was created with brute-force index. Delete data files or change index_type to 'brute' in config")
-	}
-	if err := checkSnapshotVersion(header); err != nil {
-		return err
-	}
-
-	var expectedQuant string
-	switch any(*new(T)).(type) {
-	case []float32:
-		expectedQuant = "none"
-	case []int8:
-		expectedQuant = "scalar"
-	default:
-		return fmt.Errorf("unknown vector type")
-	}
-	if header.Quantization != expectedQuant {
-		return fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
-	}
-	if header.DistanceMetric != idx.distanceMetric {
-		return fmt.Errorf("snapshot distance metric mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", idx.distanceMetric, header.DistanceMetric)
-	}
-	dims, err := loadedDimensions(header.Dimensions, idx.configuredDimensions, idx.dimensions)
-	if err != nil {
-		return err
-	}
-	idx.dimensions = dims
-
-	if err := idx.IDMapper.DecodeGOB(decoder); err != nil {
-		return fmt.Errorf("failed to decode IDMapper: %w", err)
-	}
-
-	if header.Mmap && idx.vectorStore == nil {
-		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
-	}
-	var mmapStore *storage.MmapStore
-	if header.Mmap {
-		mmapStore = idx.vectorStore
-	}
-	if err := readNodeRecords(decoder, idx.metadata, mmapStore); err != nil {
-		return err
-	}
-
-	lookupVec := func(key uint32) (T, bool) {
-		node, ok := idx.metadata[key]
-		if !ok {
-			var zero T
-			return zero, false
+		topology := bufio.NewReaderSize(newGobChunkReader(dec), snapshotChunkSize)
+		if err := idx.graph.ImportTopology(topology, lookupVec); err != nil {
+			return fmt.Errorf("failed to import HNSW topology: %w", err)
 		}
-		return node.Vector, true
-	}
-	topology := bufio.NewReaderSize(newGobChunkReader(decoder), snapshotChunkSize)
-	if err := idx.graph.ImportTopology(topology, lookupVec); err != nil {
-		return fmt.Errorf("failed to import HNSW topology: %w", err)
+		return nil
+	})
+	if err != nil || !found {
+		return err
 	}
 
 	if idx.metaIndex != nil {
@@ -694,15 +601,12 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) (err err
 	}
 	idx.rebuildInvertedIndex()
 
-	if err == nil {
-		zerolog.Ctx(ctx).Info().
-			Str("path", path).
-			Int("vectors", idx.graph.Len()).
-			Dur("duration", time.Since(start)).
-			Msg("HNSW snapshot loaded from disk")
-	}
-
-	return err
+	zerolog.Ctx(ctx).Info().
+		Str("path", path).
+		Int("vectors", idx.graph.Len()).
+		Dur("duration", time.Since(start)).
+		Msg("HNSW snapshot loaded from disk")
+	return nil
 }
 
 // rebuildMetaIndex reconstructs the MetadataIndex from the current metadata map.

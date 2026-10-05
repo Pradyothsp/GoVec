@@ -134,6 +134,158 @@ func loadedDimensions(savedDims, configuredDims, currentDims int) (int, error) {
 	return savedDims, nil
 }
 
+// snapshotContents is what a snapshot holds for either engine: the header
+// fields, the ID mapper and the node records. An HNSW snapshot adds the graph
+// topology after them.
+type snapshotContents[T any] struct {
+	indexType      string // the header's IndexType: "" for brute force, "hnsw"
+	distanceMetric string
+	dimensions     int // the index's current width
+	idMapper       *core.IDMapper
+	nodes          map[uint32]*core.VectorNode[T]
+	vectorStore    *storage.MmapStore // nil unless mmap is on
+}
+
+// quantizationOf is how a snapshot header names the vector type T.
+func quantizationOf[T any]() (string, error) {
+	switch any(*new(T)).(type) {
+	case []float32:
+		return "none", nil
+	case []int8:
+		return "scalar", nil
+	default:
+		return "", fmt.Errorf("unknown vector type %T", *new(T))
+	}
+}
+
+// startSnapshot writes c into a new snapshot at path (layout in
+// snapshot_stream.go). The caller writes anything engine-specific after it,
+// then publishes the snapshot or aborts it. On error nothing is left behind.
+// PRECONDITION: the index write lock is held.
+func startSnapshot[T any](path string, c snapshotContents[T]) (*snapshotWriter, error) {
+	quantType, err := quantizationOf[T]()
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParentDir(path); err != nil {
+		return nil, err
+	}
+	if c.vectorStore != nil {
+		// The vectors live only in the mmap store, so they must be on disk before
+		// publishSnapshot lets the WAL go.
+		if err := c.vectorStore.Sync(); err != nil {
+			return nil, fmt.Errorf("mmap sync: %w", err)
+		}
+	}
+
+	w, err := newSnapshotWriter(path)
+	if err != nil {
+		return nil, err
+	}
+
+	header := SnapshotHeader{
+		Version:        snapshotVersion,
+		Quantization:   quantType,
+		DistanceMetric: c.distanceMetric,
+		IndexType:      c.indexType,
+		Mmap:           c.vectorStore != nil,
+		Dimensions:     c.dimensions,
+	}
+	if err := w.enc.Encode(header); err != nil {
+		w.abort()
+		return nil, err
+	}
+	if err := c.idMapper.EncodeGOB(w.enc); err != nil {
+		w.abort()
+		return nil, err
+	}
+	if err := writeNodeRecords(w.enc, c.nodes, c.vectorStore == nil); err != nil {
+		w.abort()
+		return nil, err
+	}
+	return w, nil
+}
+
+// readSnapshotFile opens the snapshot at path and hands its decoder to read.
+// A missing file means there is no snapshot yet: found is false, err nil.
+func readSnapshotFile(path string, read func(*gob.Decoder) error) (found bool, err error) {
+	f, err := os.Open(path) //nolint:gosec // path from operator config
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	return true, read(gob.NewDecoder(f))
+}
+
+// readSnapshotContents reads what startSnapshot wrote into c.idMapper and
+// c.nodes, after checking the header against c and the build. It returns the
+// index's width after the load (see loadedDimensions).
+func readSnapshotContents[T any](dec *gob.Decoder, c snapshotContents[T], configuredDims int) (int, error) {
+	var header SnapshotHeader
+	if err := dec.Decode(&header); err != nil {
+		return 0, fmt.Errorf("failed to decode snapshot header: %w", err)
+	}
+
+	if savedHNSW, wantHNSW := header.IndexType == "hnsw", c.indexType == "hnsw"; savedHNSW != wantHNSW {
+		if savedHNSW {
+			return 0, fmt.Errorf("snapshot was created with HNSW index. Delete data files or change index_type to 'hnsw' in config")
+		}
+		return 0, fmt.Errorf("snapshot was created with brute-force index. Delete data files or change index_type to 'brute' in config")
+	}
+	if err := checkSnapshotVersion(header); err != nil {
+		return 0, err
+	}
+
+	expectedQuant, err := quantizationOf[T]()
+	if err != nil {
+		return 0, err
+	}
+	if header.Quantization != expectedQuant {
+		return 0, fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
+	}
+	if header.DistanceMetric != c.distanceMetric {
+		return 0, fmt.Errorf("snapshot distance metric mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", c.distanceMetric, header.DistanceMetric)
+	}
+	dims, err := loadedDimensions(header.Dimensions, configuredDims, c.dimensions)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := c.idMapper.DecodeGOB(dec); err != nil {
+		return 0, fmt.Errorf("failed to decode IDMapper: %w", err)
+	}
+
+	if header.Mmap && c.vectorStore == nil {
+		return 0, fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
+	}
+	var mmapStore *storage.MmapStore
+	if header.Mmap {
+		mmapStore = c.vectorStore
+	}
+	if err := readNodeRecords(dec, c.nodes, mmapStore); err != nil {
+		return 0, err
+	}
+	return dims, nil
+}
+
+func (idx *VectorIndex[T]) snapshotContents() snapshotContents[T] {
+	return snapshotContents[T]{
+		distanceMetric: idx.distanceMetric,
+		dimensions:     idx.dimensions,
+		idMapper:       idx.IDMapper,
+		nodes:          idx.Store,
+		vectorStore:    idx.vectorStore,
+	}
+}
+
 // SaveToFile serializes the index to a specific path.
 // When mmap is enabled (vectorStore != nil) the vectors stay in the mmap store
 // and the snapshot carries everything else; otherwise vectors are inline.
@@ -142,138 +294,38 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	var quantType string
-	switch any(*new(T)).(type) {
-	case []float32:
-		quantType = "none"
-	case []int8:
-		quantType = "scalar"
-	default:
-		return fmt.Errorf("unknown vector type")
-	}
-
-	if err := ensureParentDir(path); err != nil {
-		return err
-	}
-
-	err := idx.saveSnapshot(path, quantType)
-
-	if err == nil {
-		zerolog.Ctx(ctx).Info().
-			Str("path", path).
-			Int("vectors", len(idx.Store)).
-			Dur("duration", time.Since(start)).
-			Msg("snapshot saved to disk")
-	}
-	return err
-}
-
-// saveSnapshot writes the snapshot (layout in snapshot_stream.go) and
-// publishes it. PRECONDITION: idx.mu.Lock() held.
-func (idx *VectorIndex[T]) saveSnapshot(path, quantType string) error {
-	if idx.vectorStore != nil {
-		// The vectors live only in the mmap store, so they must be on disk before
-		// publishSnapshot lets the WAL go.
-		if err := idx.vectorStore.Sync(); err != nil {
-			return fmt.Errorf("mmap sync: %w", err)
-		}
-	}
-
-	w, err := newSnapshotWriter(path)
+	w, err := startSnapshot(path, idx.snapshotContents())
 	if err != nil {
 		return err
 	}
-
-	header := SnapshotHeader{
-		Version:        snapshotVersion,
-		Quantization:   quantType,
-		DistanceMetric: idx.distanceMetric,
-		Mmap:           idx.vectorStore != nil,
-		Dimensions:     idx.dimensions,
-	}
-	if err := w.enc.Encode(header); err != nil {
-		w.abort()
-		return err
-	}
-	if err := idx.IDMapper.EncodeGOB(w.enc); err != nil {
-		w.abort()
-		return err
-	}
-	if err := writeNodeRecords(w.enc, idx.Store, idx.vectorStore == nil); err != nil {
-		w.abort()
+	if err := w.publish(idx.wal); err != nil {
 		return err
 	}
 
-	return w.publish(idx.wal)
+	zerolog.Ctx(ctx).Info().
+		Str("path", path).
+		Int("vectors", len(idx.Store)).
+		Dur("duration", time.Since(start)).
+		Msg("snapshot saved to disk")
+	return nil
 }
 
 // LoadFromFile reads the index from disk.
 // A missing file is not an error — the server starts with an empty index.
-func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err error) {
+func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 	start := time.Now()
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	f, err := os.Open(path) //nolint:gosec // path from operator config
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	found, err := readSnapshotFile(path, func(dec *gob.Decoder) error {
+		dims, err := readSnapshotContents(dec, idx.snapshotContents(), idx.configuredDimensions)
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-
-	decoder := gob.NewDecoder(f)
-
-	var header SnapshotHeader
-	if err := decoder.Decode(&header); err != nil {
-		return fmt.Errorf("failed to decode snapshot header: %w", err)
-	}
-
-	if header.IndexType == "hnsw" {
-		return fmt.Errorf("snapshot was created with HNSW index. Delete data files or change index_type to 'hnsw' in config")
-	}
-	if err := checkSnapshotVersion(header); err != nil {
-		return err
-	}
-
-	var expectedQuant string
-	switch any(*new(T)).(type) {
-	case []float32:
-		expectedQuant = "none"
-	case []int8:
-		expectedQuant = "scalar"
-	default:
-		return fmt.Errorf("unknown vector type")
-	}
-	if header.Quantization != expectedQuant {
-		return fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
-	}
-	if header.DistanceMetric != idx.distanceMetric {
-		return fmt.Errorf("snapshot distance metric mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", idx.distanceMetric, header.DistanceMetric)
-	}
-	dims, err := loadedDimensions(header.Dimensions, idx.configuredDimensions, idx.dimensions)
-	if err != nil {
-		return err
-	}
-	idx.dimensions = dims
-
-	if err := idx.IDMapper.DecodeGOB(decoder); err != nil {
-		return fmt.Errorf("failed to decode IDMapper: %w", err)
-	}
-
-	if header.Mmap && idx.vectorStore == nil {
-		return fmt.Errorf("snapshot keeps its vectors in an mmap store, but storage.enable_mmap is off")
-	}
-	var mmapStore *storage.MmapStore
-	if header.Mmap {
-		mmapStore = idx.vectorStore
-	}
-	if err := readNodeRecords(decoder, idx.Store, mmapStore); err != nil {
+		idx.dimensions = dims
+		return nil
+	})
+	if err != nil || !found {
 		return err
 	}
 
@@ -283,16 +335,12 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) (err e
 			idx.metaIndex.Add(internalID, node.Metadata)
 		}
 	}
-
 	idx.rebuildInvertedIndex()
 
-	if err == nil {
-		zerolog.Ctx(ctx).Info().
-			Str("path", path).
-			Int("vectors", len(idx.Store)).
-			Dur("duration", time.Since(start)).
-			Msg("snapshot loaded from disk")
-	}
-
-	return err
+	zerolog.Ctx(ctx).Info().
+		Str("path", path).
+		Int("vectors", len(idx.Store)).
+		Dur("duration", time.Since(start)).
+		Msg("snapshot loaded from disk")
+	return nil
 }
