@@ -196,6 +196,9 @@ func (r *records[T]) put(id string, vec []float32, sparse core.SparseVector, met
 	if err := validateVectorDims(vec, r.dimensions); err != nil {
 		return nil, false, err
 	}
+	if err := validateSparse(sparse); err != nil {
+		return nil, false, err
+	}
 	encoded, err := r.encode(vec)
 	if err != nil {
 		return nil, false, err
@@ -319,16 +322,19 @@ func (r *records[T]) encode(vec []float32) (T, error) {
 	return r.encodeFunc(input), nil
 }
 
-// encodeQuery checks a query's width and encodes it as stored vectors are.
-// A query of the wrong width can't be compared against anything stored, and
-// the comparison functions report that as a bare "vector dimensions mismatch"
-// from deep inside the search. Checking here names the required width,
-// classifies the failure as the caller's, and makes both engines reject a bad
-// query the same way, even when the index is empty.
+// encodeQuery checks a query -- its width, and its sparse part -- and encodes
+// it as stored vectors are. A query of the wrong width can't be compared
+// against anything stored, and the comparison functions report that as a bare
+// "vector dimensions mismatch" from deep inside the search. Checking here
+// names the required width, classifies the failure as the caller's, and makes
+// both engines reject a bad query the same way, even when the index is empty.
 // PRECONDITION: r.mu.RLock() held.
-func (r *records[T]) encodeQuery(query []float32) (T, error) {
+func (r *records[T]) encodeQuery(query []float32, sparseQuery core.SparseVector) (T, error) {
+	var zero T
 	if err := validateVectorDims(query, r.dimensions); err != nil {
-		var zero T
+		return zero, err
+	}
+	if err := validateSparse(sparseQuery); err != nil {
 		return zero, err
 	}
 	return r.encode(query)

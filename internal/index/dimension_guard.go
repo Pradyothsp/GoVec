@@ -3,6 +3,8 @@ package index
 import (
 	"errors"
 	"fmt"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 var (
@@ -12,6 +14,10 @@ var (
 	// ErrDimensionMismatch is returned when an insert supplies a vector whose
 	// width differs from the index's.
 	ErrDimensionMismatch = errors.New("vector dimension mismatch")
+
+	// ErrInvalidSparseVector is returned when a sparse vector's indices and
+	// values differ in length.
+	ErrInvalidSparseVector = errors.New("invalid sparse_vector: indices and values must have the same length")
 )
 
 // IsInvalidVectorError reports whether err means the caller supplied an
@@ -22,7 +28,17 @@ var (
 // correctly rejected. Keeping the classification here means the transports do
 // not each need to know which sentinels the index layer defines.
 func IsInvalidVectorError(err error) bool {
-	return errors.Is(err, ErrEmptyVector) || errors.Is(err, ErrDimensionMismatch)
+	return errors.Is(err, ErrEmptyVector) || errors.Is(err, ErrDimensionMismatch) || errors.Is(err, ErrInvalidSparseVector)
+}
+
+// validateSparse rejects a sparse vector whose indices and values don't pair
+// up: every index needs its weight, and the inverted index and sparse scoring
+// read them pairwise. An empty sparse vector is valid and means none.
+func validateSparse(sparse core.SparseVector) error {
+	if len(sparse.Indices) != len(sparse.Values) {
+		return fmt.Errorf("%w: %d indices, %d values", ErrInvalidSparseVector, len(sparse.Indices), len(sparse.Values))
+	}
+	return nil
 }
 
 // validateVectorDims rejects any vector that could not participate in a

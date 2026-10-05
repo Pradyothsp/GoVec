@@ -95,23 +95,10 @@ func (h *VectorHandler) BatchInsert(c *gin.Context) {
 	items := make([]index.BatchInsertItem, 0, len(req.Vectors))
 
 	for _, v := range req.Vectors {
-		if v.SparseVector != nil && !v.SparseVector.IsValid() {
-			errs = append(errs, BatchInsertResult{
-				ID:    v.ID,
-				Error: "invalid sparse_vector: indices and values must have the same length",
-			})
-			continue
-		}
-
-		var sparse core.SparseVector
-		if v.SparseVector != nil {
-			sparse = *v.SparseVector
-		}
-
 		items = append(items, index.BatchInsertItem{
 			ID:     v.ID,
 			Vector: v.Vector,
-			Sparse: sparse,
+			Sparse: sparseOrNone(v.SparseVector),
 			Meta:   v.Metadata,
 		})
 	}
@@ -157,18 +144,7 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 	}
 
 	// Validate sparse vector if provided
-	if req.SparseVector != nil && !req.SparseVector.IsValid() {
-		response.Fail(c, http.StatusBadRequest, "invalid sparse_vector: indices and values must have the same length")
-		return
-	}
-
-	// Convert nil pointer to empty SparseVector for cleaner API
-	var sparse core.SparseVector
-	if req.SparseVector != nil {
-		sparse = *req.SparseVector
-	}
-
-	err := h.Engine.Insert(c.Request.Context(), req.ID, req.Vector, sparse, req.Metadata)
+	err := h.Engine.Insert(c.Request.Context(), req.ID, req.Vector, sparseOrNone(req.SparseVector), req.Metadata)
 	if err != nil {
 		// A mis-sized or empty vector is the caller's mistake, not a server
 		// fault -- report it as such, and don't log it at error level alongside
@@ -211,19 +187,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		return
 	}
 
-	// Validate sparse vector if provided
-	if req.SparseVector != nil && !req.SparseVector.IsValid() {
-		response.Fail(c, http.StatusBadRequest, "invalid sparse_vector: indices and values must have the same length")
-		return
-	}
-
-	// Convert nil pointer to empty SparseVector for cleaner API
-	var sparse core.SparseVector
-	if req.SparseVector != nil {
-		sparse = *req.SparseVector
-	}
-
-	results, err := h.Engine.Search(c.Request.Context(), req.Vector, sparse, req.K, req.Filters)
+	results, err := h.Engine.Search(c.Request.Context(), req.Vector, sparseOrNone(req.SparseVector), req.K, req.Filters)
 	if err != nil {
 		// Same rule as Insert: a query the index can't compare is a bad
 		// request, not a server fault. It matters more here -- search is the
@@ -312,4 +276,13 @@ func (h *VectorHandler) Delete(c *gin.Context) {
 	}
 
 	response.OK(c, http.StatusOK, DeleteResponse{Status: "deleted", ID: id})
+}
+
+// sparseOrNone turns an absent sparse_vector into an empty one, which the
+// engine reads as none. The engine checks a present one.
+func sparseOrNone(sparse *core.SparseVector) core.SparseVector {
+	if sparse == nil {
+		return core.SparseVector{}
+	}
+	return *sparse
 }

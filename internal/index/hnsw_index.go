@@ -211,7 +211,7 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	encodedQuery, err := idx.encodeQuery(query)
+	encodedQuery, err := idx.encodeQuery(query, sparseQuery)
 	if err != nil {
 		return nil, err
 	}

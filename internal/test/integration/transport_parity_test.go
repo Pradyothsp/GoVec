@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
@@ -201,4 +203,44 @@ func TestInfoVersion_RESTAndGRPCAgree(t *testing.T) {
 
 	assert.Equal(t, "v9.9.9-parity", envelope.Data.Version, "REST /info version")
 	assert.Equal(t, "v9.9.9-parity", resp.Version, "gRPC Info version")
+}
+
+// TestSparseVector_RESTAndGRPCAgree: the sparse-vector rule lives in the
+// engine, so both transports accept an empty one as "no sparse part" and
+// reject mismatched lengths as the caller's error. REST used to reject an
+// empty one too, and the two answered a mismatch with different messages.
+func TestSparseVector_RESTAndGRPCAgree(t *testing.T) {
+	router, grpcClient := parityServers(t)
+	ctx := context.Background()
+	vec := []float32{1, 2, 3}
+
+	restInsert := func(id string, indices []uint32, values []float32) *httptest.ResponseRecorder {
+		raw, err := json.Marshal(map[string]any{"id": id, "vector": vec, "sparse_vector": map[string]any{"indices": indices, "values": values}})
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("empty is accepted", func(t *testing.T) {
+		rec := restInsert("empty", []uint32{}, []float32{})
+		assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+		_, err := grpcClient.Insert(ctx, &pb.InsertRequest{Id: "empty", Vector: vec, Sparse: &pb.SparseVector{}})
+		assert.NoError(t, err)
+	})
+
+	t.Run("mismatched lengths are rejected", func(t *testing.T) {
+		rec := restInsert("bad", []uint32{0, 1}, []float32{0.5})
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+		_, err := grpcClient.Insert(ctx, &pb.InsertRequest{Id: "bad", Vector: vec, Sparse: &pb.SparseVector{Indices: []uint32{0, 1}, Values: []float32{0.5}}})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+
+		assert.Contains(t, rec.Body.String(), "indices and values must have the same length")
+		assert.Contains(t, err.Error(), "indices and values must have the same length")
+	})
 }

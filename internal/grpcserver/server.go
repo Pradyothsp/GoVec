@@ -36,10 +36,7 @@ func (s *GoVecServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.In
 	if len(req.Vector) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "vector is required")
 	}
-	sparse, err := convert.ProtoToSparse(req.Sparse)
-	if err != nil {
-		return nil, err
-	}
+	sparse := convert.ProtoToSparse(req.Sparse)
 	meta := convert.ProtoToMeta(req.Metadata)
 	if err := s.engine.Insert(ctx, req.Id, req.Vector, sparse, meta); err != nil {
 		// A mis-sized vector is the caller's mistake, not a server fault.
@@ -70,11 +67,7 @@ func (s *GoVecServer) BatchInsert(stream pb.GoVecService_BatchInsertServer) erro
 			return status.Errorf(codes.Internal, "stream recv error: %v", err)
 		}
 
-		sparse, err := convert.ProtoToSparse(req.Sparse)
-		if err != nil {
-			batchErrors = append(batchErrors, &pb.BatchError{Id: req.Id, Error: err.Error()})
-			continue
-		}
+		sparse := convert.ProtoToSparse(req.Sparse)
 		meta := convert.ProtoToMeta(req.Metadata)
 		if err := s.engine.Insert(ctx, req.Id, req.Vector, sparse, meta); err != nil {
 			batchErrors = append(batchErrors, &pb.BatchError{Id: req.Id, Error: err.Error()})
@@ -97,10 +90,7 @@ func (s *GoVecServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.Se
 	if req.K <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "k must be positive")
 	}
-	sparse, err := convert.ProtoToSparse(req.SparseQuery)
-	if err != nil {
-		return nil, err
-	}
+	sparse := convert.ProtoToSparse(req.SparseQuery)
 	filters := convert.ProtoToMeta(req.Filters)
 	results, err := s.engine.Search(ctx, req.QueryVector, sparse, int(req.K), filters)
 	if err != nil {

@@ -42,11 +42,12 @@ internal/
   index/                    Engine interface + both engines, WAL, snapshots, input guards
     engine.go               the Engine interface every transport talks to
     factory.go              picks VectorIndex[T] (brute force) or HNSWIndex[T] from config
-    index.go / hnsw_index.go  the two engines
+    records.go              what both engines store and every rule for it: insert, delete, WAL order, scoring
+    index.go / hnsw_index.go  the two engines: only how each searches (scan or HNSW graph)
     wal.go / wal_record.go  write-ahead log: binary records (length + CRC-32C), replay rules
     persistence.go          snapshot save/load, publishSnapshot (WAL truncated only after)
     snapshot_stream.go      snapshot layout: streamed records, vectors once, HNSW topology only
-    dimension_guard.go      input sentinels + IsInvalidVectorError
+    dimension_guard.go      input checks (width, sparse) + sentinels + IsInvalidVectorError
     encode_guard.go         quantization preconditions (prepareForEncode)
   hnsw/                     vendored fork of an upstream HNSW library, made generic over T
   storage/                  mmap-backed store (unix, plus a stub for other platforms)

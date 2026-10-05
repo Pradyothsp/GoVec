@@ -1,30 +1,20 @@
 package convert
 
 import (
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
-// ProtoToSparse converts a protobuf SparseVector to a core.SparseVector.
-// Returns an error if indices and values have different lengths (and both are non-nil).
-func ProtoToSparse(in *pb.SparseVector) (core.SparseVector, error) {
+// ProtoToSparse converts a protobuf SparseVector to a core.SparseVector. The
+// engine checks that indices and values pair up, for every transport.
+func ProtoToSparse(in *pb.SparseVector) core.SparseVector {
 	if in == nil {
-		return core.SparseVector{}, nil
-	}
-	if len(in.Indices) != len(in.Values) {
-		return core.SparseVector{}, status.Errorf(
-			codes.InvalidArgument,
-			"sparse vector: indices length %d != values length %d",
-			len(in.Indices), len(in.Values),
-		)
+		return core.SparseVector{}
 	}
 	return core.SparseVector{
 		Indices: in.Indices,
 		Values:  in.Values,
-	}, nil
+	}
 }
 
 // SparseToProto converts a core.SparseVector to a protobuf SparseVector.

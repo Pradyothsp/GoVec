@@ -98,3 +98,51 @@ func recordsOf(t *testing.T, engine Engine) *records[[]int8] {
 		return nil
 	}
 }
+
+// TestSparseVector_LengthMismatch_Rejected: a sparse vector pairs each index
+// with a value, so mismatched lengths are the caller's mistake, for an insert
+// and for a query alike. The transports used to check this themselves, four
+// times and with two different messages.
+func TestSparseVector_LengthMismatch_Rejected(t *testing.T) {
+	ctx := context.Background()
+	mismatched := core.SparseVector{Indices: []uint32{0, 1}, Values: []float32{0.5}}
+	for _, indexType := range parityIndexTypes {
+		t.Run(string(indexType), func(t *testing.T) {
+			engine := newParityEngine(t, config.EngineConfig{
+				IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine, EnableHybridSearch: true,
+			}, config.StorageConfig{})
+			require.NoError(t, engine.Insert(ctx, "stored", []float32{1, 0, 0}, core.SparseVector{}, nil))
+
+			insertErr := engine.Insert(ctx, "bad", []float32{0, 1, 0}, mismatched, nil)
+			_, searchErr := engine.Search(ctx, []float32{1, 0, 0}, mismatched, 5, nil)
+
+			for _, err := range []error{insertErr, searchErr} {
+				require.ErrorIs(t, err, ErrInvalidSparseVector)
+				assert.True(t, IsInvalidVectorError(err), "a caller error, answered with 400 / InvalidArgument")
+			}
+			assert.Equal(t, 1, engine.Len())
+		})
+	}
+}
+
+// TestSparseVector_Empty_MeansNone: an empty sparse vector is no sparse part,
+// on every transport. REST used to reject one with 400 where gRPC took it.
+func TestSparseVector_Empty_MeansNone(t *testing.T) {
+	ctx := context.Background()
+	empty := core.SparseVector{Indices: []uint32{}, Values: []float32{}}
+	for _, indexType := range parityIndexTypes {
+		t.Run(string(indexType), func(t *testing.T) {
+			engine := newParityEngine(t, config.EngineConfig{
+				IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine, EnableHybridSearch: true,
+			}, config.StorageConfig{})
+
+			require.NoError(t, engine.Insert(ctx, "dense-only", []float32{1, 0, 0}, empty, nil))
+			_, err := engine.Search(ctx, []float32{1, 0, 0}, empty, 5, nil)
+			require.NoError(t, err)
+
+			record, err := engine.GetByID(ctx, "dense-only")
+			require.NoError(t, err)
+			assert.Nil(t, record.SparseVector)
+		})
+	}
+}
