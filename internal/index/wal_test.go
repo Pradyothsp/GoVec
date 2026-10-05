@@ -47,7 +47,6 @@ func TestNewWAL_UncreatableParent_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestWriteEntry_Variations consolidates all WriteEntry tests
 // readWALEntries reads a WAL back through replay, so tests check what was
 // written rather than how the format spells it.
 func readWALEntries(t *testing.T, path string) []WALEntry {
@@ -60,6 +59,7 @@ func readWALEntries(t *testing.T, path string) []WALEntry {
 	return entries
 }
 
+// TestWriteEntry_Variations consolidates all WriteEntry tests.
 func TestWriteEntry_Variations(t *testing.T) {
 	tests := []struct {
 		name   string

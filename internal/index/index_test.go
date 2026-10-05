@@ -308,67 +308,46 @@ func TestSearch_WithFilters(t *testing.T) {
 	assert.Len(t, results, 1, "Should find 1 vector with value 20")
 }
 
-func TestSearch_Concurrency(t *testing.T) {
+// TestSearch_ConcurrentInsertAndSearch runs searches alongside inserts. -race
+// checks the memory accesses; the assertions check that every search
+// succeeded with a full result and every insert landed.
+func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
+	ctx := context.Background()
 	idx := newTestIndex(t)
+	const initial, inserted, searchers, k = 10, 20, 20, 5
 
-	// Pre-populate
-	for i := 0; i < 10; i++ {
-		id := fmt.Sprintf("vec%d", i)
-		vec := []float32{float32(i), float32(i * 2)}
-		_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	for i := 1; i <= initial; i++ {
+		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
+		require.NoError(t, idx.Insert(ctx, fmt.Sprintf("initial%d", i), vec, core.SparseVector{}, nil))
 	}
 
-	query := []float32{5.0, 10.0}
-
 	var wg sync.WaitGroup
-	numGoroutines := 50
-	wg.Add(numGoroutines)
-
-	for i := 0; i < numGoroutines; i++ {
+	errs := make(chan error, inserted+searchers)
+	wg.Add(1 + searchers)
+	go func() {
+		defer wg.Done()
+		for i := 1; i <= inserted; i++ {
+			vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
+			errs <- idx.Insert(ctx, fmt.Sprintf("new%d", i), vec, core.SparseVector{}, nil)
+		}
+	}()
+	for range searchers {
 		go func() {
 			defer wg.Done()
-			_, _ = idx.Search(context.Background(), query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
+			results, err := idx.Search(ctx, []float32{5, 10, 15}, core.SparseVector{}, k, nil)
+			if err == nil && len(results) != k {
+				err = fmt.Errorf("search returned %d results, want %d", len(results), k)
+			}
+			errs <- err
 		}()
 	}
-
 	wg.Wait()
-	// No assertion - test passes if no race conditions occur
-}
+	close(errs)
 
-func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
-	idx := newTestIndex(t)
-
-	// Pre-populate with non-zero vectors to avoid edge cases
-	for i := 1; i <= 10; i++ {
-		id := fmt.Sprintf("initial%d", i)
-		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-		_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test setup
+	for err := range errs {
+		require.NoError(t, err)
 	}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Concurrent inserts
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 20; i++ {
-			id := fmt.Sprintf("new%d", i)
-			vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-			_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, nil) //nolint:errcheck // test concurrency
-		}
-	}()
-
-	// Concurrent searches
-	go func() {
-		defer wg.Done()
-		query := []float32{5.0, 10.0, 15.0}
-		for i := 0; i < 20; i++ {
-			_, _ = idx.Search(context.Background(), query, core.SparseVector{}, 5, nil) //nolint:errcheck // test concurrency
-		}
-	}()
-
-	wg.Wait()
-	// Test passes if no race conditions occur
+	assert.Equal(t, initial+inserted, idx.Len())
 }
 
 func TestDelete(t *testing.T) {
