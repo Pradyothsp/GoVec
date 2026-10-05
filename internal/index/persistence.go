@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -59,6 +60,72 @@ func ensureParentDir(path string) error {
 	return nil
 }
 
+// publishSnapshot makes a fully written temporary snapshot the live one, and
+// only then truncates the WAL.
+//
+// Until the new snapshot is durably on disk, the WAL is the only durable copy
+// of every write since the previous snapshot. Truncating it first meant any
+// failure in between -- out of memory, disk full, a crash -- lost all of those
+// writes at the next restart, while the server kept serving them from memory.
+// govec-bench hit exactly that: OOM-killed mid-save, right after "WAL cleared".
+//
+// The order, each step only if the one before succeeded:
+//   - fsync the file, so the rename can't publish a snapshot whose bytes are
+//     still only in the page cache;
+//   - rename it over the old snapshot (atomic: readers see old or new, whole);
+//   - fsync the directory, so the rename itself survives a power cut;
+//   - truncate the WAL.
+//
+// A failure before the rename removes the temporary file and keeps the WAL, so
+// recovery replays it over the previous snapshot. A failure after the rename
+// keeps the WAL too; replaying entries the new snapshot already holds is safe
+// because replay applies inserts as upserts and deletes of missing IDs as
+// no-ops.
+//
+// PRECONDITION: the index write lock is held, so no write can land between the
+// snapshot and the truncation.
+func publishSnapshot(f *os.File, tmpPath, path string, wal *WAL) error {
+	if err := f.Sync(); err != nil {
+		_ = f.Close()          //nolint:errcheck // best-effort cleanup; sync error takes precedence
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; sync error takes precedence
+		return fmt.Errorf("sync snapshot: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; close error takes precedence
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; rename error takes precedence
+		return err
+	}
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync snapshot directory: %w", err)
+	}
+
+	if wal == nil {
+		return nil
+	}
+	return wal.Clear()
+}
+
+// syncDir fsyncs a directory, making a rename inside it durable. Windows
+// can't open a directory for syncing, and NTFS journals the rename itself.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
+	d, err := os.Open(dir) //nolint:gosec // dir of the operator-configured data_path
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close() //nolint:errcheck // best-effort cleanup; sync error takes precedence
+		return err
+	}
+	return d.Close()
+}
+
 // SaveToFile serializes the index to a specific path.
 // When mmap is enabled (vectorStore != nil) the vectors stay in the mmap store
 // and the snapshot carries everything else; otherwise vectors are inline.
@@ -101,12 +168,6 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 // saveToFileHeap writes a snapshot with the vectors inline.
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
-	if idx.wal != nil {
-		if err := idx.wal.Clear(); err != nil {
-			return err
-		}
-	}
-
 	tmpPath := path + ".tmp"
 	f, err := os.Create(tmpPath) //nolint:gosec // path from operator config
 	if err != nil {
@@ -134,29 +195,16 @@ func (idx *VectorIndex[T]) saveToFileHeap(path, quantType string) error {
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return nil
+	return publishSnapshot(f, tmpPath, path, idx.wal)
 }
 
 // saveToFileMmap writes a snapshot without vectors; they stay in the mmap store.
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
-	// Flush mmap pages to disk before clearing WAL.
+	// The vectors live only in the mmap store, so they must be on disk before
+	// publishSnapshot lets the WAL go.
 	if err := idx.vectorStore.Sync(); err != nil {
 		return fmt.Errorf("mmap sync: %w", err)
-	}
-
-	if idx.wal != nil {
-		if err := idx.wal.Clear(); err != nil {
-			return err
-		}
 	}
 
 	// Build vector-free snapshots.
@@ -198,15 +246,7 @@ func (idx *VectorIndex[T]) saveToFileMmap(path, quantType string) error {
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return nil
+	return publishSnapshot(f, tmpPath, path, idx.wal)
 }
 
 // LoadFromFile reads the index from disk.

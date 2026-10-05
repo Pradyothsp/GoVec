@@ -560,12 +560,6 @@ func (idx *HNSWIndex[T]) SaveToFile(ctx context.Context, path string) error {
 // saveToFileHeap writes a snapshot with the vectors inline (embedded in the GOB stream).
 // PRECONDITION: idx.mu.Lock() held.
 func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
-	if idx.wal != nil {
-		if err := idx.wal.Clear(); err != nil {
-			return err
-		}
-	}
-
 	tmpPath := path + ".tmp"
 	f, err := os.Create(tmpPath) //nolint:gosec // path from operator config
 	if err != nil {
@@ -608,15 +602,7 @@ func (idx *HNSWIndex[T]) saveToFileHeap(path, quantType string) error {
 		return err
 	}
 
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return nil
+	return publishSnapshot(f, tmpPath, path, idx.wal)
 }
 
 // saveToFileMmap writes a snapshot without vectors: topology-only graph bytes + vectorNodeSnapshot list.
@@ -625,12 +611,6 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 	if err := idx.vectorStore.Sync(); err != nil {
 		return fmt.Errorf("mmap sync: %w", err)
 	}
-	if idx.wal != nil {
-		if err := idx.wal.Clear(); err != nil {
-			return err
-		}
-	}
-
 	// Build vector-free snapshots.
 	snapshots := make([]vectorNodeSnapshot, 0, len(idx.metadata))
 	for _, node := range idx.metadata {
@@ -682,15 +662,7 @@ func (idx *HNSWIndex[T]) saveToFileMmap(path, quantType string) error {
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
 		return err
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; encoding error takes precedence
-		return err
-	}
-	return nil
+	return publishSnapshot(f, tmpPath, path, idx.wal)
 }
 
 // LoadFromFile reads the HNSW index from a snapshot file.

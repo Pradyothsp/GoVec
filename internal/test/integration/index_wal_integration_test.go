@@ -257,7 +257,11 @@ func TestVectorIndex_SaveToFile_ClearsWAL(t *testing.T) {
 }
 
 func TestVectorIndex_SaveToFile_WALClearFailure(t *testing.T) {
-	// 🔴 CRITICAL: This test verifies two-phase commit prevents partial success
+	// The WAL is truncated last, after the new snapshot is safely renamed into
+	// place. So a failed truncation leaves the new snapshot *and* a WAL holding
+	// entries it already contains -- safe, because replay is idempotent
+	// (TestRecovery_WALAlreadyInSnapshot_ReplaysToTheSameState). What must hold
+	// is that nothing is lost, not that no snapshot exists.
 	walPath := filepath.Join(t.TempDir(), "test.wal")
 	snapPath := filepath.Join(t.TempDir(), "snapshot.bin")
 
@@ -279,17 +283,16 @@ func TestVectorIndex_SaveToFile_WALClearFailure(t *testing.T) {
 	err = idx.SaveToFile(context.Background(), snapPath)
 	assert.Error(t, err, "SaveToFile should return error when WAL.Clear fails")
 
-	// CRITICAL: After two-phase commit fix:
-	// - If WAL.Clear fails, snapshot should NOT exist (atomic failure)
-	// - Verify snapshot doesn't exist
-	_, statErr := os.Stat(snapPath)
-	assert.True(t, os.IsNotExist(statErr),
-		"Snapshot should NOT exist if WAL.Clear fails (atomic failure)")
-
 	// WAL should still contain entries (not cleared)
 	info, err := os.Stat(walPath)
 	require.NoError(t, err)
 	assert.Greater(t, info.Size(), int64(0), "WAL should still have entries")
+
+	// Recovery from the new snapshot plus the untruncated WAL loses nothing.
+	recovered := index.NewVectorIndex[[]float32](nil, nil, core.NewIDMapper(), func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	require.NoError(t, recovered.LoadFromFile(context.Background(), snapPath))
+	require.NoError(t, recovered.ReplayWAL(walPath))
+	assert.Equal(t, 5, recovered.Len())
 }
 
 func TestVectorIndex_Recovery_SnapshotPlusWAL(t *testing.T) {
