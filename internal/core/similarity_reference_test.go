@@ -48,6 +48,23 @@ func TestCosineSimilarity_MatchesReference(t *testing.T) {
 	}
 }
 
+func TestDotFloat32_MatchesReference(t *testing.T) {
+	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic test data
+	for _, dims := range unrollLengths {
+		t.Run(fmt.Sprintf("d%d", dims), func(t *testing.T) {
+			for range 50 {
+				a, b := signedFloats(rng, dims), signedFloats(rng, dims)
+				var dot float64
+				for i := range a {
+					dot += float64(a[i]) * float64(b[i])
+				}
+
+				assert.InDelta(t, dot, DotFloat32(a, b), 1e-12)
+			}
+		})
+	}
+}
+
 func TestEuclideanSimilarity_MatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic test data
 	for _, dims := range unrollLengths {
