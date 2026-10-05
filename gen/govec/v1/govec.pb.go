@@ -295,7 +295,7 @@ type SearchRequest struct {
 	state         protoimpl.MessageState     `protogen:"open.v1"`
 	QueryVector   []float32                  `protobuf:"fixed32,1,rep,packed,name=query_vector,json=queryVector,proto3" json:"query_vector,omitempty"`
 	SparseQuery   *SparseVector              `protobuf:"bytes,2,opt,name=sparse_query,json=sparseQuery,proto3" json:"sparse_query,omitempty"`
-	K             int32                      `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
+	K             *int32                     `protobuf:"varint,3,opt,name=k,proto3,oneof" json:"k,omitempty"` // required: how many results; 0 returns none
 	Filters       map[string]*structpb.Value `protobuf:"bytes,4,rep,name=filters,proto3" json:"filters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -346,8 +346,8 @@ func (x *SearchRequest) GetSparseQuery() *SparseVector {
 }
 
 func (x *SearchRequest) GetK() int32 {
-	if x != nil {
-		return x.K
+	if x != nil && x.K != nil {
+		return *x.K
 	}
 	return 0
 }
@@ -1149,15 +1149,16 @@ const file_govec_v1_govec_proto_rawDesc = "" +
 	"\n" +
 	"BatchError\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x93\x02\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x9e\x02\n" +
 	"\rSearchRequest\x12%\n" +
 	"\fquery_vector\x18\x01 \x03(\x02B\x02\x10\x01R\vqueryVector\x129\n" +
-	"\fsparse_query\x18\x02 \x01(\v2\x16.govec.v1.SparseVectorR\vsparseQuery\x12\f\n" +
-	"\x01k\x18\x03 \x01(\x05R\x01k\x12>\n" +
+	"\fsparse_query\x18\x02 \x01(\v2\x16.govec.v1.SparseVectorR\vsparseQuery\x12\x11\n" +
+	"\x01k\x18\x03 \x01(\x05H\x00R\x01k\x88\x01\x01\x12>\n" +
 	"\afilters\x18\x04 \x03(\v2$.govec.v1.SearchRequest.FiltersEntryR\afilters\x1aR\n" +
 	"\fFiltersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xbb\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01B\x04\n" +
+	"\x02_k\"\xbb\x01\n" +
 	"\fSearchResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x02R\x05score\x124\n" +
@@ -1307,6 +1308,7 @@ func file_govec_v1_govec_proto_init() {
 	if File_govec_v1_govec_proto != nil {
 		return
 	}
+	file_govec_v1_govec_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

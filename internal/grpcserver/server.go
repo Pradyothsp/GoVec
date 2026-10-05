@@ -119,12 +119,15 @@ func (s *GoVecServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.Se
 	if len(req.QueryVector) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "query_vector is required")
 	}
-	if req.K <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "k must be positive")
+	if req.K == nil {
+		return nil, status.Error(codes.InvalidArgument, "k is required")
+	}
+	if req.GetK() < 0 {
+		return nil, status.Error(codes.InvalidArgument, "k cannot be negative")
 	}
 	sparse := convert.ProtoToSparse(req.SparseQuery)
 	filters := convert.ProtoToMeta(req.Filters)
-	results, err := s.engine.Search(ctx, req.QueryVector, sparse, int(req.K), filters)
+	results, err := s.engine.Search(ctx, req.QueryVector, sparse, int(req.GetK()), filters)
 	if err != nil {
 		// A query the index can't compare is the caller's mistake.
 		if index.IsInvalidVectorError(err) {

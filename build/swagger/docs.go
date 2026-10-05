@@ -696,6 +696,7 @@ const docTemplate = `{
         "handlers.SearchRequest": {
             "type": "object",
             "required": [
+                "k",
                 "vector"
             ],
             "properties": {
@@ -703,6 +704,7 @@ const docTemplate = `{
                     "type": "object"
                 },
                 "k": {
+                    "description": "required; 0 returns an empty list",
                     "type": "integer",
                     "example": 10
                 },

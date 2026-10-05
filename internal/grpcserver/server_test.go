@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
@@ -177,7 +178,7 @@ func (s *GoVecServerSuite) TestSearch_HappyPath() {
 
 	resp, err := s.client.Search(context.Background(), &pb.SearchRequest{
 		QueryVector: []float32{1.0, 0.0, 0.0},
-		K:           1,
+		K:           proto.Int32(1),
 	})
 	require.NoError(s.T(), err)
 	assert.Len(s.T(), resp.Results, 1)
@@ -185,18 +186,30 @@ func (s *GoVecServerSuite) TestSearch_HappyPath() {
 }
 
 func (s *GoVecServerSuite) TestSearch_EmptyVector() {
-	_, err := s.client.Search(context.Background(), &pb.SearchRequest{K: 1})
+	_, err := s.client.Search(context.Background(), &pb.SearchRequest{K: proto.Int32(1)})
 	require.Error(s.T(), err)
 	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
 }
 
-func (s *GoVecServerSuite) TestSearch_NegativeK() {
-	_, err := s.client.Search(context.Background(), &pb.SearchRequest{
-		QueryVector: []float32{1.0, 0.0, 0.0},
-		K:           -1,
-	})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
+// k is required: a missing k is InvalidArgument, as it is a 400 over REST.
+// 0 asks for nothing and gets no results; negative is InvalidArgument.
+func (s *GoVecServerSuite) TestSearch_K() {
+	// Arrange
+	ctx := context.Background()
+	_, err := s.client.Insert(ctx, &pb.InsertRequest{Id: "v1", Vector: []float32{1, 0, 0}})
+	s.Require().NoError(err)
+	query := []float32{1, 0, 0}
+
+	// Act
+	_, missingErr := s.client.Search(ctx, &pb.SearchRequest{QueryVector: query})
+	zero, zeroErr := s.client.Search(ctx, &pb.SearchRequest{QueryVector: query, K: proto.Int32(0)})
+	_, negativeErr := s.client.Search(ctx, &pb.SearchRequest{QueryVector: query, K: proto.Int32(-1)})
+
+	// Assert
+	s.Equal(codes.InvalidArgument, status.Code(missingErr), "a missing k must be rejected")
+	s.Require().NoError(zeroErr)
+	s.Empty(zero.Results)
+	s.Equal(codes.InvalidArgument, status.Code(negativeErr))
 }
 
 // Search carried the same miscategorisation Insert did: a wrong-width query
@@ -210,7 +223,7 @@ func (s *GoVecServerSuite) TestSearch_DimensionMismatch() {
 
 	_, err = s.client.Search(context.Background(), &pb.SearchRequest{
 		QueryVector: []float32{1.0, 2.0},
-		K:           1,
+		K:           proto.Int32(1),
 	})
 
 	require.Error(s.T(), err)
@@ -337,7 +350,7 @@ func (s *GoVecServerSuite) TestReset_IndexStillUsableAfterwards() {
 
 	found, err := s.client.Search(context.Background(), &pb.SearchRequest{
 		QueryVector: []float32{3.0, 2.0, 1.0},
-		K:           5,
+		K:           proto.Int32(5),
 	})
 	require.NoError(s.T(), err)
 	require.Len(s.T(), found.Results, 1)

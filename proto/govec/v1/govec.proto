@@ -35,7 +35,7 @@ message BatchError {
 message SearchRequest {
   repeated float query_vector             = 1 [packed = true];
   SparseVector   sparse_query             = 2;
-  int32          k                        = 3;
+  optional int32 k                        = 3; // required: how many results; 0 returns none
   map<string, google.protobuf.Value> filters = 4;
 }
 

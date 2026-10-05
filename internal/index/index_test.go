@@ -264,19 +264,6 @@ func TestSearch_Variations(t *testing.T) {
 			filters:     nil,
 			expectCount: 2,
 		},
-		{
-			name: "with_limit_0",
-			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
-			},
-			query:       fixtures.Vec3dSimple,
-			sparseQuery: core.SparseVector{},
-			limit:       0,
-			filters:     nil,
-			expectCount: 3, // 0 means no limit
-		},
 	}
 
 	for _, tt := range tests {

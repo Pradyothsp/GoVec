@@ -167,12 +167,6 @@ func TestQuery_Validation(t *testing.T) {
 			expectedStatus: http.StatusOK, // Content-Type not currently validated
 			errorContains:  "",
 		},
-		{
-			name:           "missing_k_defaults_to_10",
-			body:           `{"vector": [1.0, 2.0, 3.0]}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusOK, // Should succeed with default k=10
-		},
 	}
 
 	for _, tt := range tests {
@@ -681,4 +675,40 @@ func TestSearch_DimensionMismatchReturns400(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "index requires 3")
+}
+
+// k is required: a missing k used to decode as 0 and return every vector on
+// brute force. 0 asks for nothing and gets an empty list; negative is a 400.
+func TestSearch_K(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantBody string
+	}{
+		{"missing k", `{"vector": [1, 2, 3]}`, http.StatusBadRequest, ""},
+		{"k=0", `{"vector": [1, 2, 3], "k": 0}`, http.StatusOK, `{"success":true,"data":[]}`},
+		{"negative k", `{"vector": [1, 2, 3], "k": -1}`, http.StatusBadRequest, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			idx := testutil.NewTestIndex(t)
+			require.NoError(t, idx.Insert(context.Background(), "vec1", []float32{1, 2, 3}, core.SparseVector{}, nil))
+			router := gin.New()
+			router.POST("/query", NewVectorHandler(idx).Search)
+			req := httptest.NewRequest(http.MethodPost, "/query", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			// Act
+			router.ServeHTTP(rec, req)
+
+			// Assert
+			assert.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
+			if tt.wantBody != "" {
+				assert.JSONEq(t, tt.wantBody, rec.Body.String())
+			}
+		})
+	}
 }

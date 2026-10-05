@@ -479,7 +479,7 @@ func (s *APITestSuite) TestSearchWithDifferentKValues() {
 		{"k=5", 5, 5},
 		{"k=10", 10, 10},
 		{"k=20", 20, 10}, // More than available
-		{"k=0", 0, 10},   // All results
+		{"k=0", 0, 0},    // Asks for nothing: an empty list
 	}
 
 	for _, tc := range testCases {

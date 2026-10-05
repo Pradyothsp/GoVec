@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -254,5 +255,31 @@ func TestReset_FailedSnapshot_ChangesNothing(t *testing.T) {
 			require.NoError(t, statErr)
 			assert.Positive(t, info.Size(), "a failed reset must not truncate the WAL")
 		})
+	}
+}
+
+// TestSearch_KZero_ReturnsEmpty: asking for no results gets none, without a
+// search. Brute force used to read k=0 as "no limit" and return every vector,
+// while HNSW returned none; a negative k panicked HNSW. The transports reject
+// a negative k; the engine still answers it safely.
+func TestSearch_KZero_ReturnsEmpty(t *testing.T) {
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		for _, k := range []int{0, -1} {
+			t.Run(fmt.Sprintf("%s/k=%d", e.name, k), func(t *testing.T) {
+				// Arrange
+				idx, _ := e.open(t)
+				for i := range 5 {
+					require.NoError(t, idx.Insert(ctx, fmt.Sprintf("v%d", i), []float32{1, float32(i), 0}, core.SparseVector{}, nil))
+				}
+
+				// Act
+				results, err := idx.Search(ctx, []float32{1, 0, 0}, core.SparseVector{}, k, nil)
+
+				// Assert
+				require.NoError(t, err)
+				assert.Empty(t, results)
+			})
+		}
 	}
 }

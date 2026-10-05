@@ -92,6 +92,7 @@ definitions:
       filter:
         type: object
       k:
+        description: required; 0 returns an empty list
         example: 10
         type: integer
       sparse_vector:
@@ -101,6 +102,7 @@ definitions:
           type: number
         type: array
     required:
+    - k
     - vector
     type: object
   handlers.StatsResponse:

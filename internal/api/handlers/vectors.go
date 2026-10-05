@@ -25,7 +25,7 @@ type CreateVectorRequest struct {
 type SearchRequest struct {
 	Vector       []float32              `json:"vector" binding:"required" swaggertype:"array,number"`
 	SparseVector *core.SparseVector     `json:"sparse_vector,omitempty" swaggertype:"object"`
-	K            int                    `json:"k" example:"10"`
+	K            *int                   `json:"k" binding:"required" example:"10"` // required; 0 returns an empty list
 	Filters      map[string]interface{} `json:"filter" swaggertype:"object"`
 }
 
@@ -182,12 +182,12 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		return
 	}
 
-	if req.K < 0 {
+	if *req.K < 0 {
 		response.Fail(c, http.StatusBadRequest, "k cannot be negative")
 		return
 	}
 
-	results, err := h.Engine.Search(c.Request.Context(), req.Vector, sparseOrNone(req.SparseVector), req.K, req.Filters)
+	results, err := h.Engine.Search(c.Request.Context(), req.Vector, sparseOrNone(req.SparseVector), *req.K, req.Filters)
 	if err != nil {
 		// Same rule as Insert: a query the index can't compare is a bad
 		// request, not a server fault. It matters more here -- search is the
@@ -197,7 +197,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 			return
 		}
 
-		zerolog.Ctx(c.Request.Context()).Error().Err(err).Int("k", req.K).Msg("failed to search vectors")
+		zerolog.Ctx(c.Request.Context()).Error().Err(err).Int("k", *req.K).Msg("failed to search vectors")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -384,22 +384,31 @@ func (r *records[T]) encode(vec []float32) (T, error) {
 	return r.encodeFunc(input), nil
 }
 
-// encodeQuery checks a query -- its width, and its sparse part -- and encodes
-// it as stored vectors are. A query of the wrong width can't be compared
-// against anything stored, and the comparison functions report that as a bare
-// "vector dimensions mismatch" from deep inside the search. Checking here
-// names the required width, classifies the failure as the caller's, and makes
-// both engines reject a bad query the same way, even when the index is empty.
+// prepareSearch checks a query -- its width, and its sparse part -- and
+// encodes it as stored vectors are. A query of the wrong width can't be
+// compared against anything stored, and the comparison functions report that
+// as a bare "vector dimensions mismatch" from deep inside the search. Checking
+// here names the required width, classifies the failure as the caller's, and
+// makes both engines reject a bad query the same way, even when the index is
+// empty.
+//
+// skip is true when k asks for no results: the caller returns an empty list
+// without searching. Brute force used to read k=0 as "no limit". The
+// transports reject a negative k; here it is skipped too, rather than reach
+// the graph search, which panicked on it.
 // PRECONDITION: r.mu.RLock() held.
-func (r *records[T]) encodeQuery(query []float32, sparseQuery core.SparseVector) (T, error) {
-	var zero T
+func (r *records[T]) prepareSearch(query []float32, sparseQuery core.SparseVector, k int) (encoded T, skip bool, err error) {
 	if err := validateVectorDims(query, r.dimensions); err != nil {
-		return zero, err
+		return encoded, false, err
 	}
 	if err := validateSparse(sparseQuery); err != nil {
-		return zero, err
+		return encoded, false, err
 	}
-	return r.encode(query)
+	if k <= 0 {
+		return encoded, true, nil
+	}
+	encoded, err = r.encode(query)
+	return encoded, false, err
 }
 
 // filterAllowlist returns the internal IDs matching filters, from the
@@ -444,13 +453,12 @@ func (r *records[T]) scorer(sparseQuery core.SparseVector) func(internalID uint3
 	}
 }
 
-// rankTop sorts results best first and keeps the top k, or all of them when
-// k <= 0.
+// rankTop sorts results best first and keeps the top k.
 func rankTop(results []SearchResult, k int) []SearchResult {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
 	})
-	if k > 0 && len(results) > k {
+	if len(results) > k {
 		results = results[:k]
 	}
 	return results
