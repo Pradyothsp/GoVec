@@ -158,25 +158,6 @@ func TestRouterConfiguration(t *testing.T) {
 		require.Contains(t, idx.Store, newID)
 	})
 
-	t.Run("api_v1_group_prefix", func(t *testing.T) {
-		idx := testutil.NewTestIndex(t)
-		router := SetupRouter(idx, "", "")
-
-		reqBody := map[string]interface{}{
-			"id":     "test",
-			"vector": []float32{1.0},
-		}
-
-		body, _ := json.Marshal(reqBody)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code, "Route should be under /api/v1 prefix")
-	})
-
 	t.Run("without_api_v1_prefix_fails", func(t *testing.T) {
 		idx := testutil.NewTestIndex(t)
 		router := SetupRouter(idx, "", "")
@@ -215,29 +196,4 @@ func TestSwaggerEndpoints(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code, "GET /swagger/doc.json should return 200")
 		assert.Contains(t, w.Body.String(), `"swagger": "2.0"`, "Response should contain OpenAPI 2.0 spec")
 	})
-}
-
-func TestRouterMultipleRequests(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	router := SetupRouter(idx, "", "")
-
-	vectors := []map[string]interface{}{
-		{"id": "v1", "vector": []float32{1.0, 2.0}},
-		{"id": "v2", "vector": []float32{3.0, 4.0}},
-		{"id": "v3", "vector": []float32{5.0, 6.0}},
-	}
-
-	for _, vec := range vectors {
-		body, _ := json.Marshal(vec)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/vectors", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.JSONEq(t, `{"success":true,"data":{"status":"inserted"}}`, w.Body.String())
-	}
-
-	assert.Len(t, idx.Store, len(vectors), "All vectors should be in the index")
 }

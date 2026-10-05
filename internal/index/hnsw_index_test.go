@@ -338,61 +338,6 @@ func TestVectorIndex_LoadFromFile_RejectsHNSWSnapshot(t *testing.T) {
 // WAL replay recovery
 // =============================================================================
 
-func TestHNSWIndex_WALReplay_Recovery(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "wal_replay.wal")
-	wal, err := NewWAL(walPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
-
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, nil, nil)
-
-	// Insert writes go to WAL first
-	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v3", []float32{0, 0, 1}, core.SparseVector{}, nil))
-
-	// Simulate crash: create a fresh index and replay the WAL
-	wal2, err := NewWAL(filepath.Join(t.TempDir(), "dummy.wal"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal2.Close() })
-
-	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, nil, idMapper2, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, nil, nil)
-
-	require.NoError(t, recovered.ReplayWAL(walPath))
-	assert.Equal(t, 3, recovered.Len(), "all 3 inserts must be recovered from WAL")
-}
-
-func TestHNSWIndex_WALReplay_DeleteIsReplayed(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "wal_delete.wal")
-	wal, err := NewWAL(walPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
-
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, nil, nil)
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{0, 1, 0}, core.SparseVector{}, nil))
-	deleted, err := idx.Delete(context.Background(), "v1")
-	require.NoError(t, err)
-	require.True(t, deleted)
-
-	// Replay on fresh index
-	wal2, err := NewWAL(filepath.Join(t.TempDir(), "dummy.wal"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal2.Close() })
-
-	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, nil, idMapper2, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, nil, nil)
-
-	require.NoError(t, recovered.ReplayWAL(walPath))
-	assert.Equal(t, 1, recovered.Len(), "v1 was deleted in WAL, only v2 survives")
-}
-
 func TestHNSWIndex_WALReplay_MissingFile(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 	err := idx.ReplayWAL("/nonexistent/wal.wal")

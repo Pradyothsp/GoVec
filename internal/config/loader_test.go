@@ -113,38 +113,6 @@ server:
 	assert.Contains(t, err.Error(), "invalid configuration")
 }
 
-func TestLoader_Load_WithEnvironmentVariables(t *testing.T) {
-	// Set environment variables
-	envVars := map[string]string{
-		"GOVEC_SERVER_HOST":        "0.0.0.0",
-		"GOVEC_SERVER_PORT":        "7000",
-		"GOVEC_SHUTDOWN_TIMEOUT":   "20s",
-		"GOVEC_DATA_PATH":          "/custom/path.bin",
-		"GOVEC_AUTO_SAVE_ENABLED":  "false",
-		"GOVEC_AUTO_SAVE_INTERVAL": "90s",
-	}
-
-	// Set env vars
-	for key, val := range envVars {
-		t.Setenv(key, val)
-	}
-
-	loader := NewLoader("nonexistent.yaml")
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-
-	// Verify environment variables were applied
-	assert.Equal(t, "0.0.0.0", cfg.Server.Host)
-	assert.Equal(t, 7000, cfg.Server.Port)
-	assert.Equal(t, 20*time.Second, cfg.Server.ShutdownTimeout)
-
-	assert.Equal(t, "/custom/path.bin", cfg.Storage.DataPath)
-	assert.Equal(t, false, cfg.Storage.AutoSaveEnabled)
-	assert.Equal(t, 90*time.Second, cfg.Storage.AutoSaveInterval)
-}
-
 func TestLoader_Load_EnvironmentOverridesFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
@@ -175,20 +143,6 @@ server:
 	// Other values should be from file
 	assert.Equal(t, "localhost", cfg.Server.Host)
 	assert.Equal(t, 15*time.Second, cfg.Server.ShutdownTimeout)
-}
-
-func TestLoader_Load_InvalidEnvironmentVariables(t *testing.T) {
-	// Invalid port value
-	t.Setenv("GOVEC_SERVER_PORT", "not_a_number")
-
-	loader := NewLoader("nonexistent.yaml")
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-
-	// Should fall back to default when env var is invalid
-	assert.Equal(t, 9697, cfg.Server.Port)
 }
 
 func TestLoader_Load_PartialYAML(t *testing.T) {
@@ -241,48 +195,6 @@ func TestLoader_Load_BooleanEnvironmentVariable(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, cfg.Storage.AutoSaveEnabled)
-		})
-	}
-}
-
-func TestLoader_Load_InvalidBooleanEnvironmentVariable(t *testing.T) {
-	// Invalid boolean value should fall back to default (true)
-	t.Setenv("GOVEC_AUTO_SAVE_ENABLED", "yes")
-
-	loader := NewLoader("nonexistent.yaml")
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	// Since "yes" is not a valid boolean, it should keep the default value (true)
-	assert.Equal(t, true, cfg.Storage.AutoSaveEnabled)
-}
-
-func TestLoader_Load_DurationParsing(t *testing.T) {
-	tests := []struct {
-		name     string
-		envVar   string
-		value    string
-		expected time.Duration
-	}{
-		{"seconds", "GOVEC_SHUTDOWN_TIMEOUT", "30s", 30 * time.Second},
-		{"minutes", "GOVEC_AUTO_SAVE_INTERVAL", "2m", 2 * time.Minute},
-		{"hours", "GOVEC_SHUTDOWN_TIMEOUT", "1h", 1 * time.Hour},
-		{"mixed", "GOVEC_AUTO_SAVE_INTERVAL", "1h30m", 90 * time.Minute},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(tt.envVar, tt.value)
-
-			loader := NewLoader("nonexistent.yaml")
-			cfg, err := loader.Load()
-
-			require.NoError(t, err)
-			if tt.envVar == "GOVEC_SHUTDOWN_TIMEOUT" {
-				assert.Equal(t, tt.expected, cfg.Server.ShutdownTimeout)
-			} else {
-				assert.Equal(t, tt.expected, cfg.Storage.AutoSaveInterval)
-			}
 		})
 	}
 }

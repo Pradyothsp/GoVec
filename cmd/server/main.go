@@ -181,14 +181,14 @@ func startGRPCServer(cfg *config.Config, engine index.Engine) (*grpc.Server, err
 // write after the failure point would be silently dropped. A missing WAL is a
 // fresh start, and single malformed lines are skipped inside ReplayWAL.
 func runRecovery(cfg *config.Config, engine index.Engine) error {
-	// Step 1: Load the base snapshot from DataPath (GOB format)
+	// Step 1: Load the base snapshot from DataPath
 	log.Info().Str("path", cfg.Storage.DataPath).Msg("loading snapshot from disk")
 	if err := engine.LoadFromFile(context.Background(), cfg.Storage.DataPath); err != nil {
 		return fmt.Errorf("load snapshot %s (restore a backup, or delete it to start empty): %w", cfg.Storage.DataPath, err)
 	}
 	log.Info().Int("vectors", engine.Len()).Msg("snapshot loaded")
 
-	// Step 2: Replay the WAL from WalPath (JSON format) to recover uncommitted changes
+	// Step 2: Replay the WAL from WalPath to recover writes made after the snapshot
 	log.Info().Str("path", cfg.Storage.WalPath).Msg("replaying WAL")
 	if err := engine.ReplayWAL(cfg.Storage.WalPath); err != nil {
 		return fmt.Errorf("replay WAL %s (fix or move it aside to start from the snapshot alone): %w", cfg.Storage.WalPath, err)

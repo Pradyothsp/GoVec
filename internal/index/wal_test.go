@@ -302,9 +302,8 @@ func TestWAL_Close(t *testing.T) {
 	err = wal.WriteEntry(context.Background(), &entry)
 	require.NoError(t, err)
 
-	// Close
-	err = wal.Close()
-	require.NoError(t, err)
+	require.NoError(t, wal.Close())
+	assert.Error(t, wal.Close(), "a second close must report the file is already closed")
 
 	// Verify data was flushed
 	data, err := os.ReadFile(walPath)

@@ -19,51 +19,6 @@ import (
 	"github.com/Pradyothsp/govec/internal/index"
 )
 
-func TestWALCloseOnShutdown(t *testing.T) {
-	// Create temporary WAL
-	walPath := filepath.Join(t.TempDir(), "test.wal")
-
-	wal, err := index.NewWAL(walPath)
-	require.NoError(t, err)
-
-	// Write an entry
-	err = wal.WriteEntry(context.Background(), &index.WALEntry{
-		Action: index.WALActionInsert,
-		ID:     "test1",
-		Vector: []float32{1.0, 2.0},
-	})
-	require.NoError(t, err)
-
-	// Close WAL (simulating defer wal.Close() in main)
-	err = wal.Close()
-	require.NoError(t, err)
-
-	// Verify file is properly closed by trying to reopen
-	wal2, err := index.NewWAL(walPath)
-	require.NoError(t, err, "Should be able to reopen WAL after close")
-	defer wal2.Close()
-
-	// Verify data is persisted
-	info, err := os.Stat(walPath)
-	require.NoError(t, err)
-	assert.Greater(t, info.Size(), int64(0), "WAL should have data")
-}
-
-func TestWALDoubleClose(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "test.wal")
-
-	wal, err := index.NewWAL(walPath)
-	require.NoError(t, err)
-
-	// First close
-	err = wal.Close()
-	require.NoError(t, err)
-
-	// Second close should error
-	err = wal.Close()
-	assert.Error(t, err, "Double close should return error")
-}
-
 // newRecoveryTarget opens the WAL and engine the way main does, for a config
 // whose data and WAL paths live in a temp dir.
 func newRecoveryTarget(t *testing.T) (*config.Config, index.Engine) {
