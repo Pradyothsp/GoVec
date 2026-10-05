@@ -21,7 +21,7 @@ import (
 //
 // It used to be one JSON object per line. JSON writes each float32 as about 12
 // characters of decimal text, so a 1536-dimension entry took about 19 KB for
-// 6 KB of vector (govec #15): 100k vectors meant a 1.9 GB WAL between
+// 6 KB of vector: 100k vectors meant a 1.9 GB WAL between
 // snapshots, slow to write and slower to replay. Vectors are now raw bytes.
 // Metadata stays JSON inside the record: it's arbitrary map[string]any, usually
 // small, and JSON round-trips it exactly as the API does.

@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// WAL benchmarks at the shape that made the WAL a problem (govec #15): real
+// WAL benchmarks at the shape that made the old JSON WAL a problem: real
 // valued 1536-dimension embeddings with a little metadata, written in batches
 // of 100 as the bench loads them. They use only WriteEntries and replay, so the
 // same benchmarks measure any entry format.
