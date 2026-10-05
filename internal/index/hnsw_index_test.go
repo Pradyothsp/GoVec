@@ -50,33 +50,6 @@ func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
 // Basic Insert / Search / Delete
 // =============================================================================
 
-func TestHNSWIndex_InsertAndLen(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-	assert.Equal(t, 0, idx.Len())
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	assert.Equal(t, 1, idx.Len())
-
-	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
-	assert.Equal(t, 2, idx.Len())
-}
-
-func TestHNSWIndex_Insert_Overwrite(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"version": 1}))
-	assert.Equal(t, 1, idx.Len())
-
-	// Overwrite same ID — count must not increase
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"version": 2}))
-	assert.Equal(t, 1, idx.Len())
-
-	// Metadata should reflect the latest insert
-	internalID, err := idx.IDMapper.ToUint32ID("v1")
-	require.NoError(t, err)
-	assert.Equal(t, map[string]any{"version": 2}, idx.Store[internalID].Metadata)
-}
-
 func TestHNSWIndex_Search_EmptyIndex(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 
@@ -91,34 +64,6 @@ func TestHNSWIndex_Search_EmptyQuery(t *testing.T) {
 
 	_, err := idx.Search(context.Background(), []float32{}, core.SparseVector{}, 5, nil)
 	assert.Error(t, err)
-}
-
-func TestHNSWIndex_Delete_ExistingVector(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
-	assert.Equal(t, 2, idx.Len())
-
-	internalID, err := idx.IDMapper.ToUint32ID("v1")
-	require.NoError(t, err)
-
-	deleted, err := idx.Delete(context.Background(), "v1")
-	require.NoError(t, err)
-	assert.True(t, deleted)
-	assert.Equal(t, 1, idx.Len())
-
-	// ID is gone from metadata and is tombstoned
-	assert.NotContains(t, idx.Store, internalID)
-	assert.True(t, idx.IDMapper.IsTombstone(internalID))
-}
-
-func TestHNSWIndex_Delete_NonExistentVector(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-
-	deleted, err := idx.Delete(context.Background(), "does-not-exist")
-	require.NoError(t, err)
-	assert.False(t, deleted)
 }
 
 // =============================================================================
@@ -345,74 +290,6 @@ func TestHNSWIndex_WALReplay_MissingFile(t *testing.T) {
 }
 
 // =============================================================================
-// Clear
-// =============================================================================
-
-func TestHNSWIndex_Clear(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
-	assert.Equal(t, 2, idx.Len())
-
-	idx.Clear()
-	assert.Equal(t, 0, idx.Len())
-	assert.Empty(t, idx.Store)
-}
-
-// TestHNSWIndex_Clear_ResetsIDMapperAndWAL verifies Clear wipes ID mappings/tombstones
-// and truncates the WAL, not just the graph/metadata -- these are easy to miss since
-// they're separate fields the caller could forget to reset.
-func TestHNSWIndex_Clear_ResetsIDMapperAndWAL(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "hnsw_clear_test.wal")
-	wal, err := NewWAL(walPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
-
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](
-		wal, nil, idMapper, identityFunc,
-		hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, core.NewMetadataIndex(), nil,
-	)
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
-	_, err = idx.Delete(context.Background(), "v2")
-	require.NoError(t, err)
-
-	info, err := os.Stat(walPath)
-	require.NoError(t, err)
-	assert.Positive(t, info.Size(), "WAL should have entries before Clear")
-
-	idx.Clear()
-
-	assert.Equal(t, 0, idx.Len())
-	assert.Equal(t, 0, idx.IDMapper.Count(), "IDMapper should have no active mappings after Clear")
-	assert.Equal(t, uint32(0), idx.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Clear")
-
-	info, err = os.Stat(walPath)
-	require.NoError(t, err)
-	assert.Zero(t, info.Size(), "WAL should be truncated after Clear")
-}
-
-func TestHNSWIndex_Clear_AllowsReinsertion(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	idx.Clear()
-
-	// Should be able to insert again after Clear
-	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-	assert.Equal(t, 1, idx.Len())
-
-	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 1, nil)
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "v1", results[0].ID)
-}
-
-// =============================================================================
 // Filtered Search (MetadataIndex + Selectivity Strategy)
 // =============================================================================
 
@@ -635,29 +512,29 @@ func TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability(t *testing.T) {
 	assert.Equal(t, "doc1", results[0].ID)
 }
 
-func TestHNSWIndex_DistanceToScore_Cosine(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-	idx.distanceMetric = "cosine"
+// distanceToScore turns a graph distance into a higher-is-closer score on the
+// same scale the brute-force engine uses, so hybrid blending behaves alike.
+func TestHNSWIndex_DistanceToScore(t *testing.T) {
+	tests := []struct {
+		metric   string
+		distance float32
+		want     float32
+	}{
+		{"cosine", 0.25, 0.75},  // 1 - distance
+		{"euclidean", 4, 0.2},   // 1 / (1 + distance)
+		{"euclidean", 99, 0.01}, // farther is lower, never negative
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/%v", tt.metric, tt.distance), func(t *testing.T) {
+			// Arrange
+			idx := newTestHNSWIndex(t)
+			idx.distanceMetric = tt.metric
 
-	got := idx.distanceToScore(0.25)
-	want := float32(0.75)
-	assert.InDelta(t, want, got, 0.0001)
-}
+			// Act
+			got := idx.distanceToScore(tt.distance)
 
-func TestHNSWIndex_DistanceToScore_Euclidean(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-	idx.distanceMetric = "euclidean"
-
-	got := idx.distanceToScore(4)
-	want := float32(0.2) // 1 / (1 + 4)
-	assert.InDelta(t, want, got, 0.0001)
-}
-
-func TestHNSWIndex_DistanceToScore_Euclidean_FartherIsLowerScore(t *testing.T) {
-	idx := newTestHNSWIndex(t)
-	idx.distanceMetric = "euclidean"
-
-	near := idx.distanceToScore(1)
-	far := idx.distanceToScore(100)
-	assert.Greater(t, near, far)
+			// Assert
+			assert.InDelta(t, tt.want, got, 1e-4)
+		})
+	}
 }

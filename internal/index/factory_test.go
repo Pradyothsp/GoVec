@@ -6,139 +6,64 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
-func TestNewEngine_NoneQuantization(t *testing.T) {
-	// Create temporary WAL file
-	walPath := t.TempDir() + "/test.wal"
-	wal, err := NewWAL(walPath)
-	if err != nil {
-		t.Fatalf("failed to create WAL: %v", err)
-	}
-	defer wal.Close()
-	defer os.Remove(walPath)
+// TestNewEngine builds every engine and quantization combination and checks
+// it stores, finds and reports what it was configured as.
+func TestNewEngine(t *testing.T) {
+	ctx := context.Background()
+	for _, indexType := range parityIndexTypes {
+		for _, quant := range []config.Quantization{config.QuantizationNone, config.QuantizationScalar} {
+			t.Run(string(indexType)+"/"+string(quant), func(t *testing.T) {
+				// Arrange
+				engine := newParityEngine(t,
+					config.EngineConfig{IndexType: indexType, Quantization: quant, DistanceMetric: config.DistanceMetricCosine},
+					config.StorageConfig{})
+				vec := []float32{0.5, 0.5, 0.5}
 
-	cfg := config.EngineConfig{
-		Quantization:   "none",
-		DistanceMetric: "cosine",
-	}
+				// Act
+				insertErr := engine.Insert(ctx, "test1", vec, core.SparseVector{}, nil)
+				results, searchErr := engine.Search(ctx, vec, core.SparseVector{}, 1, nil)
 
-	engine, err := NewEngine(cfg, config.StorageConfig{}, wal)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
-
-	if engine == nil {
-		t.Fatal("expected non-nil engine")
-	}
-
-	// Verify we can insert and search
-	vec := []float32{0.5, 0.5, 0.5}
-	err = engine.Insert(context.Background(), "test1", vec, core.SparseVector{}, nil)
-	if err != nil {
-		t.Fatalf("Insert failed: %v", err)
-	}
-
-	results, err := engine.Search(context.Background(), vec, core.SparseVector{}, 1, nil)
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-
-	if results[0].ID != "test1" {
-		t.Errorf("expected ID 'test1', got '%s'", results[0].ID)
+				// Assert
+				require.NoError(t, insertErr)
+				require.NoError(t, searchErr)
+				require.Len(t, results, 1)
+				assert.Equal(t, "test1", results[0].ID)
+				info := engine.Info()
+				assert.Equal(t, string(indexType), info.IndexType)
+				assert.Equal(t, string(quant), info.Quantization)
+			})
+		}
 	}
 }
 
-func TestNewEngine_ScalarQuantization(t *testing.T) {
-	// Create temporary WAL file
-	walPath := t.TempDir() + "/test.wal"
-	wal, err := NewWAL(walPath)
-	if err != nil {
-		t.Fatalf("failed to create WAL: %v", err)
+func TestNewEngine_RejectsUnknownSettings(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.EngineConfig
+	}{
+		{"unknown quantization", config.EngineConfig{Quantization: "invalid", DistanceMetric: config.DistanceMetricCosine}},
+		{"unknown metric", config.EngineConfig{Quantization: config.QuantizationNone, DistanceMetric: "manhattan"}},
 	}
-	defer wal.Close()
-	defer os.Remove(walPath)
+	for _, indexType := range parityIndexTypes {
+		for _, tt := range tests {
+			t.Run(string(indexType)+"/"+tt.name, func(t *testing.T) {
+				// Arrange
+				tt.cfg.IndexType = indexType
 
-	cfg := config.EngineConfig{
-		Quantization:   "scalar",
-		DistanceMetric: "cosine",
-	}
+				// Act
+				_, err := NewEngine(tt.cfg, config.StorageConfig{}, newTestWAL(t))
 
-	engine, err := NewEngine(cfg, config.StorageConfig{}, wal)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
-
-	if engine == nil {
-		t.Fatal("expected non-nil engine")
-	}
-
-	// Verify we can insert and search
-	vec := []float32{0.5, 0.5, 0.5}
-	err = engine.Insert(context.Background(), "test1", vec, core.SparseVector{}, nil)
-	if err != nil {
-		t.Fatalf("Insert failed: %v", err)
-	}
-
-	results, err := engine.Search(context.Background(), vec, core.SparseVector{}, 1, nil)
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-
-	if results[0].ID != "test1" {
-		t.Errorf("expected ID 'test1', got '%s'", results[0].ID)
-	}
-}
-
-func TestNewEngine_InvalidQuantization(t *testing.T) {
-	// Create temporary WAL file
-	walPath := t.TempDir() + "/test.wal"
-	wal, err := NewWAL(walPath)
-	if err != nil {
-		t.Fatalf("failed to create WAL: %v", err)
-	}
-	defer wal.Close()
-	defer os.Remove(walPath)
-
-	cfg := config.EngineConfig{
-		Quantization:   "invalid",
-		DistanceMetric: "cosine",
-	}
-
-	_, err = NewEngine(cfg, config.StorageConfig{}, wal)
-	if err == nil {
-		t.Fatal("expected error for invalid quantization, got nil")
-	}
-}
-
-func TestNewEngine_UnsupportedMetric(t *testing.T) {
-	// Create temporary WAL file
-	walPath := t.TempDir() + "/test.wal"
-	wal, err := NewWAL(walPath)
-	if err != nil {
-		t.Fatalf("failed to create WAL: %v", err)
-	}
-	defer wal.Close()
-	defer os.Remove(walPath)
-
-	cfg := config.EngineConfig{
-		Quantization:   "none",
-		DistanceMetric: "manhattan", // Not supported
-	}
-
-	_, err = NewEngine(cfg, config.StorageConfig{}, wal)
-	if err == nil {
-		t.Fatal("expected error for unsupported metric, got nil")
+				// Assert
+				assert.Error(t, err)
+			})
+		}
 	}
 }
 

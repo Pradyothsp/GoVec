@@ -1,130 +1,106 @@
 package core
 
 import (
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestEuclideanSimilarity_IdenticalVectors(t *testing.T) {
-	a := []float32{1.0, 2.0, 3.0}
-	b := []float32{1.0, 2.0, 3.0}
+// Euclidean similarity is 1/(1+distance): 1 for identical vectors, falling
+// toward 0 as they move apart.
 
-	score, err := EuclideanSimilarity(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestEuclideanSimilarity(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []float32
+		want float32
+	}{
+		{"identical", []float32{1, 2, 3}, []float32{1, 2, 3}, 1},
+		{"3-4-5 triangle", []float32{0, 0}, []float32{3, 4}, 1.0 / 6},
+		{"near", []float32{0, 0}, []float32{1, 0}, 1.0 / 2},
+		{"far", []float32{0, 0}, []float32{10, 0}, 1.0 / 11},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the case's vectors.
+
+			// Act
+			ab, errAB := EuclideanSimilarity(tt.a, tt.b)
+			ba, errBA := EuclideanSimilarity(tt.b, tt.a)
+
+			// Assert
+			require.NoError(t, errAB)
+			require.NoError(t, errBA)
+			assert.InDelta(t, tt.want, ab, 1e-6)
+			assert.Equal(t, ab, ba, "must be symmetric")
+		})
 	}
 
-	// Identical vectors have distance 0, so score = 1/(1+0) = 1.0
-	if math.Abs(float64(score-1.0)) > 0.001 {
-		t.Errorf("expected similarity 1.0, got %f", score)
-	}
+	t.Run("dimension mismatch", func(t *testing.T) {
+		// Arrange
+		a, b := []float32{1, 2}, []float32{1, 2, 3}
+
+		// Act
+		_, err := EuclideanSimilarity(a, b)
+
+		// Assert
+		assert.Error(t, err)
+	})
+	t.Run("empty", func(t *testing.T) {
+		// Arrange
+		empty := []float32{}
+
+		// Act
+		_, err := EuclideanSimilarity(empty, empty)
+
+		// Assert
+		assert.Error(t, err)
+	})
 }
 
-func TestEuclideanSimilarity_KnownDistance(t *testing.T) {
-	a := []float32{0.0, 0.0}
-	b := []float32{3.0, 4.0}
+func TestEuclideanSimilarityInt8(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []int8
+		want float32
+	}{
+		{"identical", []int8{127, 63, 31}, []int8{127, 63, 31}, 1},
+		{"3-4-5 triangle", []int8{0, 0}, []int8{3, 4}, 1.0 / 6},
+		// int64 arithmetic: the difference of two int8s overflows int8.
+		{"full range", []int8{-127}, []int8{127}, 1.0 / 255},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the case's vectors.
 
-	score, err := EuclideanSimilarity(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+			// Act
+			got, err := EuclideanSimilarityInt8(tt.a, tt.b)
+
+			// Assert
+			require.NoError(t, err)
+			assert.InDelta(t, tt.want, got, 1e-6)
+		})
 	}
 
-	// distance = sqrt(3^2 + 4^2) = 5, so score = 1/(1+5) = 1/6
-	want := float32(1.0 / 6.0)
-	if math.Abs(float64(score-want)) > 0.001 {
-		t.Errorf("expected similarity %f, got %f", want, score)
-	}
-}
+	t.Run("dimension mismatch", func(t *testing.T) {
+		// Arrange
+		a, b := []int8{127, 63}, []int8{127, 63, 31}
 
-func TestEuclideanSimilarity_FartherIsLowerScore(t *testing.T) {
-	origin := []float32{0.0, 0.0}
-	near := []float32{1.0, 0.0}
-	far := []float32{10.0, 0.0}
+		// Act
+		_, err := EuclideanSimilarityInt8(a, b)
 
-	nearScore, err := EuclideanSimilarity(origin, near)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	farScore, err := EuclideanSimilarity(origin, far)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+		// Assert
+		assert.Error(t, err)
+	})
+	t.Run("empty", func(t *testing.T) {
+		// Arrange
+		empty := []int8{}
 
-	if nearScore <= farScore {
-		t.Errorf("expected nearer vector to score higher: near=%f far=%f", nearScore, farScore)
-	}
-}
+		// Act
+		_, err := EuclideanSimilarityInt8(empty, empty)
 
-func TestEuclideanSimilarity_DimensionMismatch(t *testing.T) {
-	a := []float32{1.0, 2.0}
-	b := []float32{1.0, 2.0, 3.0}
-
-	_, err := EuclideanSimilarity(a, b)
-	if err == nil {
-		t.Fatal("expected error for dimension mismatch, got nil")
-	}
-}
-
-func TestEuclideanSimilarity_EmptyVectors(t *testing.T) {
-	a := []float32{}
-	b := []float32{}
-
-	_, err := EuclideanSimilarity(a, b)
-	if err == nil {
-		t.Fatal("expected error for empty vectors, got nil")
-	}
-}
-
-func TestEuclideanSimilarity_Symmetry(t *testing.T) {
-	a := []float32{1.0, 2.0, 3.0, 4.0}
-	b := []float32{5.0, 6.0, 7.0, 8.0}
-
-	scoreAB, err1 := EuclideanSimilarity(a, b)
-	scoreBA, err2 := EuclideanSimilarity(b, a)
-	if err1 != nil || err2 != nil {
-		t.Fatalf("unexpected errors: %v, %v", err1, err2)
-	}
-
-	if scoreAB != scoreBA {
-		t.Errorf("euclidean similarity not symmetric: AB=%f, BA=%f", scoreAB, scoreBA)
-	}
-}
-
-func TestEuclideanSimilarityInt8_IdenticalVectors(t *testing.T) {
-	a := []int8{127, 63, 31}
-	b := []int8{127, 63, 31}
-
-	score, err := EuclideanSimilarityInt8(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if math.Abs(float64(score-1.0)) > 0.001 {
-		t.Errorf("expected similarity 1.0, got %f", score)
-	}
-}
-
-func TestEuclideanSimilarityInt8_KnownDistance(t *testing.T) {
-	a := []int8{0, 0}
-	b := []int8{3, 4}
-
-	score, err := EuclideanSimilarityInt8(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	want := float32(1.0 / 6.0)
-	if math.Abs(float64(score-want)) > 0.001 {
-		t.Errorf("expected similarity %f, got %f", want, score)
-	}
-}
-
-func TestEuclideanSimilarityInt8_DimensionMismatch(t *testing.T) {
-	a := []int8{127, 63}
-	b := []int8{127, 63, 31}
-
-	_, err := EuclideanSimilarityInt8(a, b)
-	if err == nil {
-		t.Fatal("expected error for dimension mismatch, got nil")
-	}
+		// Assert
+		assert.Error(t, err)
+	})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -155,28 +154,36 @@ func TestInsert_Variations(t *testing.T) {
 	}
 }
 
+// An insert with an existing ID replaces the record -- vector and metadata --
+// and, for HNSW, the graph node, so search finds the new vector.
 func TestInsert_Overwrite(t *testing.T) {
-	idx := newTestIndex(t)
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, r := e.open(t)
+			require.NoError(t, idx.Insert(ctx, "vec1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple))
+			require.NoError(t, idx.Insert(ctx, "other", fixtures.Vec3dThird, core.SparseVector{}, nil))
 
-	// Initial insert
-	err := idx.Insert(context.Background(), "vec1", fixtures.Vec3dSimple, core.SparseVector{}, fixtures.MetaSimple)
-	require.NoError(t, err)
+			// Act
+			err := idx.Insert(ctx, "vec1", fixtures.Vec3dAlternate, core.SparseVector{}, fixtures.MetaNested)
 
-	internalID, _ := idx.IDMapper.ToUint32ID("vec1")
-	assert.Equal(t, fixtures.Vec3dSimple, idx.Store[internalID].Vector)
-	assert.Equal(t, fixtures.MetaSimple, idx.Store[internalID].Metadata)
+			// Assert
+			require.NoError(t, err)
+			assert.Equal(t, 2, idx.Len(), "an overwrite must not add a record")
+			internalID, err := r.IDMapper.ToUint32ID("vec1")
+			require.NoError(t, err)
+			assert.Equal(t, fixtures.Vec3dAlternate, r.Store[internalID].Vector)
+			assert.Equal(t, fixtures.MetaNested, r.Store[internalID].Metadata)
 
-	// Overwrite with new vector and metadata
-	newVec := fixtures.Vec3dAlternate
-	newMeta := fixtures.MetaNested
-	err = idx.Insert(context.Background(), "vec1", newVec, core.SparseVector{}, newMeta)
-	require.NoError(t, err)
-
-	assert.Len(t, idx.Store, 1, "Should still have 1 vector (overwritten)")
-	assert.Equal(t, newVec, idx.Store[internalID].Vector)
-	assert.Equal(t, newMeta, idx.Store[internalID].Metadata)
+			results, err := idx.Search(ctx, fixtures.Vec3dAlternate, core.SparseVector{}, 1, nil)
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "vec1", results[0].ID)
+			assert.InDelta(t, 1, results[0].Score, 1e-5, "search must see the new vector, not the old one")
+		})
+	}
 }
-
 func TestInsert_Concurrency(t *testing.T) {
 	idx := newTestIndex(t)
 
@@ -312,6 +319,7 @@ func TestSearch_WithFilters(t *testing.T) {
 // checks the memory accesses; the assertions check that every search
 // succeeded with a full result and every insert landed.
 func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
+	// Arrange
 	ctx := context.Background()
 	idx := newTestIndex(t)
 	const initial, inserted, searchers, k = 10, 20, 20, 5
@@ -321,6 +329,7 @@ func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
 		require.NoError(t, idx.Insert(ctx, fmt.Sprintf("initial%d", i), vec, core.SparseVector{}, nil))
 	}
 
+	// Act
 	var wg sync.WaitGroup
 	errs := make(chan error, inserted+searchers)
 	wg.Add(1 + searchers)
@@ -344,6 +353,7 @@ func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
 	wg.Wait()
 	close(errs)
 
+	// Assert
 	for err := range errs {
 		require.NoError(t, err)
 	}
@@ -351,93 +361,103 @@ func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	idx := newTestIndex(t)
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, r := e.open(t)
+			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+			require.NoError(t, idx.Insert(ctx, "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+			internalID, err := r.IDMapper.ToUint32ID("v1")
+			require.NoError(t, err)
 
-	// Insert vectors
-	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-	assert.Len(t, idx.Store, 2)
+			// Act
+			deleted, err := idx.Delete(ctx, "v1")
+			missingDeleted, missingErr := idx.Delete(ctx, "does-not-exist")
 
-	// Get the internal ID before deletion
-	internalID, err := idx.IDMapper.ToUint32ID("v1")
-	require.NoError(t, err)
+			// Assert
+			require.NoError(t, err)
+			assert.True(t, deleted)
+			assert.Equal(t, 1, idx.Len())
+			assert.NotContains(t, r.Store, internalID)
+			_, err = r.IDMapper.ToUint32ID("v1")
+			assert.Error(t, err, "a deleted ID must not resolve")
+			assert.True(t, r.IDMapper.IsTombstone(internalID))
 
-	// Delete one vector
-	deleted, err := idx.Delete(context.Background(), "v1")
-	require.NoError(t, err)
-	assert.True(t, deleted, "Delete should return true for successful deletion")
-	assert.Len(t, idx.Store, 1)
-
-	// Verify it's deleted
-	_, err = idx.IDMapper.ToUint32ID("v1")
-	assert.Error(t, err, "Deleted ID should not be found")
-	assert.NotContains(t, idx.Store, internalID)
-
-	// Verify tombstone
-	assert.True(t, idx.IDMapper.IsTombstone(internalID))
+			results, err := idx.Search(ctx, fixtures.Vec3dSimple, core.SparseVector{}, 5, nil)
+			require.NoError(t, err)
+			for _, res := range results {
+				assert.NotEqual(t, "v1", res.ID, "search must not return a deleted vector")
+			}
+			require.NoError(t, missingErr)
+			assert.False(t, missingDeleted, "deleting an unknown ID reports false")
+		})
+	}
 }
 
-func TestClear(t *testing.T) {
-	idx := newTestIndex(t)
-
-	// Insert vectors
-	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-	assert.Len(t, idx.Store, 2)
-
-	// Clear
-	idx.Clear()
-	assert.Empty(t, idx.Store, "Store should be empty after clear")
-}
-
-// TestClear_ResetsIDMapperAndWAL verifies Clear wipes ID mappings/tombstones
-// and truncates the WAL, not just the Store -- these are easy to miss since
-// they're separate fields the caller could forget to reset.
+// TestClear_ResetsIDMapperAndWAL verifies Clear empties the store and also
+// wipes ID mappings and truncates the WAL -- separate state that is easy to
+// forget to reset -- and that the index is usable afterwards.
 func TestClear_ResetsIDMapperAndWAL(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, r := e.open(t)
+			walPath := r.wal.file.Name()
+			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+			require.NoError(t, idx.Insert(ctx, "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+			_, err := idx.Delete(ctx, "v2")
+			require.NoError(t, err)
+			info, err := os.Stat(walPath)
+			require.NoError(t, err)
+			require.Positive(t, info.Size(), "WAL should have entries before Clear")
 
-	idx := newTestIndexWithWAL(t, wal)
+			// Act
+			idx.Clear()
 
-	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-	_, err = idx.Delete(context.Background(), "v2")
-	require.NoError(t, err)
+			// Assert
+			assert.Empty(t, r.Store)
+			assert.Equal(t, 0, idx.Len())
+			assert.Equal(t, 0, r.IDMapper.Count(), "IDMapper should have no active mappings after Clear")
+			assert.Equal(t, uint32(0), r.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Clear")
+			info, err = os.Stat(walPath)
+			require.NoError(t, err)
+			assert.Zero(t, info.Size(), "WAL should be truncated after Clear")
 
-	info, err := os.Stat(walPath)
-	require.NoError(t, err)
-	assert.Positive(t, info.Size(), "WAL should have entries before Clear")
-
-	idx.Clear()
-
-	assert.Empty(t, idx.Store, "Store should be empty after Clear")
-	assert.Equal(t, 0, idx.IDMapper.Count(), "IDMapper should have no active mappings after Clear")
-	assert.Equal(t, uint32(0), idx.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Clear")
-
-	info, err = os.Stat(walPath)
-	require.NoError(t, err)
-	assert.Zero(t, info.Size(), "WAL should be truncated after Clear")
-
-	// Re-inserting after a full Clear may reuse ID 0 -- safe here because the
-	// entire collection was wiped alongside it, unlike a plain Delete.
-	_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
-	newID, err := idx.IDMapper.ToUint32ID("v3")
-	require.NoError(t, err)
-	assert.Equal(t, uint32(0), newID)
+			// Re-inserting after a full Clear may reuse ID 0 -- safe here because
+			// the entire collection was wiped alongside it, unlike a plain Delete.
+			require.NoError(t, idx.Insert(ctx, "v3", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+			newID, err := r.IDMapper.ToUint32ID("v3")
+			require.NoError(t, err)
+			assert.Equal(t, uint32(0), newID)
+			results, err := idx.Search(ctx, fixtures.Vec3dSimple, core.SparseVector{}, 1, nil)
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "v3", results[0].ID)
+		})
+	}
 }
 
 func TestLen(t *testing.T) {
-	idx := newTestIndex(t)
-	assert.Equal(t, 0, idx.Len())
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, _ := e.open(t)
+			lens := make([]int, 0, 3)
 
-	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
-	assert.Equal(t, 1, idx.Len())
+			// Act: record the length after each change.
+			lens = append(lens, idx.Len())
+			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+			require.NoError(t, idx.Insert(ctx, "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
+			lens = append(lens, idx.Len())
+			_, err := idx.Delete(ctx, "v1")
+			require.NoError(t, err)
+			lens = append(lens, idx.Len())
 
-	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-	assert.Equal(t, 2, idx.Len())
-
-	_, _ = idx.Delete(context.Background(), "v1") //nolint:errcheck // test setup
-	assert.Equal(t, 1, idx.Len())
+			// Assert
+			assert.Equal(t, []int{0, 2, 1}, lens, "empty, after two inserts, after one delete")
+		})
+	}
 }

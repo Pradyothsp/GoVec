@@ -229,10 +229,9 @@ func TestHybridSearch_MultipleTokenOverlap(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
-	// doc1 should rank higher with multiple token matches
-	// Sparse score for doc1: (1*1) + (2*1) + (3*1) = 6.0
-	// Sparse score for doc2: (10*1) = 10.0
-	// But doc2 has higher sparse score, so it should rank first
+	// The sparse score is a weighted sum, not a count of matching tokens:
+	// doc1 matches three tokens for (1*1) + (2*1) + (3*1) = 6, doc2 matches one
+	// for 10*1 = 10. Their dense scores tie, so doc2 ranks first.
 	assert.Equal(t, "doc2", results[0].ID)
 }
 

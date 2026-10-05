@@ -19,13 +19,7 @@ import (
 // a bad last record is a write torn by a crash and is cut off; anything else
 // that can't be replayed is corruption and must stop recovery.
 
-var replayEngines = []struct {
-	name      string
-	newEngine func(t *testing.T) Engine
-}{
-	{"brute", func(t *testing.T) Engine { return newTestIndex(t) }},
-	{"hnsw", func(t *testing.T) Engine { return newTestHNSWIndex(t) }},
-}
+func engineOnly(e Engine, _ *records[[]float32]) Engine { return e }
 
 // walRecord encodes entry as the WAL writes it.
 func walRecord(t *testing.T, entry *WALEntry) []byte {
@@ -74,13 +68,13 @@ func TestReplayWAL_TornLastRecord_IsCutOffSoTheNextWriteSurvives(t *testing.T) {
 		// Stale bytes some filesystems leave at the end of a file after a crash.
 		"garbage": []byte("CORRUPTED DATA\n"),
 	}
-	for _, e := range replayEngines {
+	for _, e := range bothEngines {
 		for tailName, tail := range tails {
 			t.Run(e.name+"/"+tailName, func(t *testing.T) {
 				good := goodWALRecord(t)
 				walPath := writeWAL(t, append(bytes.Clone(good), tail...))
 
-				require.NoError(t, e.newEngine(t).ReplayWAL(walPath), "a torn last record is expected after a crash")
+				require.NoError(t, engineOnly(e.open(t)).ReplayWAL(walPath), "a torn last record is expected after a crash")
 
 				data, err := os.ReadFile(walPath)
 				require.NoError(t, err)
@@ -93,7 +87,7 @@ func TestReplayWAL_TornLastRecord_IsCutOffSoTheNextWriteSurvives(t *testing.T) {
 				require.NoError(t, wal.WriteEntry(context.Background(), &WALEntry{Action: WALActionInsert, ID: "after", Vector: []float32{0, 0, 1}}))
 				require.NoError(t, wal.Close())
 
-				recovered := e.newEngine(t)
+				recovered := engineOnly(e.open(t))
 				require.NoError(t, recovered.ReplayWAL(walPath))
 				assert.Equal(t, 2, recovered.Len())
 				_, err = recovered.GetByID(context.Background(), "after")
@@ -109,13 +103,13 @@ func TestReplayWAL_CorruptRecordBeforeTheEnd_ReturnsError(t *testing.T) {
 		"crc_mismatch": withFlippedPayloadByte(walRecord(t, &WALEntry{Action: WALActionInsert, ID: "bad", Vector: []float32{1, 1, 0}})),
 		"bad_header":   {7, 1, 2, 3, 4, 5, 6, 7, 8},
 	}
-	for _, e := range replayEngines {
+	for _, e := range bothEngines {
 		for name, bad := range damaged {
 			t.Run(e.name+"/"+name, func(t *testing.T) {
 				content := bytes.Join([][]byte{goodWALRecord(t), bad, later}, nil)
 				walPath := writeWAL(t, content)
 
-				err := e.newEngine(t).ReplayWAL(walPath)
+				err := engineOnly(e.open(t)).ReplayWAL(walPath)
 
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "record 2")
@@ -134,13 +128,13 @@ func TestReplayWAL_EntryThatCannotBeApplied_ReturnsError(t *testing.T) {
 		// Intact framing around a payload no writer produces.
 		"unknown_action": framedRecord([]byte{9, 1, 'x', 0, 0, 0, 0}),
 	}
-	for _, e := range replayEngines {
+	for _, e := range bothEngines {
 		for entryName, entry := range entries {
 			t.Run(e.name+"/"+entryName, func(t *testing.T) {
 				// Put the bad entry before a good one, and as the last record: an
 				// intact record that can't be applied is never a torn write.
 				for _, content := range [][]byte{append(bytes.Clone(entry), goodWALRecord(t)...), append(goodWALRecord(t), entry...)} {
-					err := e.newEngine(t).ReplayWAL(writeWAL(t, content))
+					err := engineOnly(e.open(t)).ReplayWAL(writeWAL(t, content))
 					require.Error(t, err)
 					assert.Contains(t, err.Error(), "record ")
 				}
@@ -150,10 +144,10 @@ func TestReplayWAL_EntryThatCannotBeApplied_ReturnsError(t *testing.T) {
 }
 
 func TestReplayWAL_DeleteOfMissingID_IsNotAnError(t *testing.T) {
-	for _, e := range replayEngines {
+	for _, e := range bothEngines {
 		t.Run(e.name, func(t *testing.T) {
 			content := append(walRecord(t, &WALEntry{Action: WALActionDelete, ID: "never-inserted"}), goodWALRecord(t)...)
-			require.NoError(t, e.newEngine(t).ReplayWAL(writeWAL(t, content)), "replay must stay idempotent")
+			require.NoError(t, engineOnly(e.open(t)).ReplayWAL(writeWAL(t, content)), "replay must stay idempotent")
 		})
 	}
 }

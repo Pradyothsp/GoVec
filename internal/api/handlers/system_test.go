@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,84 +28,49 @@ func TestNewSystemHandler(t *testing.T) {
 	assert.Equal(t, "/tmp/test.bin", h.DataPath)
 }
 
-func TestStats_EmptyIndex(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	h := NewSystemHandler(idx, "")
-
-	router := gin.New()
-	router.GET("/stats", h.Stats)
-
-	req := httptest.NewRequest(http.MethodGet, "/stats", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"success":true,"data":{"vector_count":0}}`, rec.Body.String())
-}
-
-func TestStats_AfterInsert(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
-
-	h := NewSystemHandler(idx, "")
-
-	router := gin.New()
-	router.GET("/stats", h.Stats)
-
-	req := httptest.NewRequest(http.MethodGet, "/stats", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"success":true,"data":{"vector_count":1}}`, rec.Body.String())
-}
-
-func TestInfo_EmptyIndex(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	h := NewSystemHandler(idx, "")
-
-	router := gin.New()
-	router.GET("/info", h.Info)
-
-	req := httptest.NewRequest(http.MethodGet, "/info", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var env struct {
-		Success bool                   `json:"success"`
-		Data    map[string]interface{} `json:"data"`
+// Stats and Info report the vector count, and Info the width, which an
+// empty index doesn't have yet and the first insert sets.
+func TestStatsAndInfo_EmptyThenAfterInsert(t *testing.T) {
+	tests := []struct {
+		name     string
+		inserted [][]float32
+		count    float64
+		dims     float64
+	}{
+		{"empty index", nil, 0, 0},
+		{"after one insert", [][]float32{{1, 2, 3}}, 1, 3},
 	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
-	assert.True(t, env.Success)
-	assert.Equal(t, float64(0), env.Data["dimensions"], "dimensions should be 0 on empty index")
-	assert.Equal(t, float64(0), env.Data["vector_count"])
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			idx := testutil.NewTestIndex(t)
+			for i, vec := range tt.inserted {
+				require.NoError(t, idx.Insert(context.Background(), fmt.Sprintf("v%d", i), vec, core.SparseVector{}, nil))
+			}
+			h := NewSystemHandler(idx, "")
+			router := gin.New()
+			router.GET("/stats", h.Stats)
+			router.GET("/info", h.Info)
+			stats, info := httptest.NewRecorder(), httptest.NewRecorder()
 
-func TestInfo_DimensionsSetAfterInsert(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0, 3.0}, core.SparseVector{}, nil))
+			// Act
+			router.ServeHTTP(stats, httptest.NewRequest(http.MethodGet, "/stats", nil))
+			router.ServeHTTP(info, httptest.NewRequest(http.MethodGet, "/info", nil))
 
-	h := NewSystemHandler(idx, "")
-
-	router := gin.New()
-	router.GET("/info", h.Info)
-
-	req := httptest.NewRequest(http.MethodGet, "/info", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var env struct {
-		Success bool                   `json:"success"`
-		Data    map[string]interface{} `json:"data"`
+			// Assert
+			assert.Equal(t, http.StatusOK, stats.Code)
+			assert.JSONEq(t, fmt.Sprintf(`{"success":true,"data":{"vector_count":%v}}`, tt.count), stats.Body.String())
+			assert.Equal(t, http.StatusOK, info.Code)
+			var env struct {
+				Success bool           `json:"success"`
+				Data    map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(info.Body.Bytes(), &env))
+			assert.True(t, env.Success)
+			assert.Equal(t, tt.dims, env.Data["dimensions"])
+			assert.Equal(t, tt.count, env.Data["vector_count"])
+		})
 	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
-	assert.True(t, env.Success)
-	assert.Equal(t, float64(3), env.Data["dimensions"], "dimensions should be set from first insert")
-	assert.Equal(t, float64(1), env.Data["vector_count"])
 }
 
 func TestInfo_ReportsServerVersion(t *testing.T) {
