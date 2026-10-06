@@ -33,7 +33,7 @@ engine:
   quantization: "none"        # Options: "none" (float32), "scalar" (int8, 4x memory reduction)
   distance_metric: "cosine"   # Options: "cosine", "euclidean"
   dimensions: 0               # Required when enable_mmap: true (e.g. 1536 for OpenAI embeddings). 0 = no upfront enforcement
-  enable_hybrid_search: false  # Groundwork only: builds a sparse-vector index that search does not read yet
+  enable_hybrid_search: true   # Blends sparse-vector scores into search (0.7 dense + 0.3 sparse) when a query has one
   enable_metadata_index: false # Enables in-memory inverted index for fast filtered search (brute & HNSW)
   # HNSW parameters (only used when index_type: "hnsw")
   hnsw_m: 16                  # Max connections per node (higher = better recall, more memory)
