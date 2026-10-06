@@ -257,6 +257,32 @@ func TestHNSWIndex_LoadFromFile_BruteForceSnapshot(t *testing.T) {
 	assert.Contains(t, err.Error(), "brute", "error must hint that the snapshot is brute-force")
 }
 
+// TestHNSWIndex_LoadFromFile_KeepsConfiguredEfSearch is the regression test for
+// a snapshot's saved EfSearch replacing the configured one on load, which kept
+// existing data on the old ef after hnsw_ef_search or its default changed.
+func TestHNSWIndex_LoadFromFile_KeepsConfiguredEfSearch(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "hnsw.bin")
+	saved := newTestHNSWIndex(t) // EfSearch 20
+	require.NoError(t, saved.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
+	require.NoError(t, saved.SaveToFile(ctx, path))
+
+	wal, err := NewWAL(filepath.Join(t.TempDir(), "loaded.wal"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = wal.Close() })
+	identityFunc := func(v []float32) []float32 { return v }
+	loaded := NewHNSWIndex[[]float32](wal, nil, core.NewIDMapper(), identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 100, 200, core.NewMetadataIndex(), nil)
+
+	// Act
+	err = loaded.LoadFromFile(ctx, path)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, 1, loaded.Len())
+	assert.Equal(t, 100, loaded.graph.EfSearch, "the configured ef_search must win over the snapshot's")
+}
+
 func TestHNSWIndex_SaveToFile_InvalidPath(t *testing.T) {
 	idx := newTestHNSWIndex(t)
 	require.NoError(t, idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))

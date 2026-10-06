@@ -351,6 +351,10 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 		if err := idx.graph.ImportTopology(topology, lookupVec); err != nil {
 			return fmt.Errorf("failed to import HNSW topology: %w", err)
 		}
+		// The import sets EfSearch to the value saved with the snapshot. It only
+		// shapes searches, not the graph, so the configured value wins: otherwise
+		// a changed hnsw_ef_search, or a new default, never reaches existing data.
+		idx.graph.EfSearch = idx.hnswEfSearch
 		return nil
 	})
 	if err != nil || !found {
