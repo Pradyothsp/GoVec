@@ -134,8 +134,8 @@ func DefaultConfig() *Config {
 			// this package is meant to stay independent of any specific index
 			// implementation -- so keep them in sync by hand if either changes.
 			HnswM:              16,
-			HnswEfSearch:       50,
-			HnswEfConstruction: 200,
+			HnswEfSearch:       100,
+			HnswEfConstruction: 100,
 			// 0 = auto (runtime.GOMAXPROCS(0)) / hnsw.DefaultBatchParallelThreshold --
 			// see internal/hnsw/graph.go's own doc comments on these fields for
 			// the reasoning; kept as separate literals here for the same

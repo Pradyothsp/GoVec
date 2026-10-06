@@ -728,14 +728,17 @@ func (g *Graph[K, V]) fromRank(v float32) float32 {
 const (
 	// DefaultM is a good default for OpenAI-style embeddings.
 	DefaultM = 16
-	// DefaultEfSearch is 50 because recall@1/5 plateaus there in an
-	// EfConstruction/EfSearch sweep; below it, recall drops with no latency
-	// benefit, since resultCap = max(k, EfSearch) already floors at k for
-	// k > EfSearch anyway.
-	DefaultEfSearch = 50
-	// DefaultEfConstruction of 200 is hnswlib's own default and a reasonable
-	// starting point.
-	DefaultEfConstruction = 200
+	// DefaultEfSearch is 100, as in Chroma and Qdrant. An ef sweep on 1536-dim
+	// text embeddings (DBpedia, M=16, EfConstruction=100) gave recall@10 0.973
+	// and recall@50 0.931 at ef 50, against 0.995 and 0.981 at ef 100; SIFT's
+	// 128-dim vectors had hidden that gap (0.997 at ef 50). Larger k needs more:
+	// recall@50 reached 0.997 only at ef 200.
+	DefaultEfSearch = 100
+	// DefaultEfConstruction is 100, as in Chroma and Qdrant. Against 200 (hnswlib's
+	// default) it cut batch insert time by 21% on 1536-dim text embeddings and 35%
+	// on SIFT, at 10k vectors, with the same recall from EfSearch 100 up; 200 only
+	// gained recall at EfSearch 25-50.
+	DefaultEfConstruction = 100
 	// DefaultBatchParallelThreshold: below this many nodes in one Add() call,
 	// round-based parallelism (see addRound) is skipped entirely in favor of
 	// addSerial -- goroutine/WaitGroup overhead isn't worth paying for a

@@ -231,7 +231,7 @@ func TestLoadFromEnv_EveryFieldHasAnOverride(t *testing.T) {
 		"GOVEC_ENABLE_HYBRID_SEARCH":          "true",
 		"GOVEC_ENABLE_METADATA_INDEX":         "true",
 		"GOVEC_HNSW_M":                        "32",
-		"GOVEC_HNSW_EF_SEARCH":                "100",
+		"GOVEC_HNSW_EF_SEARCH":                "150",
 		"GOVEC_HNSW_EF_CONSTRUCTION":          "400",
 		"GOVEC_HNSW_BATCH_PARALLELISM":        "8",
 		"GOVEC_HNSW_BATCH_PARALLEL_THRESHOLD": "50",
@@ -270,7 +270,7 @@ func TestLoadFromEnv_EveryFieldHasAnOverride(t *testing.T) {
 	assert.True(t, cfg.Engine.EnableHybridSearch)
 	assert.True(t, cfg.Engine.EnableMetadataIndex)
 	assert.Equal(t, 32, cfg.Engine.HnswM)
-	assert.Equal(t, 100, cfg.Engine.HnswEfSearch)
+	assert.Equal(t, 150, cfg.Engine.HnswEfSearch)
 	assert.Equal(t, 400, cfg.Engine.HnswEfConstruction)
 	assert.Equal(t, 8, cfg.Engine.HnswBatchParallelism)
 	assert.Equal(t, 50, cfg.Engine.HnswBatchParallelThreshold)
