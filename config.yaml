@@ -38,7 +38,7 @@ engine:
   # HNSW parameters (only used when index_type: "hnsw")
   hnsw_m: 16                  # Max connections per node (higher = better recall, more memory)
   hnsw_ef_search: 100         # Query-time search breadth (higher = better recall, slower). Raise it for large k
-  hnsw_ef_construction: 100   # Build-time search breadth (higher = better graph, slower inserts)
+  hnsw_ef_construction: 100   # Build-time search breadth (higher = better graph, slower inserts). Try 200 on large datasets if recall matters
   # hnsw_batch_parallelism: 0        # Concurrent workers for a single Add() call's round-based parallel Prepare phase. 0 = runtime.GOMAXPROCS(0)
   # hnsw_batch_parallel_threshold: 20 # Minimum node count in one Add() call before parallelism kicks in at all; below it, inserts stay fully serial
 

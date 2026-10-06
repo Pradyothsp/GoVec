@@ -168,6 +168,11 @@ The settings you're most likely to change:
 [`config.example.yaml`](config.example.yaml) documents every option, including the HNSW tuning
 parameters (`hnsw_m`, `hnsw_ef_search`, `hnsw_ef_construction`).
 
+**Recall tip:** both `ef` defaults are 100, as in Chroma and Qdrant. On large datasets, if recall
+matters more than insert speed, raise `hnsw_ef_construction` (to 200, say: at 100k text
+embeddings that looked worth about half a point to a point of recall@10, at slower inserts) or
+`hnsw_ef_search`, which costs query latency instead and can be changed without rebuilding.
+
 **Memory tip:** set `GOMEMLIMIT` to 2–3x your expected live data, kept under the container's
 memory limit. Under sustained load it cuts resident memory substantially (-46% in benchmarks)
 with no latency cost. It isn't set by default because the right value depends on dataset size.

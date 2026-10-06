@@ -737,7 +737,9 @@ const (
 	// DefaultEfConstruction is 100, as in Chroma and Qdrant. Against 200 (hnswlib's
 	// default) it cut batch insert time by 21% on 1536-dim text embeddings and 35%
 	// on SIFT, at 10k vectors, with the same recall from EfSearch 100 up; 200 only
-	// gained recall at EfSearch 25-50.
+	// gained recall at EfSearch 25-50. At 100k vectors 200 looked about half a point
+	// to a point better at recall@10, within build-to-build noise, so 100 stays the
+	// default and large datasets that need the recall can raise it.
 	DefaultEfConstruction = 100
 	// DefaultBatchParallelThreshold: below this many nodes in one Add() call,
 	// round-based parallelism (see addRound) is skipped entirely in favor of
