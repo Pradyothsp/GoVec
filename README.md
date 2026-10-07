@@ -212,42 +212,42 @@ Every database builds HNSW with `M=16, ef_construction=100` and searches with ef
 every number for a database comes from one index, and recall is graded against exact cosine
 neighbours.
 
-> **Preliminary:** a single run (October 6, 2026) with these defaults, before their release, on a
-> laptop that wasn't kept idle. To be replaced by medians of repeated runs.
+Medians of three runs (October 7, 2026, GoVec 0.2.1) on a MacBook with Docker Desktop.
 
 | | GoVec | GoVec (int8) | GoVec (mmap)† | Chroma | Qdrant |
 |---|---:|---:|---:|---:|---:|
-| Query latency, k=10 (mean) | 6.22 ms | 5.96 ms | 6.53 ms | 5.21 ms | **3.98 ms** |
-| Single insert (mean) | **4.57 ms** | 4.65 ms | 4.67 ms | 11.76 ms | 5.82 ms |
-| Batch insert, per vector | **1.90 ms** | 1.98 ms | 1.96 ms | 2.07 ms | 8.23 ms |
-| Recall@10 | 98.4% | 88.4% | 97.7% | **98.5%** | 97.5% |
-| Recall@50 | 96.4% | 89.1% | 96.2% | 96.6% | **97.2%** |
-| Restart, empty (median) | **7.9 ms** | 8.3 ms | 9.0 ms | 55.8 ms | 10.3 ms |
-| Restart with the data loaded (median) | 981 ms | 485 ms | 418 ms | 181 ms | **78 ms** |
-| RAM | 1,329 MB | 463 MB | 816 MB | 707 MB | 161 MB* |
-| Disk | 632 MB | **171 MB** | 632 MB‡ | 659 MB | 867 MB‡ |
+| Query latency, k=10 (mean) | 6.23 ms | 6.45 ms | 7.93 ms | 5.58 ms | **4.61 ms** |
+| Query latency over gRPC, k=10 (mean)‡ | 4.10 ms | | | | |
+| Single insert (mean) | **5.06 ms** | 5.16 ms | 5.24 ms | 12.42 ms | 6.04 ms |
+| Batch insert, per vector | **1.96 ms** | 2.04 ms | 2.12 ms | 2.21 ms | 7.62 ms |
+| Recall@10 | 97.7% | 88.4% | 98.1% | 98.1% | **98.6%** |
+| Recall@50 | 96.2% | 89.1% | 96.4% | 96.4% | **97.8%** |
+| Restart, empty (median) | **9.0 ms** | 10.3 ms | 10.5 ms | 67.2 ms | 12.0 ms |
+| Restart with the data loaded (median) | 930 ms | 553 ms | 474 ms | 209 ms | **81 ms** |
+| RAM | 1,329 MB | 466 MB | 817 MB | 708 MB | 271 MB* |
+| Disk (allocated) | 632 MB | **171 MB** | 632 MB | 659 MB | 774 MB |
 
 \* Qdrant keeps its vectors on disk by default and lets the OS cache only part of them, so its
 RAM isn't comparable with GoVec's and Chroma's, which hold every vector in memory.
 
 † GoVec with `storage.enable_mmap: true` (and `engine.dimensions` set): vectors in memory-mapped
-files instead of the Go heap; RAM is what's in use, including those files' cached pages. From a
-separate run with the same settings, in which in-memory GoVec measured 1,343 MB. Its disk is the
-same as in memory: each vector is stored once, in the mapped files instead of the snapshot.
+files instead of the Go heap; RAM is what's in use, including those files' cached pages. Its disk
+is the same as in memory: each vector is stored once, in the mapped files instead of the snapshot.
 
-‡ Allocated size, from a separate run. Apparent size, which counts file space reserved but not
-yet written, is larger: 1,219 MB for Qdrant, and 1,091 MB for GoVec (mmap), whose mapped files are
-created larger than they're filled. The other disk figures are file sizes as written.
+‡ The same GoVec index, queried over gRPC instead of REST. Every other figure, Chroma's and
+Qdrant's included, is over HTTP; Qdrant also has a gRPC API, not measured here. Compare this row
+with GoVec's REST figure, not with the other databases.
 
 All three find the same neighbours at the same ef, within the point or so that recall moves
-between index builds. GoVec has the fastest single and batch inserts. Its queries are the slowest
-at this size, 1.2x Chroma and 1.6x Qdrant: at 10k vectors it was level with Qdrant, and its latency
-grows faster with the graph, since distance computation doesn't use SIMD yet and neighbour lists
-are pointers rather than flat ID arrays. It restarts empty in about 8 ms but takes about 1 s to
-answer with 100k vectors loaded, because it reads its whole snapshot back first. In memory it holds
-about 1.9x Chroma's RAM. Memory-mapped (the mmap column), memory in use falls 40% (1,343 to
-816 MB in the same run), restarts with data take half as long, and recall and query latency stay
-the same while the data fits in memory. int8 recall on text embeddings is low for now. SIFT
+between index builds. GoVec has the fastest single and batch inserts. Over REST its queries are
+the slowest at this size, 1.1x Chroma and 1.4x Qdrant: at 10k vectors it was level with Qdrant,
+and its latency grows faster with the graph, since distance computation doesn't use SIMD yet and
+neighbour lists are pointers rather than flat ID arrays. Over gRPC the same queries take a third
+less time. It restarts empty in about 9 ms but takes about 1 s to answer with 100k vectors loaded,
+because it reads its whole snapshot back first. In memory it holds about 1.9x Chroma's RAM.
+Memory-mapped (the mmap column), memory in use falls 38%, restarts with data take half as long
+and recall is the same, but queries are about 27% slower. int8 recall on text embeddings is low
+for now. SIFT
 results, the 10k numbers, an ef sweep, the method and how to reproduce are in the govec-bench
 repo.
 
