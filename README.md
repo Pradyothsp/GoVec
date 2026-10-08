@@ -12,8 +12,9 @@ gRPC from a single static binary.
 GoVec is inspired by Qdrant, Weaviate and Pinecone, but deliberately smaller. It targets
 prototyping, local semantic search, and ML apps that need vector search on a single node,
 without running a distributed platform. It finds the same neighbours as Chroma and Qdrant at the
-same settings and has the fastest inserts of the three; its queries are slower at 100k vectors,
-and in memory it uses more RAM (see [Performance](#performance)).
+same settings and inserts one at a time as fast as Qdrant; its queries are slower at 100k
+vectors, Qdrant loads batches faster, and in memory it uses more RAM (see
+[Performance](#performance)).
 
 ## Ecosystem
 
@@ -212,20 +213,19 @@ Every database builds HNSW with `M=16, ef_construction=100` and searches with ef
 every number for a database comes from one index, and recall is graded against exact cosine
 neighbours.
 
-Medians of three runs (October 7, 2026, GoVec 0.2.1) on a MacBook with Docker Desktop.
+Medians of three runs (October 8, 2026, GoVec 0.2.1) on a MacBook with Docker Desktop.
 
 | | GoVec | GoVec (int8) | GoVec (mmap)† | Chroma | Qdrant |
 |---|---:|---:|---:|---:|---:|
-| Query latency, k=10 (mean) | 6.23 ms | 6.45 ms | 7.93 ms | 5.58 ms | **4.61 ms** |
-| Query latency over gRPC, k=10 (mean)‡ | 4.10 ms | | | | |
-| Single insert (mean) | **5.06 ms** | 5.16 ms | 5.24 ms | 12.42 ms | 6.04 ms |
-| Batch insert, per vector | **1.96 ms** | 2.04 ms | 2.12 ms | 2.21 ms | 7.62 ms |
-| Recall@10 | 97.7% | 88.4% | 98.1% | 98.1% | **98.6%** |
-| Recall@50 | 96.2% | 89.1% | 96.4% | 96.4% | **97.8%** |
-| Restart, empty (median) | **9.0 ms** | 10.3 ms | 10.5 ms | 67.2 ms | 12.0 ms |
-| Restart with the data loaded (median) | 930 ms | 553 ms | 474 ms | 209 ms | **81 ms** |
-| RAM | 1,329 MB | 466 MB | 817 MB | 708 MB | 271 MB* |
-| Disk (allocated) | 632 MB | **171 MB** | 632 MB | 659 MB | 774 MB |
+| Query latency, k=10 (mean) | 6.08 ms | 6.25 ms | 6.16 ms | 5.53 ms | **4.87 ms** |
+| Query latency over gRPC, k=10 (mean)‡ | 3.80 ms | | | | 4.49 ms |
+| Single insert, per vector | **4.64 ms** | 4.92 ms | **4.64 ms** | 12.15 ms | 4.69 ms |
+| Batch insert, per vector | 1.96 ms | 2.03 ms | 1.96 ms | 2.14 ms | **1.10 ms**§ |
+| Recall@10 | 98.3% | 88.4% | 98.3% | 98.5% | **99.3%** |
+| Recall@50 | 96.6% | 89.0% | 96.5% | 96.8% | **98.1%** |
+| Restart with the data loaded (median)‖ | 873 ms | 612 ms | 467 ms | 309 ms | **211 ms** |
+| RAM | 1,338 MB | 458 MB | 836 MB | 712 MB | 354 MB* |
+| Disk (allocated) | 632 MB | **171 MB** | 632 MB | 659 MB | 776 MB |
 
 \* Qdrant keeps its vectors on disk by default and lets the OS cache only part of them, so its
 RAM isn't comparable with GoVec's and Chroma's, which hold every vector in memory.
@@ -233,23 +233,32 @@ RAM isn't comparable with GoVec's and Chroma's, which hold every vector in memor
 † GoVec with `storage.enable_mmap: true` (and `engine.dimensions` set): vectors in memory-mapped
 files instead of the Go heap; RAM is what's in use, including those files' cached pages. Its disk
 is the same as in memory: each vector is stored once, in the mapped files instead of the snapshot.
+From three separate runs alongside in-memory GoVec.
 
-‡ The same GoVec index, queried over gRPC instead of REST. Every other figure, Chroma's and
-Qdrant's included, is over HTTP; Qdrant also has a gRPC API, not measured here. Compare this row
-with GoVec's REST figure, not with the other databases.
+‡ The same index through each client's gRPC mode (Chroma's client has none), from three separate
+runs. gRPC cuts GoVec's latency by 38% but doesn't help Qdrant's, whose Python client likely
+spends the saving on converting responses; in those runs Qdrant's REST figure was 3.88 ms. This
+row compares client libraries as much as databases.
+
+§ Qdrant indexes in the background after its upserts return; the figure includes waiting until
+every vector is indexed.
+
+‖ From `docker compose start` until a query is answered, so about 130 ms of each is Docker
+starting the container.
 
 All three find the same neighbours at the same ef, within the point or so that recall moves
-between index builds. GoVec has the fastest single and batch inserts. Over REST its queries are
-the slowest at this size, 1.1x Chroma and 1.4x Qdrant: at 10k vectors it was level with Qdrant,
-and its latency grows faster with the graph, since distance computation doesn't use SIMD yet and
-neighbour lists are pointers rather than flat ID arrays. Over gRPC the same queries take a third
-less time. It restarts empty in about 9 ms but takes about 1 s to answer with 100k vectors loaded,
-because it reads its whole snapshot back first. In memory it holds about 1.9x Chroma's RAM.
-Memory-mapped (the mmap column), memory in use falls 38%, restarts with data take half as long
-and recall is the same, but queries are about 27% slower. int8 recall on text embeddings is low
-for now. SIFT
-results, the 10k numbers, an ef sweep, the method and how to reproduce are in the govec-bench
-repo.
+between index builds. GoVec's single inserts are level with Qdrant's and 2.6x faster than
+Chroma's; Qdrant loads batches 1.8x faster by indexing in the background. Over REST GoVec's
+queries are the slowest at this size, 1.1x Chroma and 1.25x Qdrant: at 10k vectors it was level
+with Qdrant, and its latency grows faster with the graph, since distance computation doesn't use
+SIMD yet and neighbour lists are pointers rather than flat ID arrays. Through each database's
+fastest Python client (gRPC for GoVec, REST for Qdrant), the two are level at 100k. With 100k
+vectors loaded it takes about 0.9 s to answer after a restart, because it reads its whole
+snapshot back first. In memory it holds about 1.9x Chroma's RAM. Memory-mapped (the mmap column),
+memory in use falls 37%, restarts with data take half as long, and recall and query latency are
+the same, though in an earlier set of runs its queries were 27% slower. int8 recall on text
+embeddings is low for now. SIFT results, the 10k numbers, an ef sweep, the method and how to
+reproduce are in the govec-bench repo.
 
 ## Status and limitations
 

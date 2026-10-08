@@ -27,8 +27,8 @@ every gap to Pinecone/Chroma-class systems.
 ## Next
 
 Small, independent changes aimed at the gaps the benchmarks measure on 100k text embeddings
-(see the README's Performance section): queries 1.1–1.4x slower than Chroma and Qdrant, about
-twice the raw vectors in RAM, and int8 recall around 88%.
+(see the README's Performance section): queries 1.1–1.25x slower than Chroma and Qdrant, batch
+inserts 1.8x slower than Qdrant, about twice the raw vectors in RAM, and int8 recall around 88%.
 
 - **A cheaper visited set in HNSW.** Each search builds a fresh map of visited nodes for every
   layer, and inserts reuse one but still hash every visit. A pooled array, tagged per search,
