@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/metric"
 
 	"github.com/Pradyothsp/govec/internal/core"
 )
@@ -31,7 +32,7 @@ func NewTestIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	// Create index with IDMapper, identity encode function and cosine similarity
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
+	return index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
 }
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 func Test_binaryVarint(t *testing.T) {
@@ -159,7 +159,7 @@ func TestGraph_TopologyRoundTrip(t *testing.T) {
 func TestGraph_Int8_TopologyRoundTrip(t *testing.T) {
 	// Arrange
 	g1 := NewGraph[uint32, []int8]()
-	g1.Metric = core.Metric[[]int8]{Distance: core.CosineDistanceInt8}
+	g1.Metric = metric.Metric[[]int8]{Distance: metric.CosineDistanceInt8}
 	g1.M = 8
 	g1.Ml = 0.25
 	g1.EfSearch = 16
@@ -197,7 +197,7 @@ func TestGraph_ImportTopology_KeepsSearchSettings(t *testing.T) {
 	require.NoError(t, saved.ExportTopology(buf))
 
 	loaded := NewGraph[int, []float32]()
-	loaded.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
+	loaded.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
 	loaded.EfSearch = saved.EfSearch + 57
 
 	// Act
@@ -206,7 +206,7 @@ func TestGraph_ImportTopology_KeepsSearchSettings(t *testing.T) {
 	// Assert
 	require.NoError(t, err)
 	require.Equal(t, saved.EfSearch+57, loaded.EfSearch)
-	require.Equal(t, core.CosineDistanceFloat32([]float32{1}, []float32{0.5}), loaded.Metric.Distance([]float32{1}, []float32{0.5}))
+	require.Equal(t, metric.CosineDistanceFloat32([]float32{1}, []float32{0.5}), loaded.Metric.Distance([]float32{1}, []float32{0.5}))
 	require.Equal(t, saved.M, loaded.M)
 	require.Equal(t, saved.Ml, loaded.Ml)
 }

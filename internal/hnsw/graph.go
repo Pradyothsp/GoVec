@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw/heap"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
-// VectorType is the vector types a graph can hold: core's, so a graph and the
-// metric it runs on always agree on them.
-type VectorType = core.VectorType
+// VectorType is the vector types a graph can hold: the metric package's, so a
+// graph and the metric it runs on always agree on them.
+type VectorType = metric.VectorType
 
 // Node is a node in the graph.
 // K is the key type (must be comparable/ordered, e.g., uint32, int, string).
@@ -55,7 +55,7 @@ type layerNode[K cmp.Ordered, V VectorType] struct {
 	//
 	// float64, not float32 or a type derived from V (e.g. int64 for
 	// []int8's integer sums): []int8's squared-norm accumulates in int64
-	// (see core.CosineSimilarityInt8) and can exceed float32's 2^24
+	// (see metric.CosineSimilarityInt8) and can exceed float32's 2^24
 	// exact-integer ceiling at realistic embedding dimensions (3072 dims x
 	// 127^2 ~= 49.5M > 16.78M) -- float32 would silently lose precision
 	// there. float64 holds any int64 this codebase will realistically ever
@@ -248,7 +248,7 @@ func (n *layerNode[K, V]) search(
 	efSearch int,
 	target V,
 	distance distFunc[V],
-	// targetCache is target's precomputed value (see core.Metric's
+	// targetCache is target's precomputed value (see metric.Metric's
 	// Precompute), computed once by the caller -- target has no layerNode of
 	// its own to carry a cached value on (it's an ephemeral query or
 	// not-yet-inserted vector), so this is search()'s only way to get it. 0
@@ -519,7 +519,7 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	// FromSquaredDistance converting just the returned results back (see
 	// rankDistFuncFor). Similarity and Score are the caller's; the graph
 	// doesn't use them.
-	Metric core.Metric[V]
+	Metric metric.Metric[V]
 
 	// Rng is used for level generation. It may be set to a deterministic value
 	// for reproducibility. Note that deterministic number generation can lead to
@@ -595,8 +595,8 @@ func (g *Graph[K, V]) visitedScratch() map[K]bool {
 
 // distFunc computes the distance between two vectors, given each one's
 // precomputed cache value (0 and ignored when the configured metric has no
-// cache -- see core.Metric's Precompute). It replaces passing a bare
-// core.DistanceFunc[V] to search()/addNeighbor()/replenish()/
+// cache -- see metric.Metric's Precompute). It replaces passing a bare
+// metric.DistanceFunc[V] to search()/addNeighbor()/replenish()/
 // selectNeighborsHeuristic() below: those need each side's cache, not just
 // its vector. It is purely internal plumbing built fresh (via distFuncFor)
 // for each top-level Add()/search() call.
@@ -619,7 +619,7 @@ func (g *Graph[K, V]) distFuncFor() distFunc[V] {
 // metric that never populates a cache. Shared by distFuncFor's fallback
 // branch and any caller (e.g. tests) that wants to drive search()/
 // addNeighbor()/etc. directly with a bare DistanceFunc[V] and no caching.
-func noCacheDist[V VectorType](dist core.DistanceFunc[V]) distFunc[V] {
+func noCacheDist[V VectorType](dist metric.DistanceFunc[V]) distFunc[V] {
 	return func(aVec V, _ float64, bVec V, _ float64) float32 {
 		return dist(aVec, bVec)
 	}
@@ -637,7 +637,7 @@ func (g *Graph[K, V]) precompute(v V) float64 {
 
 // rankDistFuncFor builds a distFunc[V] for internal ranking/comparison use
 // only -- values it produces must never reach a caller as-is; see
-// core.Metric's SquaredDistance. Prefers SquaredDistance when the
+// metric.Metric's SquaredDistance. Prefers SquaredDistance when the
 // metric opted in (cheaper: skips a monotonic transform every comparison
 // would otherwise pay for); falls back to distFuncFor's existing behavior
 // (CachedDistance, or plain Distance) when it hasn't. Callers whose
@@ -911,7 +911,7 @@ func (g *Graph[K, V]) resolveParallelism(n int) int {
 // (an upsert or an intra-round duplicate key -- see addRound's doc comment).
 func (g *Graph[K, V]) addSerial(nodes []Node[K, V], efConstruction int, distFn distFunc[V]) {
 	for _, node := range nodes {
-		// vecCache is this node's precomputed value (see core.Metric's
+		// vecCache is this node's precomputed value (see metric.Metric's
 		// Precompute) -- computed once here and reused for every layer this
 		// node touches below, instead of recomputing it on every layer.
 		vecCache := g.precompute(node.Value)

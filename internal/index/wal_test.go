@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/test/fixtures"
 )
 
@@ -577,5 +578,5 @@ func newTestIndexWithWAL(t testing.TB, wal *WAL) *VectorIndex[[]float32] {
 	t.Helper()
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
+	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
 }

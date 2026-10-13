@@ -9,6 +9,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -33,8 +34,8 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 
 	// Checked before the mmap store opens, so a bad metric leaves nothing open.
 	// Each engine then resolves it for its vector type.
-	if !core.IsMetric(engineCfg.DistanceMetric) {
-		return nil, fmt.Errorf("unknown distance metric '%s', must be one of: %s", engineCfg.DistanceMetric, strings.Join(core.MetricNames(), ", "))
+	if !metric.IsKnown(engineCfg.DistanceMetric) {
+		return nil, fmt.Errorf("unknown distance metric '%s', must be one of: %s", engineCfg.DistanceMetric, strings.Join(metric.Names(), ", "))
 	}
 
 	idMapper := core.NewIDMapper()
@@ -73,24 +74,24 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mmapStore *storage.MmapStore) (Engine, error) {
 	switch cfg.Quantization {
 	case config.QuantizationScalar:
-		metric, err := core.ResolveMetric[[]int8](cfg.DistanceMetric)
+		distMetric, err := metric.Resolve[[]int8](cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
 
-		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, metric.Similarity, mmapStore)
+		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, distMetric.Similarity, mmapStore)
 		idx.metaIndex = metaIndex
 		idx.configure(&cfg)
 		return idx, nil
 
 	case config.QuantizationNone:
-		metric, err := core.ResolveMetric[[]float32](cfg.DistanceMetric)
+		distMetric, err := metric.Resolve[[]float32](cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
 
 		identityFunc := func(v []float32) []float32 { return v }
-		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, metric.Similarity, mmapStore)
+		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, distMetric.Similarity, mmapStore)
 		idx.metaIndex = metaIndex
 		idx.configure(&cfg)
 		return idx, nil
@@ -130,12 +131,12 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 	batchParallelThreshold := cfg.HnswBatchParallelThreshold
 
 	if cfg.Quantization == config.QuantizationScalar {
-		metric, err := core.ResolveMetric[[]int8](cfg.DistanceMetric)
+		distMetric, err := metric.Resolve[[]int8](cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
 
-		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, metric,
+		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, distMetric,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
 		idx.configure(&cfg)
@@ -143,13 +144,13 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 	}
 
 	if cfg.Quantization == config.QuantizationNone {
-		metric, err := core.ResolveMetric[[]float32](cfg.DistanceMetric)
+		distMetric, err := metric.Resolve[[]float32](cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
 
 		identityFunc := func(v []float32) []float32 { return v }
-		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, metric,
+		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, distMetric,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
 		idx.configure(&cfg)

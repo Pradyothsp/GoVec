@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -39,7 +40,7 @@ func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 		{"brute_mmap", func(t *testing.T, mmapDir string) hybridIndex {
 			return bruteHybrid{NewVectorIndex[[]float32](
 				newTestWAL(t), make(map[uint32][]core.Posting), core.NewIDMapper(),
-				func(v []float32) []float32 { return v }, core.CosineSimilarity,
+				func(v []float32) []float32 { return v }, metric.CosineSimilarity,
 				newTestMmapStore(t, mmapDir))}
 		}},
 		{"hnsw_mmap", func(t *testing.T, mmapDir string) hybridIndex {

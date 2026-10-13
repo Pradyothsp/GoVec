@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 // IndexType selects the vector index algorithm.
@@ -28,14 +28,14 @@ const (
 )
 
 // DistanceMetric selects the similarity measure. The metrics themselves are
-// defined in core, so a new one needs no change here.
-type DistanceMetric = core.MetricName
+// defined in internal/metric, so a new one needs no change here.
+type DistanceMetric = metric.Name
 
 const (
 	// DistanceMetricCosine measures the angle between vectors (ignores magnitude).
-	DistanceMetricCosine = core.MetricCosine
+	DistanceMetricCosine = metric.Cosine
 	// DistanceMetricEuclidean measures straight-line distance between vectors (magnitude-sensitive).
-	DistanceMetricEuclidean = core.MetricEuclidean
+	DistanceMetricEuclidean = metric.Euclidean
 )
 
 // EngineConfig holds vector engine configuration
