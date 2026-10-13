@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -35,18 +36,18 @@ import (
 // could see the other. This test drives one engine through both transports and
 // compares the answers, so the two cannot drift apart again without failing.
 
-// parityServers starts a REST router and a gRPC server over separate engines
-// and returns a caller for each.
-func parityServers(t *testing.T) (rest *gin.Engine, grpcClient pb.GoVecServiceClient) {
+// parityServers starts a REST router and a gRPC server over separate engines,
+// both requiring apiKey when it isn't empty, and returns a caller for each.
+func parityServers(t *testing.T, apiKey string) (rest *gin.Engine, grpcClient pb.GoVecServiceClient) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	restEngine := testutil.NewTestIndex(t)
-	rest = api.SetupRouter(restEngine, "")
+	rest = api.SetupRouter(restEngine, apiKey)
 
 	grpcEngine := testutil.NewTestIndex(t)
 	lis := bufconn.Listen(1024 * 1024)
-	srv := grpcserver.SetupGRPCServer(grpcEngine, "", 4)
+	srv := grpcserver.SetupGRPCServer(grpcEngine, apiKey, 4)
 	go srv.Serve(lis) //nolint:errcheck // test server
 	t.Cleanup(srv.GracefulStop)
 
@@ -96,7 +97,7 @@ func restStatus(t *testing.T, router *gin.Engine, method, path string, body any)
 }
 
 func TestStatusStrings_RESTAndGRPCAgree(t *testing.T) {
-	router, grpcClient := parityServers(t)
+	router, grpcClient := parityServers(t, "")
 	ctx := context.Background()
 	vec := []float32{1, 2, 3}
 
@@ -184,7 +185,7 @@ func TestInfoVersion_RESTAndGRPCAgree(t *testing.T) {
 	release.Version = "v9.9.9-parity"
 	t.Cleanup(func() { release.Version = original })
 
-	router, grpcClient := parityServers(t)
+	router, grpcClient := parityServers(t, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
 	rec := httptest.NewRecorder()
@@ -209,7 +210,7 @@ func TestInfoVersion_RESTAndGRPCAgree(t *testing.T) {
 // reject mismatched lengths as the caller's error. REST used to reject an
 // empty one too, and the two answered a mismatch with different messages.
 func TestSparseVector_RESTAndGRPCAgree(t *testing.T) {
-	router, grpcClient := parityServers(t)
+	router, grpcClient := parityServers(t, "")
 	ctx := context.Background()
 	vec := []float32{1, 2, 3}
 
@@ -242,4 +243,56 @@ func TestSparseVector_RESTAndGRPCAgree(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), "indices and values must have the same length")
 		assert.Contains(t, err.Error(), "indices and values must have the same length")
 	})
+}
+
+// TestAuth_RESTAndGRPCAgree: with an API key set, a request is let in or
+// turned away the same over either transport. They disagreed twice: gRPC
+// demanded the token for its health check, which REST leaves open for load
+// balancers and probes, and gRPC took a bare token with no "Bearer " scheme,
+// which REST refuses.
+func TestAuth_RESTAndGRPCAgree(t *testing.T) {
+	const apiKey = "secret"
+	tests := []struct {
+		name          string
+		health        bool   // the health check rather than a data call
+		authorization string // "" sends no header
+		wantAllowed   bool
+	}{
+		{name: "health without a token", health: true, wantAllowed: true},
+		{name: "data call without a token"},
+		{name: "data call with the token", authorization: "Bearer secret", wantAllowed: true},
+		{name: "data call with the wrong token", authorization: "Bearer wrong"},
+		{name: "data call with the token but no scheme", authorization: "secret"},
+		{name: "data call with another scheme", authorization: "Token secret"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			router, grpcClient := parityServers(t, apiKey)
+			path := "/api/v1/stats"
+			if tt.health {
+				path = "/health"
+			}
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			ctx := context.Background()
+			if tt.authorization != "" {
+				req.Header.Set("Authorization", tt.authorization)
+				ctx = metadata.AppendToOutgoingContext(ctx, "authorization", tt.authorization)
+			}
+			rec := httptest.NewRecorder()
+
+			// Act
+			router.ServeHTTP(rec, req)
+			var grpcErr error
+			if tt.health {
+				_, grpcErr = grpcClient.Health(ctx, &pb.HealthRequest{})
+			} else {
+				_, grpcErr = grpcClient.Stats(ctx, &pb.StatsRequest{})
+			}
+
+			// Assert
+			assert.Equal(t, tt.wantAllowed, rec.Code != http.StatusUnauthorized, "REST: %d", rec.Code)
+			assert.Equal(t, tt.wantAllowed, status.Code(grpcErr) != codes.Unauthenticated, "gRPC: %v", grpcErr)
+		})
+	}
 }

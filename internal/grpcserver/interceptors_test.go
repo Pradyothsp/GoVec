@@ -13,9 +13,14 @@ import (
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
-// The auth interceptors guard unary and streaming RPCs alike.
+// The auth interceptors guard unary and streaming RPCs alike, all but the
+// health check, which stays open for load balancers and probes.
 func TestAuthInterceptors(t *testing.T) {
 	unary := func(ctx context.Context, c pb.GoVecServiceClient) error {
+		_, err := c.Stats(ctx, &pb.StatsRequest{})
+		return err
+	}
+	health := func(ctx context.Context, c pb.GoVecServiceClient) error {
 		_, err := c.Health(ctx, &pb.HealthRequest{})
 		return err
 	}
@@ -38,6 +43,8 @@ func TestAuthInterceptors(t *testing.T) {
 		{"unary: no header", "secret", "", unary, codes.Unauthenticated},
 		{"unary: wrong token", "secret", "Bearer wrong", unary, codes.Unauthenticated},
 		{"unary: correct token", "secret", "Bearer secret", unary, codes.OK},
+		{"unary: token without the Bearer scheme", "secret", "secret", unary, codes.Unauthenticated},
+		{"health: open with a key configured", "secret", "", health, codes.OK},
 		{"stream: wrong token", "secret", "Bearer wrong", streaming, codes.Unauthenticated},
 		{"stream: correct token", "secret", "Bearer secret", streaming, codes.OK},
 	}
