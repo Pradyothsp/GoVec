@@ -53,7 +53,7 @@ With Docker:
 docker run -p 9697:9697 -v govec-data:/data ghcr.io/pradyothsp/govec:latest
 ```
 
-Or from source (Go 1.26+):
+Or from source (Go 1.27+):
 
 ```bash
 git clone https://github.com/Pradyothsp/govec.git

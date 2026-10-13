@@ -3,7 +3,7 @@
 # Runs on the build machine's own architecture ($BUILDPLATFORM) and cross-compiles for the
 # target one. CGO is off, so Go cross-compiles natively -- far faster than building the arm64
 # image under QEMU emulation, which is what a plain `FROM golang` would do on an amd64 runner.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
