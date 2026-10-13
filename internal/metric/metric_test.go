@@ -52,6 +52,41 @@ func checkMetric[T VectorType](t *testing.T, m Metric[T], pairs [][2]T) {
 	}
 }
 
+// A metric that claims to be scale-invariant must score a stretched vector as
+// it scores the original; scalar quantization normalizes on that claim. One
+// that doesn't claim it must not, or it could be normalized too.
+func TestName_ScaleInvariant(t *testing.T) {
+	f32, _ := metricPairs()
+	for _, name := range Names() {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			m, err := Resolve[[]float32](Name(name))
+			require.NoError(t, err)
+
+			a, b := f32[0][0], f32[0][1]
+			stretched := make([]float32, len(a))
+			for i, v := range a {
+				stretched[i] = v * 3
+			}
+
+			// Act
+			original, err := m.Similarity(a, b)
+			require.NoError(t, err)
+			scaled, err := m.Similarity(stretched, b)
+			require.NoError(t, err)
+
+			// Assert
+			if Name(name).ScaleInvariant() {
+				assert.InDelta(t, original, scaled, 1e-5)
+			} else {
+				assert.NotEqual(t, original, scaled)
+			}
+		})
+	}
+
+	assert.False(t, Name("manhattan").ScaleInvariant(), "unknown metrics are not")
+}
+
 // Every metric, for both vector types, must score a match the same whether
 // brute force (Similarity) or HNSW (Score of Distance) found it.
 func TestMetrics_FunctionsAgree(t *testing.T) {

@@ -61,16 +61,18 @@ type Metric[T VectorType] struct {
 // metricDef is one metric for every vector type. Score works on a distance,
 // which is a float32 whatever the vector type, so the two share it.
 type metricDef struct {
-	score   func(distance float32) float32
-	float32 Metric[[]float32]
-	int8    Metric[[]int8]
+	score          func(distance float32) float32
+	scaleInvariant bool // see Name.ScaleInvariant
+	float32        Metric[[]float32]
+	int8           Metric[[]int8]
 }
 
 // metrics is every distance metric GoVec supports. Adding an entry here is
 // all a new metric needs.
 var metrics = map[Name]metricDef{
 	Cosine: {
-		score: func(distance float32) float32 { return 1 - distance },
+		score:          func(distance float32) float32 { return 1 - distance },
+		scaleInvariant: true,
 		float32: Metric[[]float32]{
 			Similarity:     CosineSimilarity,
 			Distance:       CosineDistanceFloat32,
@@ -101,6 +103,15 @@ var metrics = map[Name]metricDef{
 			FromSquaredDistance: FromSquaredEuclideanDistance,
 		},
 	},
+}
+
+// ScaleInvariant reports whether metric n ignores a vector's length, so a
+// vector can be unit-normalized without changing any score. Cosine is; scalar
+// quantization relies on it to bring any vector into its [-1, 1] range.
+// Euclidean isn't: normalizing would change its distances. False for an
+// unknown name.
+func (n Name) ScaleInvariant() bool {
+	return metrics[n].scaleInvariant
 }
 
 // Resolve returns the metric called name, for vectors stored as T.

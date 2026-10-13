@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/metric"
@@ -53,7 +54,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 			InvertedIndex: invertedIndex,
 			IDMapper:      idMapper,
 			metaIndex:     metaIndex,
-			indexType:     "hnsw",
+			indexType:     config.IndexTypeHNSW,
 			wal:           wal,
 			encodeFunc:    encodeFunc,
 			vectorStore:   vectorStore,

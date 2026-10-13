@@ -11,7 +11,9 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -25,12 +27,12 @@ func init() {
 
 // SnapshotHeader contains metadata about the snapshot file format
 type SnapshotHeader struct {
-	Version        int    // snapshotVersion at save time; a load rejects any other
-	Quantization   string // "none" or "scalar"
-	DistanceMetric string // "cosine", etc.
-	IndexType      string // "" or "brute" = VectorIndex; "hnsw" = HNSWIndex
-	Mmap           bool   // vectors live in the mmap store, not inline in the snapshot
-	Dimensions     int    // the index's width, configured or learned; 0 for an empty index that never had one
+	Version        int // snapshotVersion at save time; a load rejects any other
+	Quantization   config.Quantization
+	DistanceMetric metric.Name
+	IndexType      config.IndexType
+	Mmap           bool // vectors live in the mmap store, not inline in the snapshot
+	Dimensions     int  // the index's width, configured or learned; 0 for an empty index that never had one
 }
 
 // snapshotVersion is written into every snapshot header, and a load rejects
@@ -140,8 +142,8 @@ func loadedDimensions(savedDims, configuredDims, currentDims int) (int, error) {
 // fields, the ID mapper and the node records. An HNSW snapshot adds the graph
 // topology after them.
 type snapshotContents[T any] struct {
-	indexType      string // the header's IndexType: "" for brute force, "hnsw"
-	distanceMetric string
+	indexType      config.IndexType
+	distanceMetric metric.Name
 	dimensions     int // the index's current width
 	idMapper       *core.IDMapper
 	nodes          map[uint32]*core.VectorNode[T]
@@ -149,12 +151,12 @@ type snapshotContents[T any] struct {
 }
 
 // quantizationOf is how a snapshot header names the vector type T.
-func quantizationOf[T any]() (string, error) {
+func quantizationOf[T any]() (config.Quantization, error) {
 	switch any(*new(T)).(type) {
 	case []float32:
-		return "none", nil
+		return config.QuantizationNone, nil
 	case []int8:
-		return "scalar", nil
+		return config.QuantizationScalar, nil
 	default:
 		return "", fmt.Errorf("unknown vector type %T", *new(T))
 	}
@@ -236,11 +238,8 @@ func readSnapshotContents[T any](dec *gob.Decoder, c snapshotContents[T], config
 		return 0, fmt.Errorf("failed to decode snapshot header: %w", err)
 	}
 
-	if savedHNSW, wantHNSW := header.IndexType == "hnsw", c.indexType == "hnsw"; savedHNSW != wantHNSW {
-		if savedHNSW {
-			return 0, fmt.Errorf("snapshot was created with HNSW index. Delete data files or change index_type to 'hnsw' in config")
-		}
-		return 0, fmt.Errorf("snapshot was created with brute-force index. Delete data files or change index_type to 'brute' in config")
+	if header.IndexType != c.indexType {
+		return 0, fmt.Errorf("snapshot was created with index_type '%s'. Delete data files or change index_type to '%s' in config", header.IndexType, header.IndexType)
 	}
 	if err := checkSnapshotVersion(header); err != nil {
 		return 0, err
