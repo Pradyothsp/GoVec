@@ -141,7 +141,7 @@ func loadedDimensions(savedDims, configuredDims, currentDims int) (int, error) {
 // snapshotContents is what a snapshot holds for either engine: the header
 // fields, the ID mapper and the node records. An HNSW snapshot adds the graph
 // topology after them.
-type snapshotContents[T any] struct {
+type snapshotContents[T metric.VectorType] struct {
 	indexType      config.IndexType
 	distanceMetric metric.Name
 	dimensions     int // the index's current width
@@ -151,14 +151,12 @@ type snapshotContents[T any] struct {
 }
 
 // quantizationOf is how a snapshot header names the vector type T.
-func quantizationOf[T any]() (config.Quantization, error) {
+func quantizationOf[T metric.VectorType]() config.Quantization {
 	switch any(*new(T)).(type) {
-	case []float32:
-		return config.QuantizationNone, nil
 	case []int8:
-		return config.QuantizationScalar, nil
+		return config.QuantizationScalar
 	default:
-		return "", fmt.Errorf("unknown vector type %T", *new(T))
+		return config.QuantizationNone
 	}
 }
 
@@ -166,11 +164,8 @@ func quantizationOf[T any]() (config.Quantization, error) {
 // snapshot_stream.go). The caller writes anything engine-specific after it,
 // then publishes the snapshot or aborts it. On error nothing is left behind.
 // PRECONDITION: the index write lock is held.
-func startSnapshot[T any](path string, c snapshotContents[T]) (*snapshotWriter, error) {
-	quantType, err := quantizationOf[T]()
-	if err != nil {
-		return nil, err
-	}
+func startSnapshot[T metric.VectorType](path string, c snapshotContents[T]) (*snapshotWriter, error) {
+	quantType := quantizationOf[T]()
 	if err := ensureParentDir(path); err != nil {
 		return nil, err
 	}
@@ -232,7 +227,7 @@ func readSnapshotFile(path string, read func(*gob.Decoder) error) (found bool, e
 // readSnapshotContents reads what startSnapshot wrote into c.idMapper and
 // c.nodes, after checking the header against c and the build. It returns the
 // index's width after the load (see loadedDimensions).
-func readSnapshotContents[T any](dec *gob.Decoder, c snapshotContents[T], configuredDims int) (int, error) {
+func readSnapshotContents[T metric.VectorType](dec *gob.Decoder, c snapshotContents[T], configuredDims int) (int, error) {
 	var header SnapshotHeader
 	if err := dec.Decode(&header); err != nil {
 		return 0, fmt.Errorf("failed to decode snapshot header: %w", err)
@@ -245,10 +240,7 @@ func readSnapshotContents[T any](dec *gob.Decoder, c snapshotContents[T], config
 		return 0, err
 	}
 
-	expectedQuant, err := quantizationOf[T]()
-	if err != nil {
-		return 0, err
-	}
+	expectedQuant := quantizationOf[T]()
 	if header.Quantization != expectedQuant {
 		return 0, fmt.Errorf("snapshot quantization mismatch: config expects '%s' but snapshot is '%s'. Delete data files or change config", expectedQuant, header.Quantization)
 	}

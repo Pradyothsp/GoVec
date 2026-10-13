@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/metric"
 )
 
@@ -31,14 +30,11 @@ func newTestIndex(t testing.TB) *VectorIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() })
 
-	// Create an index with IDMapper, identity encode function and cosine similarity
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
+	return NewVectorIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric})
 }
 
-// testCosineMetric is the cosine metric as an HNSW index built by the factory
-// gets it, for tests that construct one directly.
+// testCosineMetric is the cosine metric, for tests that build an index
+// directly rather than through NewEngine.
 var testCosineMetric = func() metric.Metric[[]float32] {
 	m, err := metric.Resolve[[]float32](metric.Cosine)
 	if err != nil {

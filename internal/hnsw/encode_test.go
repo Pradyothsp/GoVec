@@ -132,8 +132,7 @@ func roundTripTopology[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]
 	buf := &bytes.Buffer{}
 	require.NoError(t, g.ExportTopology(buf))
 
-	loaded := NewGraph[K, V]()
-	loaded.Metric = g.Metric
+	loaded := NewGraph[K, V](g.Metric, Config{})
 	loaded.EfSearch = g.EfSearch
 	require.NoError(t, loaded.ImportTopology(buf, g.Lookup))
 
@@ -158,8 +157,7 @@ func TestGraph_TopologyRoundTrip(t *testing.T) {
 
 func TestGraph_Int8_TopologyRoundTrip(t *testing.T) {
 	// Arrange
-	g1 := NewGraph[uint32, []int8]()
-	g1.Metric = metric.Metric[[]int8]{Distance: metric.CosineDistanceInt8}
+	g1 := NewGraph[uint32, []int8](metric.Metric[[]int8]{Distance: metric.CosineDistanceInt8}, Config{})
 	g1.M = 8
 	g1.Ml = 0.25
 	g1.EfSearch = 16
@@ -196,8 +194,7 @@ func TestGraph_ImportTopology_KeepsSearchSettings(t *testing.T) {
 	buf := &bytes.Buffer{}
 	require.NoError(t, saved.ExportTopology(buf))
 
-	loaded := NewGraph[int, []float32]()
-	loaded.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
+	loaded := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 	loaded.EfSearch = saved.EfSearch + 57
 
 	// Act

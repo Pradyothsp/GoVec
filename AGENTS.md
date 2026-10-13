@@ -43,6 +43,7 @@ internal/
   index/                    Engine interface + both engines, WAL, snapshots, input guards
     engine.go               the Engine interface every transport talks to
     factory.go              picks VectorIndex[T] (brute force) or HNSWIndex[T] from config
+    options.go              Options: everything an engine is built from, in one call
     records.go              what both engines store and every rule for it: insert, delete, WAL order, scoring
     index.go / hnsw_index.go  the two engines: only how each searches (scan or HNSW graph)
     wal.go / wal_record.go  write-ahead log: binary records (length + CRC-32C), replay rules
