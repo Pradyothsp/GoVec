@@ -79,31 +79,3 @@ func TestCosineSimilarityInt8_CloseToFloat32(t *testing.T) {
 	require.NoError(t, errInt8)
 	assert.InDelta(t, scoreFloat, scoreInt8, 0.1)
 }
-
-func BenchmarkCosineSimilarityInt8(b *testing.B) {
-	vec1 := make([]int8, 1536)
-	vec2 := make([]int8, 1536)
-	for i := range vec1 {
-		vec1[i] = int8(i % 127)
-		vec2[i] = int8((i + 1) % 127)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = CosineSimilarityInt8(vec1, vec2)
-	}
-}
-
-func BenchmarkCosineSimilarityFloat32(b *testing.B) {
-	vec1 := make([]float32, 1536)
-	vec2 := make([]float32, 1536)
-	for i := range vec1 {
-		vec1[i] = float32(i) / 1536.0
-		vec2[i] = float32(i+1) / 1536.0
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = CosineSimilarity(vec1, vec2)
-	}
-}
