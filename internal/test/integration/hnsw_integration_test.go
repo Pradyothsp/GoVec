@@ -497,8 +497,8 @@ func (s *HNSWScalarIntegrationSuite) TestHNSW_Scalar_SearchAccuracy_VsFloat32() 
 
 // TestHNSW_SaveLoad_HybridRankingSurvives verifies that each document's sparse
 // vector survives SaveToFile/LoadFromFile, so hybrid search ranks the same
-// after a reload. Sparse scores come from the stored sparse vectors, not the
-// InvertedIndex postings, which nothing reads yet.
+// after a reload: sparse scores come from the inverted index, which every load
+// path rebuilds from the stored sparse vectors.
 func (s *hnswSuiteBase) TestHNSW_SaveLoad_HybridRankingSurvives() {
 	dir := s.T().TempDir()
 	walPath := dir + "/hybrid.wal"

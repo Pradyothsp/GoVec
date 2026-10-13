@@ -77,7 +77,7 @@ func TestInsert_Rejected_LeavesNoTrace(t *testing.T) {
 			assert.Zero(t, engine.Len())
 			r := recordsOf(t, engine)
 			assert.Empty(t, r.metaIndex.Allowlist(tagged), "a rejected record must not be in the metadata index")
-			assert.Empty(t, r.InvertedIndex, "a rejected record must not be in the inverted index")
+			assert.Zero(t, r.inverted.Postings(), "a rejected record must not be in the inverted index")
 
 			require.NoError(t, engine.Insert(ctx, "accepted", []float32{0.5, 0.5}, sparse, tagged), "the empty index must take any width")
 			results, err := engine.Search(ctx, []float32{0.5, 0.5}, core.SparseVector{}, 5, tagged)

@@ -21,8 +21,6 @@ func init() {
 	// Register types for GOB encoding/decoding of metadata
 	gob.Register(map[string]any{})
 	gob.Register([]any{})
-	// Register types for inverted index
-	gob.Register(core.Posting{})
 }
 
 // SnapshotHeader contains metadata about the snapshot file format

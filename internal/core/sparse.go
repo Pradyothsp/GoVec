@@ -34,11 +34,3 @@ func (sv *SparseVector) Dot(other SparseVector) float32 {
 
 	return dot
 }
-
-// Posting represents a single document's score for a specific keyword.
-// Uses uint32 DocID for 77.8% memory reduction (8 bytes vs 36 bytes per posting).
-// External string IDs are translated via IDMapper at API boundaries.
-type Posting struct {
-	DocID  uint32
-	Weight float32
-}

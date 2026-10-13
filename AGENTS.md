@@ -38,7 +38,8 @@ them. Don't commit them.
 cmd/server/main.go          wiring: config → index.NewEngine → REST router + optional gRPC server
 internal/
   config/                   Config structs, YAML loader, GOVEC_* env overrides (env.go), validation
-  core/                     pure domain: models, quantization, filters, metadata index, ID mapping
+  core/                     pure domain: models, quantization, filters, metadata and inverted indexes,
+                            ID mapping
   metric/                   vector math: similarity/distance kernels, and the metric table (metric.go)
   index/                    Engine interface + both engines, WAL, snapshots, input guards
     engine.go               the Engine interface every transport talks to
@@ -117,9 +118,9 @@ narrate what the code does line by line.
 
 ## Traps
 
-- **Don't delete `InvertedIndex` as dead code.** Its postings are maintained but not read yet.
-  It is the foundation for planned hybrid-search work (`docs/roadmap.md`). Snapshots don't store
-  it; every load path rebuilds it.
+- **Hybrid search's sparse scores come only from `core.InvertedIndex`.** Snapshots don't store
+  it, so every load path must rebuild it (`rebuildIndexes`): one that didn't would silently drop
+  every keyword match after a restart. `TestRebuildInvertedIndex_EveryFormat` guards this.
 - **HNSW graph mutation is single-writer.** Batch insert runs each round's graph *searches*
   concurrently, waits at a `sync.WaitGroup` barrier, then applies the *mutations* serially, so
   reads never overlap writes. Don't add concurrent mutation without reading the roadmap entry on
