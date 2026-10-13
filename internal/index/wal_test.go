@@ -262,19 +262,19 @@ func TestReplayWAL_ComplexSequence(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify final state
-	assert.Len(t, idx.Store, 1, "Should have 1 vector (v1 updated, v2 deleted)")
+	assert.Len(t, idx.nodes, 1, "Should have 1 vector (v1 updated, v2 deleted)")
 
-	internalID, err := idx.IDMapper.ToUint32ID("v1")
+	internalID, err := idx.ids.ToUint32ID("v1")
 	require.NoError(t, err)
-	assert.Contains(t, idx.Store, internalID)
-	assert.Equal(t, fixtures.Vec3dThird, idx.Store[internalID].Vector, "Should have updated vector")
+	assert.Contains(t, idx.nodes, internalID)
+	assert.Equal(t, fixtures.Vec3dThird, idx.nodes[internalID].Vector, "Should have updated vector")
 	// Note: JSON unmarshal changes types (int→float64, []string→[]interface{})
 	// Just verify key fields exist
-	assert.Contains(t, idx.Store[internalID].Metadata, "category")
-	assert.Contains(t, idx.Store[internalID].Metadata, "nested")
-	assert.Contains(t, idx.Store[internalID].Metadata, "tags")
+	assert.Contains(t, idx.nodes[internalID].Metadata, "category")
+	assert.Contains(t, idx.nodes[internalID].Metadata, "nested")
+	assert.Contains(t, idx.nodes[internalID].Metadata, "tags")
 
 	// v2 should be deleted
-	_, err = idx.IDMapper.ToUint32ID("v2")
+	_, err = idx.ids.ToUint32ID("v2")
 	assert.Error(t, err, "v2 should be deleted")
 }

@@ -179,7 +179,7 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 	candidates := idx.graph.SearchWithDistance(encodedQuery, fetchCount, graphAllowlist, scaledEf)
 	results := make([]SearchResult, 0, len(candidates))
 	for _, candidate := range candidates {
-		node, ok := idx.Store[candidate.Key]
+		node, ok := idx.nodes[candidate.Key]
 		if !ok || !core.MatchFilter(node.Metadata, filters) {
 			continue
 		}
@@ -258,7 +258,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 		idx.dimensions = dims
 
 		lookupVec := func(key uint32) (T, bool) {
-			node, ok := idx.Store[key]
+			node, ok := idx.nodes[key]
 			if !ok {
 				var zero T
 				return zero, false

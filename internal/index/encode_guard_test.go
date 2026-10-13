@@ -19,16 +19,16 @@ func TestInsert_Float32_StoresExactSizeCopy(t *testing.T) {
 		"brute": func(t *testing.T, vec []float32) []float32 {
 			idx := newTestIndex(t)
 			require.NoError(t, idx.Insert(context.Background(), "a", vec, core.SparseVector{}, nil))
-			id, err := idx.IDMapper.ToUint32ID("a")
+			id, err := idx.ids.ToUint32ID("a")
 			require.NoError(t, err)
-			return idx.Store[id].Vector
+			return idx.nodes[id].Vector
 		},
 		"hnsw": func(t *testing.T, vec []float32) []float32 {
 			idx := newTestHNSWIndex(t)
 			require.NoError(t, idx.Insert(context.Background(), "a", vec, core.SparseVector{}, nil))
-			id, err := idx.IDMapper.ToUint32ID("a")
+			id, err := idx.ids.ToUint32ID("a")
 			require.NoError(t, err)
-			return idx.Store[id].Vector
+			return idx.nodes[id].Vector
 		},
 	}
 

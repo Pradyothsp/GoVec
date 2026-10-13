@@ -281,7 +281,7 @@ func (idx *VectorIndex[T]) SaveToFile(ctx context.Context, path string) error {
 
 	zerolog.Ctx(ctx).Info().
 		Str("path", path).
-		Int("vectors", len(idx.Store)).
+		Int("vectors", len(idx.nodes)).
 		Dur("duration", time.Since(start)).
 		Msg("snapshot saved to disk")
 	return nil
@@ -320,7 +320,7 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) error 
 
 	zerolog.Ctx(ctx).Info().
 		Str("path", path).
-		Int("vectors", len(idx.Store)).
+		Int("vectors", len(idx.nodes)).
 		Dur("duration", time.Since(start)).
 		Msg("snapshot loaded from disk")
 	return nil
