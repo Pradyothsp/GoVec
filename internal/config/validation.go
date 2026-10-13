@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // Validate validates the entire configuration
@@ -110,8 +112,8 @@ func ValidateEngineConfig(cfg EngineConfig) error {
 		return fmt.Errorf("invalid quantization: '%s', must be 'none' or 'scalar'", cfg.Quantization)
 	}
 
-	if cfg.DistanceMetric != DistanceMetricCosine && cfg.DistanceMetric != DistanceMetricEuclidean {
-		return fmt.Errorf("invalid distance metric: '%s', must be 'cosine' or 'euclidean'", cfg.DistanceMetric)
+	if !core.IsMetric(cfg.DistanceMetric) {
+		return fmt.Errorf("invalid distance metric: '%s', must be one of: %s", cfg.DistanceMetric, strings.Join(core.MetricNames(), ", "))
 	}
 
 	// hnsw_ef_construction must be at least hnsw_m: the construction-time search

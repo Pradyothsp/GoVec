@@ -1,13 +1,16 @@
-package hnsw
+package core
 
 import (
 	"math"
-	"reflect"
 
 	"github.com/viterin/vek/vek32"
-
-	"github.com/Pradyothsp/govec/internal/core"
 )
+
+// VectorType is every type a vector can be stored as: []float32 unquantized,
+// []int8 under scalar quantization.
+type VectorType interface {
+	[]float32 | []int8
+}
 
 // DistanceFunc is a function that computes the distance between two vectors of type V.
 // Lower values indicate closer vectors.
@@ -21,17 +24,17 @@ func CosineDistanceFloat32(a, b []float32) float32 {
 
 // EuclideanDistanceFloat32 computes the Euclidean distance between two float32 vectors.
 func EuclideanDistanceFloat32(a, b []float32) float32 {
-	return float32(math.Sqrt(float64(core.SquaredEuclideanFloat32(a, b))))
+	return float32(math.Sqrt(float64(SquaredEuclideanFloat32(a, b))))
 }
 
 // SquaredEuclideanDistanceFloat32 is EuclideanDistanceFloat32 without the
-// final sqrt. Used as Graph.SquaredDistance for Euclidean-metric float32
-// graphs: sqrt is monotonic, so ranking on squared distance produces
+// final sqrt. Euclidean's Metric.SquaredDistance for float32
+// vectors: sqrt is monotonic, so ranking on squared distance produces
 // identical ordering to ranking on real distance while skipping sqrt() on
 // every internal comparison -- only the k results a query actually returns
 // need the real value back, via FromSquaredEuclideanDistance.
 func SquaredEuclideanDistanceFloat32(a, b []float32) float32 {
-	return core.SquaredEuclideanFloat32(a, b)
+	return SquaredEuclideanFloat32(a, b)
 }
 
 // FromSquaredEuclideanDistance converts a SquaredEuclideanDistanceFloat32/
@@ -43,10 +46,9 @@ func FromSquaredEuclideanDistance(sq float32) float32 {
 }
 
 // CosineDistanceInt8 computes the cosine distance between two int8 vectors.
-// Reuses internal/core implementation which uses int64 intermediate calculations to prevent overflow.
+// Reuses CosineSimilarityInt8, which accumulates in int64 to prevent overflow.
 func CosineDistanceInt8(a, b []int8) float32 {
-	// Use core implementation (returns similarity, error never occurs in valid HNSW graph)
-	similarity, err := core.CosineSimilarityInt8(a, b)
+	similarity, err := CosineSimilarityInt8(a, b)
 	if err != nil {
 		// This should never happen in a well-formed HNSW graph (dimensions always match)
 		// Return maximum distance as fallback
@@ -78,19 +80,19 @@ func SquaredEuclideanDistanceInt8(a, b []int8) float32 {
 }
 
 // PrecomputeSquaredNormFloat32 computes v's squared L2 norm (sum of
-// squares). Used as Graph.Precompute for cosine-metric float32 graphs (see
+// squares): cosine's Metric.Precompute for float32 vectors (see
 // CachedCosineDistanceFloat32) -- cosine's distance formula needs each
 // vector's norm as a value standalone from any particular comparison, and
 // that norm never changes once the vector is stored, so computing it once
 // here and caching it (rather than inside every single distance() call, as
 // vek32.CosineSimilarity does today) removes real, measured redundant work
 // from HNSW's hottest loop. float64 accumulation, not float32: see
-// layerNode.precomputed's doc comment for why (written for []int8's larger
+// the HNSW graph's layerNode.precomputed doc comment for why (written for []int8's larger
 // magnitudes, but the same headroom argument applies here with room to
 // spare, since float32 inputs are typically much smaller-magnitude than
 // int8's raw +-127 range).
 func PrecomputeSquaredNormFloat32(v []float32) float64 {
-	return core.DotFloat32(v, v)
+	return DotFloat32(v, v)
 }
 
 // CachedCosineDistanceFloat32 is CosineDistanceFloat32's cache-aware
@@ -103,15 +105,15 @@ func PrecomputeSquaredNormFloat32(v []float32) float64 {
 // answer, not a place to change what that answer is.
 func CachedCosineDistanceFloat32(aVec []float32, aCache float64, bVec []float32, bCache float64) float32 {
 	magnitude := math.Sqrt(aCache) * math.Sqrt(bCache)
-	return float32(1 - core.DotFloat32(aVec, bVec)/magnitude)
+	return float32(1 - DotFloat32(aVec, bVec)/magnitude)
 }
 
 // PrecomputeSquaredNormInt8 computes v's squared L2 norm (sum of squares),
-// accumulated as int64 like core.CosineSimilarityInt8's own normA/normB --
+// accumulated as int64 like CosineSimilarityInt8's own normA/normB --
 // int8 values squared and summed can overflow int8/int16 almost
-// immediately at realistic dimension counts, see layerNode.precomputed's
-// doc comment -- then converted to float64 to match Graph.Precompute's
-// signature. That conversion is exact: float64 represents any int64 this
+// immediately at realistic dimension counts, see the HNSW graph's
+// layerNode.precomputed doc comment -- then converted to float64 to match
+// Metric.Precompute's signature. That conversion is exact: float64 represents any int64 this
 // codebase will realistically ever produce here without rounding.
 func PrecomputeSquaredNormInt8(v []int8) float64 {
 	var sum int64
@@ -122,7 +124,7 @@ func PrecomputeSquaredNormInt8(v []int8) float64 {
 }
 
 // CachedCosineDistanceInt8 is CosineDistanceInt8's cache-aware counterpart,
-// mirroring core.CosineSimilarityInt8 exactly -- including its explicit
+// mirroring CosineSimilarityInt8 exactly -- including its explicit
 // zero-vector guard (return the maximum distance, 1.0, rather than let a
 // zero norm divide-by-zero into NaN) and its cast order (divide as float32,
 // same as the uncached path, rather than accumulating the whole computation
@@ -140,60 +142,4 @@ func CachedCosineDistanceInt8(aVec []int8, aCache float64, bVec []int8, bCache f
 	magnitude := math.Sqrt(aCache) * math.Sqrt(bCache)
 	similarity := float32(dot) / float32(magnitude)
 	return 1.0 - similarity
-}
-
-// distanceFuncsFloat32 is a registry of known float32 distance functions, mapped by name.
-// This registry is essential for serializing and deserializing Graph instances,
-// allowing the correct distance function to be identified and restored during import.
-var distanceFuncsFloat32 = map[string]DistanceFunc[[]float32]{
-	"euclidean_float32": EuclideanDistanceFloat32,
-	"cosine_float32":    CosineDistanceFloat32,
-}
-
-// distanceFuncsInt8 is a registry of known int8 distance functions, mapped by name.
-// Similar to distanceFuncsFloat32, this registry supports persistence operations
-// by mapping function names to their implementations for int8 vectors.
-var distanceFuncsInt8 = map[string]DistanceFunc[[]int8]{
-	"euclidean_int8": EuclideanDistanceInt8,
-	"cosine_int8":    CosineDistanceInt8,
-}
-
-// distanceFuncToNameFloat32 looks up the registered name for a given float32 distance function.
-// It is used during graph export to store a string identifier for the distance function.
-// Returns the name and true if found, otherwise an empty string and false.
-func distanceFuncToNameFloat32(fn DistanceFunc[[]float32]) (string, bool) {
-	for name, f := range distanceFuncsFloat32 {
-		fnptr := reflect.ValueOf(fn).Pointer()
-		fptr := reflect.ValueOf(f).Pointer()
-		if fptr == fnptr {
-			return name, true
-		}
-	}
-	return "", false
-}
-
-// distanceFuncToNameInt8 looks up the registered name for a given int8 distance function.
-// Similar to its float32 counterpart, it's used during graph export for persistence.
-// Returns the name and true if found, otherwise an empty string and false.
-func distanceFuncToNameInt8(fn DistanceFunc[[]int8]) (string, bool) {
-	for name, f := range distanceFuncsInt8 {
-		fnptr := reflect.ValueOf(fn).Pointer()
-		fptr := reflect.ValueOf(f).Pointer()
-		if fptr == fnptr {
-			return name, true
-		}
-	}
-	return "", false
-}
-
-// RegisterDistanceFuncFloat32 registers a float32 distance function with a name.
-// A distance function must be registered here before a graph can be exported and imported.
-func RegisterDistanceFuncFloat32(name string, fn DistanceFunc[[]float32]) {
-	distanceFuncsFloat32[name] = fn
-}
-
-// RegisterDistanceFuncInt8 registers an int8 distance function with a name.
-// A distance function must be registered here before a graph can be exported and imported.
-func RegisterDistanceFuncInt8(name string, fn DistanceFunc[[]int8]) {
-	distanceFuncsInt8[name] = fn
 }

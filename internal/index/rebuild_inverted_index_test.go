@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -47,7 +46,7 @@ func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 			return hnswHybrid{NewHNSWIndex[[]float32](
 				newTestWAL(t), make(map[uint32][]core.Posting), core.NewIDMapper(),
 				func(v []float32) []float32 { return v },
-				hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200,
+				testCosineMetric, 16, 20, 200,
 				core.NewMetadataIndex(), newTestMmapStore(t, mmapDir))}
 		}},
 	}

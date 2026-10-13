@@ -1,7 +1,6 @@
 package hnsw
 
 import (
-	"bytes"
 	"cmp"
 	"math/rand"
 	"runtime"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 func Test_maxLevel(t *testing.T) {
@@ -74,7 +75,7 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, noCacheDist(EuclideanDistanceFloat32), 0, nil, nil)
+	best := entry.search(2, 4, []float32{4}, noCacheDist(core.EuclideanDistanceFloat32), 0, nil, nil)
 
 	// Node 3 (value 3) and node 5 (value 5) are both exactly distance 1 from
 	// the target (4) -- a genuine tie, so either is a valid second-nearest.
@@ -86,7 +87,7 @@ func Test_layerNode_search(t *testing.T) {
 func newTestGraph[K cmp.Ordered]() *Graph[K, []float32] {
 	return &Graph[K, []float32]{
 		M:              6,
-		Distance:       EuclideanDistanceFloat32,
+		Metric:         core.Metric[[]float32]{Distance: core.EuclideanDistanceFloat32},
 		Ml:             0.5,
 		EfSearch:       20,
 		EfConstruction: 200,
@@ -216,7 +217,7 @@ func Test_selectNeighborsHeuristic_PrefersDiversityOverRawDistance(t *testing.T)
 	b := candidate(2, []float32{1.1, 0}, 1.1)
 	c := candidate(3, []float32{0, 2}, 2.0)
 
-	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{b, a, c}, 2, noCacheDist(EuclideanDistanceFloat32))
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{b, a, c}, 2, noCacheDist(core.EuclideanDistanceFloat32))
 
 	require.Len(t, selected, 2)
 	assert.Equal(t, 1, selected[0].Key, "nearest candidate (A) should always be selected first")
@@ -233,7 +234,7 @@ func Test_selectNeighborsHeuristic_NoBackfillWhenCandidatesAreRedundant(t *testi
 	a := candidate(1, []float32{1, 0}, 1.0)
 	b := candidate(2, []float32{1.1, 0}, 1.1)
 
-	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 2, noCacheDist(EuclideanDistanceFloat32))
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 2, noCacheDist(core.EuclideanDistanceFloat32))
 
 	require.Len(t, selected, 1, "B is redundant given A, and there's no third candidate to backfill with")
 	assert.Equal(t, 1, selected[0].Key)
@@ -245,7 +246,7 @@ func Test_selectNeighborsHeuristic_FewerCandidatesThanMReturnsAllUnpruned(t *tes
 	a := candidate(1, []float32{1, 0}, 1.0)
 	b := candidate(2, []float32{1.1, 0}, 1.1) // would be pruned as redundant if the pool were large enough to prune
 
-	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 5, noCacheDist(EuclideanDistanceFloat32))
+	selected := selectNeighborsHeuristic([]searchCandidate[int, []float32]{a, b}, 5, noCacheDist(core.EuclideanDistanceFloat32))
 
 	require.Len(t, selected, 2, "fewer candidates than m means nothing to prune, matching hnswlib's size() < M early return")
 }
@@ -260,7 +261,7 @@ func Benchmark_HSNW(b *testing.B) {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
 			g := Graph[int, []float32]{}
 			g.Ml = 0.5
-			g.Distance = EuclideanDistanceFloat32
+			g.Metric = core.Metric[[]float32]{Distance: core.EuclideanDistanceFloat32}
 			for i := 0; i < size; i++ {
 				g.Add(Node[int, []float32]{
 					Key:   i,
@@ -316,7 +317,7 @@ func Benchmark_HNSW_1536(b *testing.B) {
 
 func TestGraph_DefaultCosine(t *testing.T) {
 	g := NewGraph[int, []float32]()
-	g.Distance = CosineDistanceFloat32
+	g.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
 	g.Add(
 		Node[int, []float32]{Key: 1, Value: []float32{1, 1}},
 		Node[int, []float32]{Key: 2, Value: []float32{0, 1}},
@@ -342,7 +343,7 @@ func TestGraph_RemoveAllNodes(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		g := NewGraph[int, []float32]()
-		g.Distance = CosineDistanceFloat32
+		g.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
 		g.Add(MakeNode(1, vec))
 		g.Delete(1)
 		g.Add(MakeNode(1, vec))
@@ -354,7 +355,7 @@ func TestGraph_Int8_AddSearch(t *testing.T) {
 	t.Parallel()
 
 	g := NewGraph[int, []int8]()
-	g.Distance = CosineDistanceInt8
+	g.Metric = core.Metric[[]int8]{Distance: core.CosineDistanceInt8}
 	g.M = 6
 	g.Ml = 0.5
 	g.EfSearch = 20
@@ -384,54 +385,6 @@ func TestGraph_Int8_AddSearch(t *testing.T) {
 	}
 	require.True(t, foundKeys[1], "Should find node 1")
 	require.True(t, foundKeys[2] || foundKeys[5], "Should find node 2 or 5")
-}
-
-// TestGraph_Int8_ExportImport tests persistence with int8 vectors
-func TestGraph_Int8_ExportImport(t *testing.T) {
-	g1 := NewGraph[uint32, []int8]()
-	g1.Distance = CosineDistanceInt8
-	g1.M = 8
-	g1.Ml = 0.25
-	g1.EfSearch = 16
-
-	// Add test vectors
-	for i := uint32(0); i < 50; i++ {
-		vec := make([]int8, 128)
-		for j := range vec {
-			vec[j] = int8((i*7+uint32(j)*3)%256 - 128)
-		}
-		g1.Add(Node[uint32, []int8]{
-			Key:   i,
-			Value: vec,
-		})
-	}
-
-	// Export to buffer
-	buf := &bytes.Buffer{}
-	err := g1.Export(buf)
-	require.NoError(t, err)
-
-	// Import into new graph
-	g2 := NewGraph[uint32, []int8]()
-	err = g2.Import(buf)
-	require.NoError(t, err)
-
-	// Verify graphs are equivalent
-	require.Equal(t, g1.Len(), g2.Len())
-	require.Equal(t, g1.M, g2.M)
-	require.Equal(t, g1.Ml, g2.Ml)
-	require.Equal(t, g1.EfSearch, g2.EfSearch)
-
-	// Verify search results are identical
-	query := make([]int8, 128)
-	for j := range query {
-		query[j] = int8((j*5)%256 - 128)
-	}
-
-	results1 := g1.Search(query, 10)
-	results2 := g2.Search(query, 10)
-
-	require.Equal(t, results1, results2)
 }
 
 // TestGraph_Int8_DistanceAccuracy compares int8 vs float32 distance calculations
@@ -482,8 +435,8 @@ func TestGraph_SearchWithDistance_SquaredRanking_ReturnsRealDistance(t *testing.
 	build := func(useSquaredRanking bool) *Graph[int, []float32] {
 		g := newTestGraph[int]()
 		if useSquaredRanking {
-			g.SquaredDistance = SquaredEuclideanDistanceFloat32
-			g.FromSquaredDistance = FromSquaredEuclideanDistance
+			g.Metric.SquaredDistance = core.SquaredEuclideanDistanceFloat32
+			g.Metric.FromSquaredDistance = core.FromSquaredEuclideanDistance
 		}
 		for i := 1; i <= 20; i++ {
 			g.Add(MakeNode(i, []float32{float32(i)}))
@@ -505,8 +458,8 @@ func TestGraph_SearchWithDistance_SquaredRanking_ReturnsRealDistance(t *testing.
 		// The returned Distance must be the REAL Euclidean distance, not the
 		// squared value SquaredDistance computed internally -- this is the
 		// whole point of FromSquaredDistance's conversion step. Recompute
-		// independently via EuclideanDistanceFloat32 as the ground truth.
-		want := EuclideanDistanceFloat32([]float32{10.5}, []float32{float32(squaredResults[i].Key)})
+		// independently via core.EuclideanDistanceFloat32 as the ground truth.
+		want := core.EuclideanDistanceFloat32([]float32{10.5}, []float32{float32(squaredResults[i].Key)})
 		assert.InDelta(t, want, squaredResults[i].Distance, 1e-4,
 			"SearchResult.Distance must be the real distance, not the squared ranking value")
 		assert.InDelta(t, plainResults[i].Distance, squaredResults[i].Distance, 1e-4,
@@ -524,7 +477,7 @@ func TestGraph_SearchWithDistance_ConnectivityPreservation(t *testing.T) {
 	// lower-numbered nodes act as stepping stones.
 	g := &Graph[int, []float32]{
 		M:        2,
-		Distance: EuclideanDistanceFloat32,
+		Metric:   core.Metric[[]float32]{Distance: core.EuclideanDistanceFloat32},
 		Ml:       0.5,
 		EfSearch: 50, // high efSearch to ensure thorough exploration
 		Rng:      rand.New(rand.NewSource(42)),
@@ -552,8 +505,8 @@ func TestGraph_Int8_DistanceAccuracy(t *testing.T) {
 	aI8 := []int8{102, 76, 0, -51} // 0.8*127≈102, 0.6*127≈76, -0.4*127≈-51
 	bI8 := []int8{89, 89, 13, -38} // 0.7*127≈89, 0.1*127≈13, -0.3*127≈-38
 
-	distFloat := CosineDistanceFloat32(aF32, bF32)
-	distInt8 := CosineDistanceInt8(aI8, bI8)
+	distFloat := core.CosineDistanceFloat32(aF32, bF32)
+	distInt8 := core.CosineDistanceInt8(aI8, bI8)
 
 	// Distance should be very close (within 0.01)
 	require.InDelta(t, distFloat, distInt8, 0.01,
@@ -586,7 +539,7 @@ func TestGraph_EfConstruction_AffectsGraphQuality(t *testing.T) {
 		g.M = 6 // deliberately low, so construction quality (not connection count) dominates recall
 		g.EfConstruction = efConstruction
 		g.EfSearch = 200 // held generous and constant across both graphs
-		g.Distance = CosineDistanceFloat32
+		g.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
 		g.Rng = rand.New(rand.NewSource(1)) // deterministic level assignment for a fair comparison
 
 		nodes := make([]Node[int, []float32], n)
@@ -636,7 +589,7 @@ func bruteForceKNN(vectors [][]float32, excludeIdx int, q []float32, k int) map[
 		if j == excludeIdx {
 			continue
 		}
-		cands = append(cands, cand{j, CosineDistanceFloat32(q, v)})
+		cands = append(cands, cand{j, core.CosineDistanceFloat32(q, v)})
 	}
 	sort.Slice(cands, func(a, b int) bool { return cands[a].dist < cands[b].dist })
 
@@ -698,7 +651,7 @@ func TestGraph_BatchParallelAdd_Race(t *testing.T) {
 	g.M = 12
 	g.EfConstruction = 64
 	g.EfSearch = 32
-	g.Distance = CosineDistanceFloat32
+	g.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
 	g.Rng = rand.New(rand.NewSource(7))
 	g.BatchParallelism = runtime.GOMAXPROCS(0)
 	g.BatchParallelThreshold = 1
@@ -740,7 +693,7 @@ func TestGraph_AddRound_EmptyLayerHazard(t *testing.T) {
 	g.Ml = 0.9 // deliberately high: pushes many nodes to non-zero levels, maximizing how often multiple items in round 1 fight over the same new layer
 	g.EfConstruction = 32
 	g.EfSearch = 16
-	g.Distance = CosineDistanceFloat32
+	g.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
 	g.Rng = rand.New(rand.NewSource(11))
 	g.BatchParallelism = n // >= n: the whole batch is one round
 	g.BatchParallelThreshold = 1
@@ -790,7 +743,7 @@ func TestGraph_BatchParallelAdd_StructuralSoundness(t *testing.T) {
 		g.M = 10
 		g.EfConstruction = 48
 		g.EfSearch = 24
-		g.Distance = CosineDistanceFloat32
+		g.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
 		g.Rng = rand.New(rand.NewSource(1)) // same seed -- same level assignment sequence either way
 		if parallel {
 			g.BatchParallelism = runtime.GOMAXPROCS(0)

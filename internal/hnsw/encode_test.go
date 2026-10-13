@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 func Test_binaryVarint(t *testing.T) {
@@ -83,8 +85,8 @@ func requireGraphApproxEquals[K cmp.Ordered, V VectorType](t *testing.T, g1, g2 
 		a2.Connectivity(),
 	)
 
-	require.NotNil(t, g1.Distance)
-	require.NotNil(t, g2.Distance)
+	require.NotNil(t, g1.Metric.Distance)
+	require.NotNil(t, g2.Metric.Distance)
 	// Test distance function by creating sample vectors of the correct type V
 	var testVec1, testVec2 V
 	switch any(testVec1).(type) {
@@ -97,8 +99,8 @@ func requireGraphApproxEquals[K cmp.Ordered, V VectorType](t *testing.T, g1, g2 
 	}
 	require.Equal(
 		t,
-		g1.Distance(testVec1, testVec2),
-		g2.Distance(testVec1, testVec2),
+		g1.Metric.Distance(testVec1, testVec2),
+		g2.Metric.Distance(testVec1, testVec2),
 	)
 
 	require.Equal(t,
@@ -120,84 +122,131 @@ func requireGraphApproxEquals[K cmp.Ordered, V VectorType](t *testing.T, g1, g2 
 	require.NotNil(t, g2.Rng)
 }
 
-func TestGraph_ExportImport(t *testing.T) {
-	g1 := newTestGraph[int]()
-	for i := 0; i < 128; i++ {
-		g1.Add(
-			Node[int, []float32]{
-				i, randFloats(1),
-			},
-		)
-	}
+// roundTripTopology exports g's topology and imports it into a fresh graph
+// that gets its vectors from g, as GoVec's snapshot load does from its records.
+// The topology carries no search settings, so the fresh graph is given g's,
+// as the caller of a real load does.
+func roundTripTopology[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) *Graph[K, V] {
+	t.Helper()
 
 	buf := &bytes.Buffer{}
-	err := g1.Export(buf)
-	require.NoError(t, err)
+	require.NoError(t, g.ExportTopology(buf))
 
-	// Don't use newTestGraph to ensure parameters
-	// are imported.
-	g2 := &Graph[int, []float32]{}
-	err = g2.Import(buf)
-	require.NoError(t, err)
+	loaded := NewGraph[K, V]()
+	loaded.Metric = g.Metric
+	loaded.EfSearch = g.EfSearch
+	require.NoError(t, loaded.ImportTopology(buf, g.Lookup))
 
+	return loaded
+}
+
+func TestGraph_TopologyRoundTrip(t *testing.T) {
+	// Arrange
+	g1 := newTestGraph[int]()
+	for i := 0; i < 128; i++ {
+		g1.Add(Node[int, []float32]{i, randFloats(1)})
+	}
+
+	// Act
+	g2 := roundTripTopology(t, g1)
+
+	// Assert
 	requireGraphApproxEquals(t, g1, g2)
-
-	n1 := g1.Search(
-		[]float32{0.5},
-		10,
-	)
-
-	n2 := g2.Search(
-		[]float32{0.5},
-		10,
-	)
-
-	require.Equal(t, n1, n2)
-
-	verifyGraphNodes(t, g1)
+	require.Equal(t, g1.Search([]float32{0.5}, 10), g2.Search([]float32{0.5}, 10))
 	verifyGraphNodes(t, g2)
 }
 
-func TestSavedGraph(t *testing.T) {
-	dir := t.TempDir()
-
-	g1, err := LoadSavedGraph[int, []float32](dir + "/graph")
-	require.NoError(t, err)
-	require.Equal(t, 0, g1.Len())
-	g1.Distance = EuclideanDistanceFloat32
-	for i := 0; i < 128; i++ {
-		g1.Add(
-			Node[int, []float32]{
-				i, randFloats(1),
-			},
-		)
+func TestGraph_Int8_TopologyRoundTrip(t *testing.T) {
+	// Arrange
+	g1 := NewGraph[uint32, []int8]()
+	g1.Metric = core.Metric[[]int8]{Distance: core.CosineDistanceInt8}
+	g1.M = 8
+	g1.Ml = 0.25
+	g1.EfSearch = 16
+	for i := uint32(0); i < 50; i++ {
+		vec := make([]int8, 128)
+		for j := range vec {
+			vec[j] = int8((i*7+uint32(j)*3)%256 - 128)
+		}
+		g1.Add(Node[uint32, []int8]{Key: i, Value: vec})
 	}
 
-	err = g1.Save()
-	require.NoError(t, err)
+	query := make([]int8, 128)
+	for j := range query {
+		query[j] = int8((j*5)%256 - 128)
+	}
 
-	g2, err := LoadSavedGraph[int, []float32](dir + "/graph")
-	require.NoError(t, err)
+	// Act
+	g2 := roundTripTopology(t, g1)
 
-	requireGraphApproxEquals(t, g1.Graph, g2.Graph)
+	// Assert
+	requireGraphApproxEquals(t, g1, g2)
+	require.Equal(t, g1.Search(query, 10), g2.Search(query, 10))
+}
+
+// The topology restores the graph's structure, not how it is searched: the
+// loading graph's distance function and EfSearch survive the import.
+func TestGraph_ImportTopology_KeepsSearchSettings(t *testing.T) {
+	// Arrange
+	saved := newTestGraph[int]()
+	for i := 0; i < 10; i++ {
+		saved.Add(Node[int, []float32]{i, randFloats(1)})
+	}
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, saved.ExportTopology(buf))
+
+	loaded := NewGraph[int, []float32]()
+	loaded.Metric = core.Metric[[]float32]{Distance: core.CosineDistanceFloat32}
+	loaded.EfSearch = saved.EfSearch + 57
+
+	// Act
+	err := loaded.ImportTopology(buf, saved.Lookup)
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, saved.EfSearch+57, loaded.EfSearch)
+	require.Equal(t, core.CosineDistanceFloat32([]float32{1}, []float32{0.5}), loaded.Metric.Distance([]float32{1}, []float32{0.5}))
+	require.Equal(t, saved.M, loaded.M)
+	require.Equal(t, saved.Ml, loaded.Ml)
+}
+
+func TestGraph_ImportTopology_MissingVector(t *testing.T) {
+	// Arrange
+	g1 := newTestGraph[int]()
+	for i := 0; i < 10; i++ {
+		g1.Add(Node[int, []float32]{i, randFloats(1)})
+	}
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, g1.ExportTopology(buf))
+
+	noVectors := func(int) ([]float32, bool) { return nil, false }
+
+	// Act
+	err := newTestGraph[int]().ImportTopology(buf, noVectors)
+
+	// Assert
+	require.ErrorContains(t, err, "no vector found")
 }
 
 const benchGraphSize = 100
 
-func BenchmarkGraph_Import(b *testing.B) {
-	b.ReportAllocs()
+func newBenchGraph() *Graph[int, []float32] {
 	g := newTestGraph[int]()
 	for i := 0; i < benchGraphSize; i++ {
-		g.Add(
-			Node[int, []float32]{
-				i, randFloats(256),
-			},
-		)
+		g.Add(Node[int, []float32]{i, randFloats(256)})
 	}
 
+	return g
+}
+
+func BenchmarkGraph_ImportTopology(b *testing.B) {
+	b.ReportAllocs()
+	g := newBenchGraph()
+
 	buf := &bytes.Buffer{}
-	err := g.Export(buf)
-	require.NoError(b, err)
+	require.NoError(b, g.ExportTopology(buf))
 
 	b.ResetTimer()
 	b.SetBytes(int64(buf.Len()))
@@ -205,32 +254,22 @@ func BenchmarkGraph_Import(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		rdr := bytes.NewReader(buf.Bytes())
-		g := newTestGraph[int]()
+		loaded := newTestGraph[int]()
 		b.StartTimer()
-		err = g.Import(rdr)
-		require.NoError(b, err)
+		require.NoError(b, loaded.ImportTopology(rdr, g.Lookup))
 	}
 }
 
-func BenchmarkGraph_Export(b *testing.B) {
+func BenchmarkGraph_ExportTopology(b *testing.B) {
 	b.ReportAllocs()
-	g := newTestGraph[int]()
-	for i := 0; i < benchGraphSize; i++ {
-		g.Add(
-			Node[int, []float32]{
-				i, randFloats(256),
-			},
-		)
-	}
+	g := newBenchGraph()
 
 	var buf bytes.Buffer
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := g.Export(&buf)
-		require.NoError(b, err)
+		require.NoError(b, g.ExportTopology(&buf))
 		if i == 0 {
-			ln := buf.Len()
-			b.SetBytes(int64(ln))
+			b.SetBytes(int64(buf.Len()))
 		}
 		buf.Reset()
 	}

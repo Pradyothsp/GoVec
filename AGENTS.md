@@ -38,7 +38,8 @@ them. Don't commit them.
 cmd/server/main.go          wiring: config → index.NewEngine → REST router + optional gRPC server
 internal/
   config/                   Config structs, YAML loader, GOVEC_* env overrides (env.go), validation
-  core/                     pure domain: models, similarity math, quantization, filters, metadata index
+  core/                     pure domain: models, distance kernels, metrics (metric.go), quantization,
+                            filters, metadata index
   index/                    Engine interface + both engines, WAL, snapshots, input guards
     engine.go               the Engine interface every transport talks to
     factory.go              picks VectorIndex[T] (brute force) or HNSWIndex[T] from config
@@ -49,7 +50,7 @@ internal/
     snapshot_stream.go      snapshot layout: streamed records, vectors once, HNSW topology only
     dimension_guard.go      input checks (width, sparse) + sentinels + IsInvalidVectorError
     encode_guard.go         quantization preconditions (prepareForEncode)
-  hnsw/                     vendored fork of an upstream HNSW library, made generic over T
+  hnsw/                     GoVec's HNSW graph (began as coder/hnsw), generic over T, runs on a core.Metric
   storage/                  mmap-backed store (unix, plus a stub for other platforms)
   api/                      REST layer (Gin): router, handlers/, middleware/, response/
   grpcserver/               gRPC layer; convert/ maps protobuf ↔ core types
@@ -127,8 +128,14 @@ narrate what the code does line by line.
 - **Filtered HNSW search can return fewer than `k`.** This is known and parked. See
   `docs/hnsw-filtered-search-shortfall.md` before you touch filtering or "fix" a short result
   in a test.
-- **`internal/hnsw` is a fork.** Keep changes there minimal and generic. GoVec-specific logic
-  belongs in `internal/index`.
+- **`internal/hnsw` is a graph algorithm, nothing more.** It began as coder/hnsw but is GoVec's
+  own code now, so change it freely. It must not learn about records, the WAL, config or metadata:
+  GoVec-specific logic belongs in `internal/index`.
+- **A distance metric lives in one place.** Each metric is one entry in `core/metric.go`'s
+  `metrics` table: brute force's `Similarity`, HNSW's `Distance` and optional pairs, and the
+  `Score` that puts a distance on the similarity scale. `TestMetrics_FunctionsAgree` checks they
+  agree. Don't add a switch on a metric name elsewhere; the one left, in `encode_guard.go`'s
+  quantization checks, is due to move into the metric.
 
 ## Before you finish
 
