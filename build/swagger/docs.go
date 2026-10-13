@@ -367,7 +367,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/index.SearchResult"
+                                                "$ref": "#/definitions/handlers.SearchResultResponse"
                                             }
                                         }
                                     }
@@ -431,7 +431,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/index.VectorRecord"
+                                            "$ref": "#/definitions/handlers.VectorResponse"
                                         }
                                     }
                                 }
@@ -719,16 +719,7 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.StatsResponse": {
-            "type": "object",
-            "properties": {
-                "vector_count": {
-                    "type": "integer",
-                    "example": 42
-                }
-            }
-        },
-        "index.SearchResult": {
+        "handlers.SearchResultResponse": {
             "type": "object",
             "properties": {
                 "id": {
@@ -744,7 +735,16 @@ const docTemplate = `{
                 }
             }
         },
-        "index.VectorRecord": {
+        "handlers.StatsResponse": {
+            "type": "object",
+            "properties": {
+                "vector_count": {
+                    "type": "integer",
+                    "example": 42
+                }
+            }
+        },
+        "handlers.VectorResponse": {
             "type": "object",
             "properties": {
                 "id": {

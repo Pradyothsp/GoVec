@@ -42,8 +42,13 @@ func (h *SystemHandler) Stats(c *gin.Context) {
 // InfoResponse is the JSON response for the info endpoint: the engine's configuration plus the
 // server release, so a client can ask a running server which version it is.
 type InfoResponse struct {
-	index.EngineInfo
-	Version string `json:"version" example:"v0.1.0"`
+	Quantization   string `json:"quantization" example:"none"`
+	IndexType      string `json:"index_type" example:"brute"`
+	DistanceMetric string `json:"distance_metric" example:"cosine"`
+	Dimensions     int    `json:"dimensions" example:"0"`
+	VectorCount    int    `json:"vector_count" example:"0"`
+	EnableMmap     bool   `json:"enable_mmap" example:"false"`
+	Version        string `json:"version" example:"v0.1.0"`
 }
 
 // Info handles GET /api/v1/info
@@ -56,7 +61,16 @@ type InfoResponse struct {
 // @Security     BearerAuth
 // @Router       /api/v1/info [get]
 func (h *SystemHandler) Info(c *gin.Context) {
-	response.OK(c, http.StatusOK, InfoResponse{EngineInfo: h.Engine.Info(), Version: release.Version})
+	info := h.Engine.Info()
+	response.OK(c, http.StatusOK, InfoResponse{
+		Quantization:   string(info.Quantization),
+		IndexType:      string(info.IndexType),
+		DistanceMetric: string(info.DistanceMetric),
+		Dimensions:     info.Dimensions,
+		VectorCount:    info.VectorCount,
+		EnableMmap:     info.EnableMmap,
+		Version:        release.Version,
+	})
 }
 
 // Flush handles POST /api/v1/admin/flush

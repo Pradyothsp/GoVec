@@ -175,7 +175,7 @@ func (s *GoVecServer) GetByID(ctx context.Context, req *pb.GetByIDRequest) (*pb.
 	return &pb.GetByIDResponse{
 		Id:       record.ID,
 		Vector:   record.Vector,
-		Sparse:   convert.SparseToProto(record.SparseVector),
+		Sparse:   convert.SparseToProto(record.Sparse),
 		Metadata: meta,
 	}, nil
 }
@@ -189,9 +189,9 @@ func (s *GoVecServer) Stats(_ context.Context, _ *pb.StatsRequest) (*pb.StatsRes
 func (s *GoVecServer) Info(_ context.Context, _ *pb.InfoRequest) (*pb.InfoResponse, error) {
 	info := s.engine.Info()
 	return &pb.InfoResponse{
-		Quantization:   info.Quantization,
-		IndexType:      info.IndexType,
-		DistanceMetric: info.DistanceMetric,
+		Quantization:   string(info.Quantization),
+		IndexType:      string(info.IndexType),
+		DistanceMetric: string(info.DistanceMetric),
 		Dimensions:     int32(info.Dimensions),  //nolint:gosec // dimension fits in int32
 		VectorCount:    int32(info.VectorCount), //nolint:gosec // vector count fits in int32
 		EnableMmap:     info.EnableMmap,

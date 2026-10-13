@@ -169,7 +169,7 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      SearchRequest     true  "Search payload"
-// @Success      200   {object}  response.Response{data=[]index.SearchResult}
+// @Success      200   {object}  response.Response{data=[]handlers.SearchResultResponse}
 // @Failure      400   {object}  response.ErrorResponse
 // @Failure      401   {object}  response.ErrorResponse
 // @Failure      500   {object}  response.ErrorResponse
@@ -202,11 +202,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 		return
 	}
 
-	if results == nil {
-		results = []index.SearchResult{}
-	}
-
-	response.OK(c, http.StatusOK, results)
+	response.OK(c, http.StatusOK, toSearchResults(results))
 }
 
 // GetByID handles GET /api/v1/vectors/:id
@@ -215,7 +211,7 @@ func (h *VectorHandler) Search(c *gin.Context) {
 // @Tags         vectors
 // @Produce      json
 // @Param        id   path      string            true  "Vector ID"
-// @Success      200  {object}  response.Response{data=index.VectorRecord}
+// @Success      200  {object}  response.Response{data=handlers.VectorResponse}
 // @Failure      400  {object}  response.ErrorResponse
 // @Failure      401  {object}  response.ErrorResponse
 // @Failure      404  {object}  response.ErrorResponse
@@ -240,7 +236,7 @@ func (h *VectorHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, http.StatusOK, record)
+	response.OK(c, http.StatusOK, toVectorResponse(record))
 }
 
 // Delete handles DELETE /api/v1/vectors/:id
