@@ -22,10 +22,10 @@ import (
 func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
 	engines := []struct {
 		name string
-		open func(t *testing.T, name metric.Name) Engine
+		open func(t *testing.T, name metric.Name) FileEngine
 	}{
-		{"brute", func(t *testing.T, name metric.Name) Engine { return NewVectorIndex(metricOptions(t, name)) }},
-		{"hnsw", func(t *testing.T, name metric.Name) Engine {
+		{"brute", func(t *testing.T, name metric.Name) FileEngine { return NewVectorIndex(metricOptions(t, name)) }},
+		{"hnsw", func(t *testing.T, name metric.Name) FileEngine {
 			return NewHNSWIndex(metricOptions(t, name), hnsw.Config{})
 		}},
 	}

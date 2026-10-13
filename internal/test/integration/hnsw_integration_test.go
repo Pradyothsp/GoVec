@@ -26,7 +26,7 @@ import (
 
 // newHNSWEngine creates a fresh HNSW engine backed by a new WAL at dir/test.wal.
 // The caller is responsible for closing the returned WAL.
-func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.Engine, *index.WAL) {
+func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.FileEngine, *index.WAL) {
 	t.Helper()
 	walPath := dir + "/test.wal"
 	wal, err := index.NewWAL(walPath)
@@ -52,7 +52,7 @@ func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.Engin
 
 type hnswSuiteBase struct {
 	suite.Suite
-	engine   index.Engine
+	engine   index.FileEngine
 	wal      *index.WAL
 	walPath  string
 	snapPath string
@@ -785,7 +785,7 @@ func (s *hnswSuiteBase) TestHNSW_BatchInsert_LargeAboveThreshold_ViaREST() {
 	engine, wal := newHNSWEngine(s.T(), dir, s.quant)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
-	router := api.SetupRouter(engine, "", dir+"/test.bin")
+	router := api.SetupRouter(engine, "")
 
 	const dim, n = 8, 120 // above DefaultBatchParallelThreshold
 	vectors := generateTestVectors(n, dim)

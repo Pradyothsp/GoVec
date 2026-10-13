@@ -21,7 +21,7 @@ import (
 
 var parityIndexTypes = []config.IndexType{config.IndexTypeBrute, config.IndexTypeHNSW}
 
-func newParityEngine(t *testing.T, engineCfg config.EngineConfig, storageCfg config.StorageConfig) Engine {
+func newParityEngine(t *testing.T, engineCfg config.EngineConfig, storageCfg config.StorageConfig) FileEngine {
 	t.Helper()
 	wal, err := NewWAL(filepath.Join(t.TempDir(), "parity.wal"))
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestInsert_Rejected_LeavesNoTrace(t *testing.T) {
 	}
 }
 
-func recordsOf(t *testing.T, engine Engine) *records[[]int8] {
+func recordsOf(t *testing.T, engine FileEngine) *records[[]int8] {
 	t.Helper()
 	switch e := engine.(type) {
 	case *VectorIndex[[]int8]:
@@ -169,14 +169,14 @@ func TestSparseVector_Empty_MeansNone(t *testing.T) {
 // restart until a snapshot happened to clear the WAL.
 func TestRejectedWrite_NeverReachesTheWAL(t *testing.T) {
 	ctx := context.Background()
-	writes := map[string]func(Engine) error{
-		"wrong width": func(e Engine) error {
+	writes := map[string]func(FileEngine) error{
+		"wrong width": func(e FileEngine) error {
 			return e.Insert(ctx, "bad", []float32{1, 2}, core.SparseVector{}, nil)
 		},
-		"mismatched sparse vector": func(e Engine) error {
+		"mismatched sparse vector": func(e FileEngine) error {
 			return e.Insert(ctx, "bad", []float32{0, 1, 0}, core.SparseVector{Indices: []uint32{1, 2}, Values: []float32{1}}, nil)
 		},
-		"batch with one bad item": func(e Engine) error {
+		"batch with one bad item": func(e FileEngine) error {
 			failures, err := e.BatchInsert(ctx, []BatchInsertItem{{ID: "ok", Vector: []float32{0, 1, 0}}, {ID: "bad", Vector: []float32{1, 2}}})
 			if err == nil && len(failures) != 1 {
 				t.Errorf("want 1 failed item, got %d", len(failures))
@@ -185,8 +185,8 @@ func TestRejectedWrite_NeverReachesTheWAL(t *testing.T) {
 		},
 		// The first item sets an empty index's width, so the second is too
 		// narrow even though the index had no width when the batch began.
-		"batch whose first item sets the width": func(e Engine) error {
-			if err := e.Reset(ctx, ""); err != nil {
+		"batch whose first item sets the width": func(e FileEngine) error {
+			if err := e.Reset(ctx); err != nil {
 				return err
 			}
 			_, err := e.BatchInsert(ctx, []BatchInsertItem{{ID: "first", Vector: []float32{1, 0, 0}}, {ID: "bad", Vector: []float32{1, 2}}})
@@ -221,14 +221,15 @@ func TestReset_SurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	for _, e := range bothEngines {
 		t.Run(e.name, func(t *testing.T) {
-			// Arrange: a saved 3-d index.
+			// Arrange: a saved 3-d index that snapshots to snapPath.
 			idx, r := e.open(t)
 			snapPath := filepath.Join(t.TempDir(), "snap.bin")
+			r.snapshotPath = snapPath
 			require.NoError(t, idx.Insert(ctx, "old", []float32{1, 0, 0}, core.SparseVector{}, nil))
-			require.NoError(t, idx.SaveToFile(ctx, snapPath))
+			require.NoError(t, idx.Flush(ctx))
 
 			// Act: reset, switch to 2-d vectors, then restart.
-			require.NoError(t, idx.Reset(ctx, snapPath))
+			require.NoError(t, idx.Reset(ctx))
 			require.NoError(t, idx.Insert(ctx, "new", []float32{0, 1}, core.SparseVector{}, nil))
 			restarted, _ := e.open(t)
 			loadErr := restarted.LoadFromFile(ctx, snapPath)
@@ -257,10 +258,11 @@ func TestReset_FailedSnapshot_ChangesNothing(t *testing.T) {
 			idx, r := e.open(t)
 			require.NoError(t, idx.Insert(ctx, "kept", []float32{1, 0, 0}, core.SparseVector{}, nil))
 			snapPath := filepath.Join(t.TempDir(), "snap.bin")
+			r.snapshotPath = snapPath
 			require.NoError(t, os.Mkdir(snapPath+".tmp", 0o750))
 
 			// Act
-			err := idx.Reset(ctx, snapPath)
+			err := idx.Reset(ctx)
 
 			// Assert
 			require.Error(t, err)

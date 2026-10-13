@@ -17,6 +17,7 @@ import (
 // so one built without every step quietly ran without part of its config.
 type Options[T metric.VectorType] struct {
 	WAL           *WAL               // nil: writes aren't logged
+	SnapshotPath  string             // where Flush writes and Recover reads; "" means none
 	Metric        metric.Metric[T]   // how vectors are compared
 	Dimensions    int                // the index's width; 0 learns it from the first insert
 	HybridSearch  bool               // keep an inverted index for sparse scoring
@@ -24,11 +25,11 @@ type Options[T metric.VectorType] struct {
 	VectorStore   *storage.MmapStore // nil keeps vectors on the heap
 }
 
-// optionsFrom is Options for an engine built from config, logging to wal and
-// keeping vectors in store.
+// optionsFrom is Options for an engine built from config, logging to wal,
+// snapshotting to snapshotPath and keeping vectors in store.
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
-func optionsFrom[T metric.VectorType](cfg config.EngineConfig, wal *WAL, store *storage.MmapStore) (Options[T], error) {
+func optionsFrom[T metric.VectorType](cfg config.EngineConfig, wal *WAL, snapshotPath string, store *storage.MmapStore) (Options[T], error) {
 	m, err := metric.Resolve[T](cfg.DistanceMetric)
 	if err != nil {
 		return Options[T]{}, err
@@ -36,6 +37,7 @@ func optionsFrom[T metric.VectorType](cfg config.EngineConfig, wal *WAL, store *
 
 	return Options[T]{
 		WAL:           wal,
+		SnapshotPath:  snapshotPath,
 		Metric:        m,
 		Dimensions:    cfg.Dimensions,
 		HybridSearch:  cfg.EnableHybridSearch,
@@ -76,6 +78,7 @@ func (r *records[T]) init(opts Options[T], indexType config.IndexType) {
 	r.configuredDimensions = opts.Dimensions
 
 	r.wal = opts.WAL
+	r.snapshotPath = opts.SnapshotPath
 	r.encodeFunc = encoderFor[T]()
 	r.vectorStore = opts.VectorStore
 }

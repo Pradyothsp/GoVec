@@ -9,7 +9,7 @@ import (
 
 // SetupGRPCServer builds a ready-to-serve *grpc.Server with auth + logging interceptors.
 // The caller is responsible for creating the net.Listener and calling Serve.
-func SetupGRPCServer(engine index.Engine, apiKey, dataPath string, maxRecvMsgSizeMB int) *grpc.Server {
+func SetupGRPCServer(engine index.Engine, apiKey string, maxRecvMsgSizeMB int) *grpc.Server {
 	srv := grpc.NewServer(
 		grpc.MaxRecvMsgSize(maxRecvMsgSizeMB*1024*1024),
 		grpc.ChainUnaryInterceptor(
@@ -21,6 +21,6 @@ func SetupGRPCServer(engine index.Engine, apiKey, dataPath string, maxRecvMsgSiz
 			StreamAuthInterceptor(apiKey),
 		),
 	)
-	pb.RegisterGoVecServiceServer(srv, NewGoVecServer(engine, dataPath))
+	pb.RegisterGoVecServiceServer(srv, NewGoVecServer(engine))
 	return srv
 }

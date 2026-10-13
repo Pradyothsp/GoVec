@@ -3,7 +3,6 @@ package grpcserver_test
 import (
 	"context"
 	"net"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,9 +44,7 @@ func TestGoVecServerSuite(t *testing.T) {
 func (s *GoVecServerSuite) SetupTest() {
 	engine := testutil.NewTestIndex(s.T())
 	s.lis = bufconn.Listen(1024 * 1024)
-	dataPath := filepath.Join(s.T().TempDir(), "data.bin")
-
-	srv := grpcserver.SetupGRPCServer(engine, "", dataPath, 4)
+	srv := grpcserver.SetupGRPCServer(engine, "", 4)
 	go srv.Serve(s.lis) //nolint:errcheck // test server
 	s.T().Cleanup(srv.GracefulStop)
 

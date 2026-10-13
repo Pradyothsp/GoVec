@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,7 +44,7 @@ func (c *callCounter) BatchInsert(ctx context.Context, items []index.BatchInsert
 func countingClient(t *testing.T, engine *callCounter) pb.GoVecServiceClient {
 	t.Helper()
 	lis := bufconn.Listen(1024 * 1024)
-	srv := grpcserver.SetupGRPCServer(engine, "", filepath.Join(t.TempDir(), "data.bin"), 4)
+	srv := grpcserver.SetupGRPCServer(engine, "", 4)
 	go srv.Serve(lis) //nolint:errcheck // test server
 	t.Cleanup(srv.GracefulStop)
 	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithContextDialer(bufconnDialer(lis)), grpc.WithTransportCredentials(insecure.NewCredentials()))

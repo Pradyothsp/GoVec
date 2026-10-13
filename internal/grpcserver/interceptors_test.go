@@ -2,7 +2,6 @@ package grpcserver_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,7 +37,7 @@ func (s *AuthInterceptorSuite) SetupTest() {
 	engine := testutil.NewTestIndex(s.T())
 	s.lis = bufconn.Listen(1024 * 1024)
 
-	srv := grpcserver.SetupGRPCServer(engine, authTestAPIKey, filepath.Join(s.T().TempDir(), "data.bin"), 4)
+	srv := grpcserver.SetupGRPCServer(engine, authTestAPIKey, 4)
 	go srv.Serve(s.lis) //nolint:errcheck // test server
 	s.T().Cleanup(srv.GracefulStop)
 
@@ -80,7 +79,7 @@ func (s *AuthInterceptorSuite) TestCorrectToken() {
 func (s *AuthInterceptorSuite) TestNoAuthRequired() {
 	engine := testutil.NewTestIndex(s.T())
 	lis := bufconn.Listen(1024 * 1024)
-	srv := grpcserver.SetupGRPCServer(engine, "", filepath.Join(s.T().TempDir(), "data.bin"), 4)
+	srv := grpcserver.SetupGRPCServer(engine, "", 4)
 	go srv.Serve(lis) //nolint:errcheck // test server
 	s.T().Cleanup(srv.GracefulStop)
 

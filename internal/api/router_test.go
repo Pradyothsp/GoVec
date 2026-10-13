@@ -22,14 +22,14 @@ func init() {
 
 func TestSetupRouter(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	router := SetupRouter(idx, "", "")
+	router := SetupRouter(idx, "")
 
 	require.NotNil(t, router, "Router should not be nil")
 }
 
 func TestHealthEndpoint(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	router := SetupRouter(idx, "", "")
+	router := SetupRouter(idx, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -42,7 +42,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestRouterEndpointRegistration(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	router := SetupRouter(idx, "", "")
+	router := SetupRouter(idx, "")
 
 	t.Run("POST_vectors_endpoint_exists", func(t *testing.T) {
 		reqBody := map[string]interface{}{
@@ -132,7 +132,7 @@ func TestRouterConfiguration(t *testing.T) {
 		idx := testutil.NewTestIndex(t)
 		idx.Insert(context.Background(), "existing", []float32{1.0, 2.0}, core.SparseVector{}, map[string]any{"pre-existing": true})
 
-		router := SetupRouter(idx, "", "")
+		router := SetupRouter(idx, "")
 
 		assert.Len(t, idx.Store, 1, "Index should have pre-existing vector")
 
@@ -160,7 +160,7 @@ func TestRouterConfiguration(t *testing.T) {
 
 	t.Run("without_api_v1_prefix_fails", func(t *testing.T) {
 		idx := testutil.NewTestIndex(t)
-		router := SetupRouter(idx, "", "")
+		router := SetupRouter(idx, "")
 
 		reqBody := map[string]interface{}{
 			"id":     "test",
@@ -180,7 +180,7 @@ func TestRouterConfiguration(t *testing.T) {
 
 func TestSwaggerEndpoints(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	router := SetupRouter(idx, "", "")
+	router := SetupRouter(idx, "")
 
 	t.Run("swagger_ui_returns_200", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil)

@@ -61,6 +61,11 @@ func NewWAL(walPath string) (*WAL, error) {
 	return &WAL{file: f}, nil
 }
 
+// Path returns the file the WAL appends to.
+func (w *WAL) Path() string {
+	return w.file.Name()
+}
+
 // WriteEntry saves an operation to the disk immediately.
 // ctx is accepted for API consistency and future use (e.g. deadline-aware writes).
 func (w *WAL) WriteEntry(_ context.Context, entry *WALEntry) error {

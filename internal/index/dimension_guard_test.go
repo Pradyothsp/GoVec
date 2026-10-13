@@ -63,13 +63,13 @@ func TestValidateVectorDims_ErrorsAreClassifiable(t *testing.T) {
 // records it keeps, for tests that hold the two to the same rule.
 var bothEngines = []struct {
 	name string
-	open func(t *testing.T) (Engine, *records[[]float32])
+	open func(t *testing.T) (FileEngine, *records[[]float32])
 }{
-	{"brute", func(t *testing.T) (Engine, *records[[]float32]) {
+	{"brute", func(t *testing.T) (FileEngine, *records[[]float32]) {
 		idx := newTestIndex(t)
 		return idx, &idx.records
 	}},
-	{"hnsw", func(t *testing.T) (Engine, *records[[]float32]) {
+	{"hnsw", func(t *testing.T) (FileEngine, *records[[]float32]) {
 		idx := newTestHNSWIndex(t)
 		return idx, &idx.records
 	}},
@@ -193,7 +193,7 @@ func TestReset_LearnedWidth_IsReleased(t *testing.T) {
 			require.Equal(t, 3, idx.Info().Dimensions)
 
 			// Act
-			require.NoError(t, idx.Reset(ctx, ""))
+			require.NoError(t, idx.Reset(ctx))
 
 			// Assert
 			assert.Equal(t, 0, idx.Info().Dimensions, "a reset index reports no width")
@@ -215,7 +215,7 @@ func TestReset_ConfiguredWidth_Survives(t *testing.T) {
 			r.configuredDimensions = 3
 
 			// Act
-			require.NoError(t, idx.Reset(ctx, ""))
+			require.NoError(t, idx.Reset(ctx))
 
 			// Assert
 			assert.Equal(t, 3, idx.Info().Dimensions)

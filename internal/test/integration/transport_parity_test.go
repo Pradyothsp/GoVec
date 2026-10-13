@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -43,11 +42,11 @@ func parityServers(t *testing.T) (rest *gin.Engine, grpcClient pb.GoVecServiceCl
 	gin.SetMode(gin.TestMode)
 
 	restEngine := testutil.NewTestIndex(t)
-	rest = api.SetupRouter(restEngine, "", filepath.Join(t.TempDir(), "rest.bin"))
+	rest = api.SetupRouter(restEngine, "")
 
 	grpcEngine := testutil.NewTestIndex(t)
 	lis := bufconn.Listen(1024 * 1024)
-	srv := grpcserver.SetupGRPCServer(grpcEngine, "", filepath.Join(t.TempDir(), "grpc.bin"), 4)
+	srv := grpcserver.SetupGRPCServer(grpcEngine, "", 4)
 	go srv.Serve(lis) //nolint:errcheck // test server
 	t.Cleanup(srv.GracefulStop)
 

@@ -401,7 +401,7 @@ func TestReset_ResetsIDMapperAndWAL(t *testing.T) {
 			require.Positive(t, info.Size(), "WAL should have entries before Reset")
 
 			// Act
-			require.NoError(t, idx.Reset(ctx, ""))
+			require.NoError(t, idx.Reset(ctx))
 
 			// Assert
 			assert.Empty(t, r.Store)

@@ -33,7 +33,7 @@ type PersistenceIntegrationTestSuite struct {
 func (s *PersistenceIntegrationTestSuite) SetupTest() {
 	gin.SetMode(gin.TestMode)
 	s.index = testutil.NewTestIndex(s.T())
-	s.router = api.SetupRouter(s.index, "", "")
+	s.router = api.SetupRouter(s.index, "")
 	s.storageDir = s.T().TempDir()
 }
 
@@ -82,7 +82,7 @@ func (s *PersistenceIntegrationTestSuite) TestServerRestart_PreservesData() {
 	err = newIndex.LoadFromFile(context.Background(), storagePath)
 	s.Require().NoError(err, "Should load from disk")
 
-	newRouter := api.SetupRouter(newIndex, "", "")
+	newRouter := api.SetupRouter(newIndex, "")
 
 	// Phase 4: Verify all 10 vectors exist via HTTP queries
 	s.Assert().Len(newIndex.Store, numVectors, "Should load all vectors")
@@ -273,7 +273,7 @@ func (s *PersistenceIntegrationTestSuite) TestCorruptedFile_StartsWithEmptyIndex
 	s.Assert().Empty(index.Store, "Index should remain empty after failed load")
 
 	// Verify server can still operate with empty index
-	router := api.SetupRouter(index, "", "")
+	router := api.SetupRouter(index, "")
 
 	payload := map[string]interface{}{
 		"id":     "recovery_vec",

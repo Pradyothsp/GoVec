@@ -38,20 +38,19 @@ type Engine interface {
 	// Delete removes a vector by ID
 	Delete(ctx context.Context, id string) (bool, error)
 
-	// SaveToFile persists the index to disk
-	SaveToFile(ctx context.Context, path string) error
+	// Flush writes a snapshot to the engine's snapshot path, then truncates
+	// the WAL. It fails if the engine has no snapshot path.
+	Flush(ctx context.Context) error
 
-	// LoadFromFile loads the index from disk
-	LoadFromFile(ctx context.Context, path string) error
+	// Recover loads the engine's snapshot, if there is one, then replays its
+	// WAL over it. Call it once, before serving any request.
+	Recover(ctx context.Context) error
 
-	// ReplayWAL replays the write-ahead log to recover uncommitted changes
-	ReplayWAL(path string) error
-
-	// Reset removes every vector durably: an empty snapshot replaces the one
-	// at snapshotPath and the WAL is truncated before memory is cleared, so a
-	// restart comes back empty and a failed reset changes nothing. With no
-	// snapshotPath, only memory and the WAL are cleared.
-	Reset(ctx context.Context, snapshotPath string) error
+	// Reset removes every vector durably: an empty snapshot replaces the
+	// engine's snapshot and the WAL is truncated before memory is cleared, so
+	// a restart comes back empty and a failed reset changes nothing. With no
+	// snapshot path, only memory and the WAL are cleared.
+	Reset(ctx context.Context) error
 
 	// Len returns the number of vectors in the index
 	Len() int
@@ -59,6 +58,30 @@ type Engine interface {
 	// Info returns engine configuration and runtime statistics
 	Info() EngineInfo
 }
+
+// FileEngine is an Engine that can also save, load and replay at paths the
+// caller chooses, rather than only the ones it was built with. Both engines
+// implement it, and NewEngine returns one, for tests and tools that manage
+// their own files. The server holds a plain Engine, so the only code that
+// knows where its files live is the engine's.
+type FileEngine interface {
+	Engine
+
+	// SaveToFile writes a snapshot to path, then truncates the WAL.
+	SaveToFile(ctx context.Context, path string) error
+
+	// LoadFromFile replaces the engine's contents with the snapshot at path.
+	// A missing file is not an error: the engine stays empty.
+	LoadFromFile(ctx context.Context, path string) error
+
+	// ReplayWAL applies the WAL at path over the engine's contents.
+	ReplayWAL(path string) error
+}
+
+var (
+	_ FileEngine = (*VectorIndex[[]float32])(nil)
+	_ FileEngine = (*HNSWIndex[[]int8])(nil)
+)
 
 // BatchInsertItem is a single vector to insert as part of a BatchInsert call.
 type BatchInsertItem struct {

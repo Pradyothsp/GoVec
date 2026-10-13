@@ -82,12 +82,12 @@ func TestLoadFromFile_OtherSnapshotVersion_RejectedWithClearError(t *testing.T) 
 func TestLoadFromFile_RejectsIndexTypeMismatch(t *testing.T) {
 	tests := []struct {
 		name      string
-		save      func(t *testing.T) Engine
-		load      func(t *testing.T) Engine
+		save      func(t *testing.T) FileEngine
+		load      func(t *testing.T) FileEngine
 		savedType string
 	}{
-		{"brute snapshot into hnsw", func(t *testing.T) Engine { return newTestIndex(t) }, func(t *testing.T) Engine { return newTestHNSWIndex(t) }, "brute"},
-		{"hnsw snapshot into brute", func(t *testing.T) Engine { return newTestHNSWIndex(t) }, func(t *testing.T) Engine { return newTestIndex(t) }, "hnsw"},
+		{"brute snapshot into hnsw", func(t *testing.T) FileEngine { return newTestIndex(t) }, func(t *testing.T) FileEngine { return newTestHNSWIndex(t) }, "brute"},
+		{"hnsw snapshot into brute", func(t *testing.T) FileEngine { return newTestHNSWIndex(t) }, func(t *testing.T) FileEngine { return newTestIndex(t) }, "hnsw"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -19,13 +19,12 @@ import (
 
 // GoVecServer implements pb.GoVecServiceServer by delegating to an index.Engine.
 type GoVecServer struct {
-	engine   index.Engine
-	dataPath string
+	engine index.Engine
 }
 
 // NewGoVecServer creates a new GoVecServer backed by the provided engine.
-func NewGoVecServer(engine index.Engine, dataPath string) *GoVecServer {
-	return &GoVecServer{engine: engine, dataPath: dataPath}
+func NewGoVecServer(engine index.Engine) *GoVecServer {
+	return &GoVecServer{engine: engine}
 }
 
 // Insert handles a single vector insert.
@@ -202,17 +201,16 @@ func (s *GoVecServer) Info(_ context.Context, _ *pb.InfoRequest) (*pb.InfoRespon
 
 // Flush persists the current index snapshot to disk.
 func (s *GoVecServer) Flush(ctx context.Context, _ *pb.FlushRequest) (*pb.FlushResponse, error) {
-	if err := s.engine.SaveToFile(ctx, s.dataPath); err != nil {
+	if err := s.engine.Flush(ctx); err != nil {
 		return nil, status.Errorf(codes.Internal, "flush failed: %v", err)
 	}
 	return &pb.FlushResponse{Status: "flushed"}, nil
 }
 
-// Reset clears every vector from the index, mirroring REST's
-// POST /api/v1/admin/reset. Like the REST endpoint it only clears memory and
-// the WAL -- call Flush afterward if the empty state should survive a restart.
+// Reset removes every vector durably, mirroring REST's POST /api/v1/admin/reset:
+// a restart comes back empty.
 func (s *GoVecServer) Reset(ctx context.Context, _ *pb.ResetRequest) (*pb.ResetResponse, error) {
-	if err := s.engine.Reset(ctx, s.dataPath); err != nil {
+	if err := s.engine.Reset(ctx); err != nil {
 		return nil, status.Errorf(codes.Internal, "reset failed: %v", err)
 	}
 	return &pb.ResetResponse{Status: "reset"}, nil

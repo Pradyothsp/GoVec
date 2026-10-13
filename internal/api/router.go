@@ -17,8 +17,7 @@ import (
 
 // SetupRouter configures the Gin engine with all routes and injects dependencies.
 // If apiKey is non-empty, all /api/v1/* routes require a matching Bearer token.
-// dataPath is the persistence path used by the flush endpoint.
-func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
+func SetupRouter(engine index.Engine, apiKey string) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.CorrelationID())
@@ -29,7 +28,7 @@ func SetupRouter(engine index.Engine, apiKey, dataPath string) *gin.Engine {
 
 	// Initialize handlers, injecting dependencies
 	vecHandler := handlers.NewVectorHandler(engine)
-	sysHandler := handlers.NewSystemHandler(engine, dataPath)
+	sysHandler := handlers.NewSystemHandler(engine)
 
 	v1 := r.Group("api/v1")
 	v1.Use(middleware.BearerAuth(apiKey))

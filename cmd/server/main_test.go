@@ -49,7 +49,7 @@ func TestRecoverySequence(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		require.NoError(t, before.Insert(ctx, fmt.Sprintf("snap%d", i), []float32{float32(i), 1}, core.SparseVector{}, nil))
 	}
-	require.NoError(t, before.SaveToFile(ctx, cfg.Storage.DataPath)) // also clears the WAL
+	require.NoError(t, before.Flush(ctx)) // also clears the WAL
 	for i := 1; i <= 2; i++ {
 		require.NoError(t, before.Insert(ctx, fmt.Sprintf("wal%d", i), []float32{float32(i), 2}, core.SparseVector{}, nil))
 	}
@@ -93,13 +93,17 @@ func TestRunRecovery_CorruptSnapshot_ReturnsError(t *testing.T) {
 // A WAL that can't be read to the end must stop startup too, as a corrupt
 // snapshot does: carrying on would drop every write after the failure point.
 func TestRunRecovery_UnreadableWAL_ReturnsError(t *testing.T) {
-	cfg, engine := newRecoveryTarget(t)
-	// Not a GoVec WAL at all: replay must refuse it, not cut it off as torn.
+	// Arrange: the engine opens a WAL that isn't a GoVec WAL at all, which
+	// replay must refuse rather than cut off as torn.
+	cfg, _ := newRecoveryTarget(t)
 	cfg.Storage.WalPath = filepath.Join(t.TempDir(), "unreadable.wal")
 	require.NoError(t, os.WriteFile(cfg.Storage.WalPath, bytes.Repeat([]byte("x"), 5<<20), 0o600))
+	engine := openEngine(t, cfg)
 
+	// Act
 	err := runRecovery(cfg, engine)
 
+	// Assert
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), cfg.Storage.WalPath, "the error must name the WAL file")
 }
@@ -140,9 +144,9 @@ type saveObservingEngine struct {
 	beforeSave func()
 }
 
-func (e saveObservingEngine) SaveToFile(ctx context.Context, path string) error {
+func (e saveObservingEngine) Flush(ctx context.Context) error {
 	e.beforeSave()
-	return e.Engine.SaveToFile(ctx, path)
+	return e.Engine.Flush(ctx)
 }
 
 // The final save must come after the servers stop taking requests and after

@@ -43,7 +43,7 @@ func (s *WALRecoveryTestSuite) SetupTest() {
 	s.T().Cleanup(func() { _ = wal.Close() })
 
 	s.index = testutil.NewIndexOnWAL(s.T(), wal)
-	s.router = api.SetupRouter(s.index, "", "")
+	s.router = api.SetupRouter(s.index, "")
 }
 
 func TestWALRecoveryTestSuite(t *testing.T) {
