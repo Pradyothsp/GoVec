@@ -444,7 +444,7 @@ func (r *records[T]) scorer(sparseQuery core.SparseVector) func(internalID uint3
 		if node.Sparse.IsEmpty() {
 			continue
 		}
-		if score := core.SparseDotProduct(sparseQuery, node.Sparse); score > 0 {
+		if score := sparseQuery.Dot(node.Sparse); score > 0 {
 			sparseScores[id] = score
 		}
 	}

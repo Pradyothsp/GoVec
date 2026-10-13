@@ -104,9 +104,10 @@ curl -X POST http://localhost:9697/api/v1/vectors/search \
 ```
 
 For hybrid search, add a `sparse_vector` (`{"indices": [...], "values": [...]}`) to both the
-insert and the query. Scores are blended as `0.7 × dense + 0.3 × sparse`. Hybrid scoring needs
-`engine.enable_hybrid_search: true`, which the Docker image's config sets; without it a sparse
-vector is stored but doesn't affect scores.
+insert and the query. Indices must be strictly ascending, one value per index; anything else is
+rejected with 400 / `InvalidArgument`. Scores are blended as `0.7 × dense + 0.3 × sparse`.
+Hybrid scoring needs `engine.enable_hybrid_search: true`, which the Docker image's config sets;
+without it a sparse vector is stored but doesn't affect scores.
 
 ### From Python
 

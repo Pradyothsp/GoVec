@@ -16,8 +16,8 @@ var (
 	ErrDimensionMismatch = errors.New("vector dimension mismatch")
 
 	// ErrInvalidSparseVector is returned when a sparse vector's indices and
-	// values differ in length.
-	ErrInvalidSparseVector = errors.New("invalid sparse_vector: indices and values must have the same length")
+	// values differ in length, or its indices aren't strictly ascending.
+	ErrInvalidSparseVector = errors.New("invalid sparse_vector")
 )
 
 // IsInvalidVectorError reports whether err means the caller supplied an
@@ -32,12 +32,23 @@ func IsInvalidVectorError(err error) bool {
 }
 
 // validateSparse rejects a sparse vector whose indices and values don't pair
-// up: every index needs its weight, and the inverted index and sparse scoring
-// read them pairwise. An empty sparse vector is valid and means none.
+// up -- every index needs its weight, and the inverted index and sparse
+// scoring read them pairwise -- or whose indices aren't strictly ascending.
+// SparseVector.Dot walks both vectors' indices in order, so an unsorted or
+// repeated index was accepted and then silently skipped matches, leaving
+// hybrid scores wrong with no error. An empty sparse vector is valid and
+// means none.
 func validateSparse(sparse core.SparseVector) error {
 	if len(sparse.Indices) != len(sparse.Values) {
-		return fmt.Errorf("%w: %d indices, %d values", ErrInvalidSparseVector, len(sparse.Indices), len(sparse.Values))
+		return fmt.Errorf("%w: indices and values must have the same length, got %d indices, %d values", ErrInvalidSparseVector, len(sparse.Indices), len(sparse.Values))
 	}
+
+	for i := 1; i < len(sparse.Indices); i++ {
+		if sparse.Indices[i] <= sparse.Indices[i-1] {
+			return fmt.Errorf("%w: indices must be strictly ascending, got %d after %d at position %d", ErrInvalidSparseVector, sparse.Indices[i], sparse.Indices[i-1], i)
+		}
+	}
+
 	return nil
 }
 
