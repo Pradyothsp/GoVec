@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/metric"
 )
 
@@ -19,17 +20,14 @@ import (
 // are chosen by its metric -- so loading one under the other must fail, as a
 // quantization mismatch already does.
 func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
-	type metricIndex interface {
-		Engine
-		setMetric(metric.Name)
-	}
-
 	engines := []struct {
 		name string
-		open func(t *testing.T) metricIndex
+		open func(t *testing.T, name metric.Name) Engine
 	}{
-		{"brute", func(t *testing.T) metricIndex { return bruteMetric{newTestIndex(t)} }},
-		{"hnsw", func(t *testing.T) metricIndex { return hnswMetric{newTestHNSWIndex(t)} }},
+		{"brute", func(t *testing.T, name metric.Name) Engine { return NewVectorIndex(metricOptions(t, name)) }},
+		{"hnsw", func(t *testing.T, name metric.Name) Engine {
+			return NewHNSWIndex(metricOptions(t, name), hnsw.Config{})
+		}},
 	}
 
 	for _, e := range engines {
@@ -37,22 +35,30 @@ func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "snapshot.bin")
 
-			saved := e.open(t)
-			saved.setMetric(metric.Euclidean)
+			saved := e.open(t, metric.Euclidean)
 			require.NoError(t, saved.Insert(ctx, "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
 			require.NoError(t, saved.SaveToFile(ctx, path))
 
 			t.Run("same_metric_loads", func(t *testing.T) {
-				loaded := e.open(t)
-				loaded.setMetric(metric.Euclidean)
-				require.NoError(t, loaded.LoadFromFile(ctx, path))
+				// Arrange
+				loaded := e.open(t, metric.Euclidean)
+
+				// Act
+				err := loaded.LoadFromFile(ctx, path)
+
+				// Assert
+				require.NoError(t, err)
 				assert.Equal(t, 1, loaded.Len())
 			})
 
 			t.Run("other_metric_is_rejected", func(t *testing.T) {
-				loaded := e.open(t)
-				loaded.setMetric(metric.Cosine)
+				// Arrange
+				loaded := e.open(t, metric.Cosine)
+
+				// Act
 				err := loaded.LoadFromFile(ctx, path)
+
+				// Assert
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "distance metric mismatch")
 				assert.Contains(t, err.Error(), "euclidean", "the error must name the snapshot's metric")
@@ -62,10 +68,12 @@ func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
 	}
 }
 
-type bruteMetric struct{ *VectorIndex[[]float32] }
+// metricOptions is float32 Options using the metric called name, logging to a
+// temporary WAL.
+func metricOptions(t *testing.T, name metric.Name) Options[[]float32] {
+	t.Helper()
+	m, err := metric.Resolve[[]float32](name)
+	require.NoError(t, err)
 
-func (b bruteMetric) setMetric(m metric.Name) { b.distanceMetric = m }
-
-type hnswMetric struct{ *HNSWIndex[[]float32] }
-
-func (h hnswMetric) setMetric(m metric.Name) { h.distanceMetric = m }
+	return Options[[]float32]{WAL: newTestWAL(t), Metric: m}
+}

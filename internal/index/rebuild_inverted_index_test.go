@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/metric"
+	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -38,17 +38,10 @@ func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 			return hnswHybrid{newTestHNSWIndexWithHybrid(t)}
 		}},
 		{"brute_mmap", func(t *testing.T, mmapDir string) hybridIndex {
-			return bruteHybrid{NewVectorIndex[[]float32](
-				newTestWAL(t), make(map[uint32][]core.Posting), core.NewIDMapper(),
-				func(v []float32) []float32 { return v }, metric.CosineSimilarity,
-				newTestMmapStore(t, mmapDir))}
+			return bruteHybrid{NewVectorIndex(Options[[]float32]{WAL: newTestWAL(t), Metric: testCosineMetric, HybridSearch: true, VectorStore: newTestMmapStore(t, mmapDir)})}
 		}},
 		{"hnsw_mmap", func(t *testing.T, mmapDir string) hybridIndex {
-			return hnswHybrid{NewHNSWIndex[[]float32](
-				newTestWAL(t), make(map[uint32][]core.Posting), core.NewIDMapper(),
-				func(v []float32) []float32 { return v },
-				testCosineMetric, 16, 20, 200,
-				core.NewMetadataIndex(), newTestMmapStore(t, mmapDir))}
+			return hnswHybrid{NewHNSWIndex(Options[[]float32]{WAL: newTestWAL(t), Metric: testCosineMetric, HybridSearch: true, MetadataIndex: true, VectorStore: newTestMmapStore(t, mmapDir)}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})}
 		}},
 	}
 

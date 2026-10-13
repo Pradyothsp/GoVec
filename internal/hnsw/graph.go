@@ -507,59 +507,33 @@ func (l *layer[K, V]) size() int {
 	return len(l.nodes)
 }
 
-// Graph is a Hierarchical Navigable Small World graph.
-// All public parameters must be set before adding nodes to the graph.
-// K is cmp.Ordered instead of of comparable so that they can be sorted.
-// V is the vector type (must satisfy VectorType constraint: []float32 or []int8).
-type Graph[K cmp.Ordered, V VectorType] struct {
-	// Metric is how the graph compares vectors. Distance is required. The
-	// optional pairs are used when set: Precompute/CachedDistance caches a
-	// value per node (layerNode.precomputed) and compares with it, and
-	// SquaredDistance ranks every comparison inside the graph, with
-	// FromSquaredDistance converting just the returned results back (see
-	// rankDistFuncFor). Similarity and Score are the caller's; the graph
-	// doesn't use them.
-	Metric metric.Metric[V]
-
-	// Rng is used for level generation. It may be set to a deterministic value
-	// for reproducibility. Note that deterministic number generation can lead to
-	// degenerate graphs when exposed to adversarial inputs.
-	Rng *rand.Rand
-
-	// M is the maximum number of neighbors to keep for each node.
-	// See DefaultM's doc comment for the reasoning behind its value.
+// Config is how a graph is built and searched. A zero M, Ml, EfSearch or
+// EfConstruction takes this package's default when NewGraph builds the graph.
+// The two batch settings give 0 their own meaning, documented on each.
+type Config struct {
+	// M is the maximum number of neighbors to keep for each node. 0 means
+	// DefaultM; see its doc comment for the reasoning behind its value.
 	M int
 
 	// Ml is the level generation factor.
 	// E.g., for Ml = 0.25, each layer is 1/4 the size of the previous layer.
+	// 0 means DefaultMl.
 	Ml float64
 
-	// EfSearch is the number of nodes to consider in the search phase.
-	// See DefaultEfSearch's doc comment for the reasoning behind its value.
+	// EfSearch is the number of nodes to consider in the search phase. 0 means
+	// DefaultEfSearch; see its doc comment for the reasoning behind its value.
 	// Higher values improve search accuracy (particularly at k > EfSearch) at
 	// the expense of latency on every query, including cheap low-k ones.
 	EfSearch int
 
 	// EfConstruction is the number of nodes to consider when selecting neighbors
-	// for a new node during graph construction (Add). It is independent of
-	// EfSearch: a low EfConstruction produces a poorly-connected graph that no
-	// amount of EfSearch or M can fully compensate for at query time. See
+	// for a new node during graph construction (Add); 0 means
+	// DefaultEfConstruction. It is independent of EfSearch: a low
+	// EfConstruction produces a poorly-connected graph that no amount of
+	// EfSearch or M can fully compensate for at query time. See
 	// DefaultEfConstruction's doc comment for the reasoning behind its value;
 	// higher values build a higher-quality graph at the cost of slower inserts.
 	EfConstruction int
-
-	// layers is a slice of layers in the graph.
-	layers []*layer[K, V]
-
-	// insertVisited is a reused scratch map for layerNode.search()'s visited
-	// tracking during Add(), cleared and passed down instead of letting
-	// search() allocate a fresh map on every layer/node it processes. Safe to
-	// share across calls (unlike a per-node tag) because Add() always runs
-	// under the caller's exclusive lock -- never concurrently with itself or
-	// with a Search(). Left nil until Add()'s first call; Search() never
-	// touches this field, since concurrent Search() calls (an RLock-permitted
-	// pattern) can't safely share one map -- see visitedScratch's doc comment.
-	insertVisited map[K]bool
 
 	// BatchParallelism caps how many items' graph searches run concurrently
 	// within one Add() call's round-based parallelism (see addRound). 0
@@ -575,6 +549,60 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	// 0 (the default) resolves to DefaultBatchParallelThreshold -- see
 	// resolveParallelism.
 	BatchParallelThreshold int
+}
+
+// withDefaults fills each zero field that has a package default.
+func (c Config) withDefaults() Config {
+	if c.M <= 0 {
+		c.M = DefaultM
+	}
+	if c.Ml <= 0 {
+		c.Ml = DefaultMl
+	}
+	if c.EfSearch <= 0 {
+		c.EfSearch = DefaultEfSearch
+	}
+	if c.EfConstruction <= 0 {
+		c.EfConstruction = DefaultEfConstruction
+	}
+
+	return c
+}
+
+// Graph is a Hierarchical Navigable Small World graph.
+// Build one with NewGraph; set Rng before adding nodes, if at all.
+// K is cmp.Ordered instead of of comparable so that they can be sorted.
+// V is the vector type (must satisfy VectorType constraint: []float32 or []int8).
+type Graph[K cmp.Ordered, V VectorType] struct {
+	// Metric is how the graph compares vectors. Distance is required. The
+	// optional pairs are used when set: Precompute/CachedDistance caches a
+	// value per node (layerNode.precomputed) and compares with it, and
+	// SquaredDistance ranks every comparison inside the graph, with
+	// FromSquaredDistance converting just the returned results back (see
+	// rankDistFuncFor). Similarity and Score are the caller's; the graph
+	// doesn't use them.
+	Metric metric.Metric[V]
+
+	// Config is how the graph is built and searched.
+	Config
+
+	// Rng is used for level generation. It may be set to a deterministic value
+	// for reproducibility. Note that deterministic number generation can lead to
+	// degenerate graphs when exposed to adversarial inputs.
+	Rng *rand.Rand
+
+	// layers is a slice of layers in the graph.
+	layers []*layer[K, V]
+
+	// insertVisited is a reused scratch map for layerNode.search()'s visited
+	// tracking during Add(), cleared and passed down instead of letting
+	// search() allocate a fresh map on every layer/node it processes. Safe to
+	// share across calls (unlike a per-node tag) because Add() always runs
+	// under the caller's exclusive lock -- never concurrently with itself or
+	// with a Search(). Left nil until Add()'s first call; Search() never
+	// touches this field, since concurrent Search() calls (an RLock-permitted
+	// pattern) can't safely share one map -- see visitedScratch's doc comment.
+	insertVisited map[K]bool
 }
 
 // visitedScratch returns g.insertVisited, lazily allocating it on first use
@@ -686,6 +714,8 @@ const (
 	// to a point better at recall@10, within build-to-build noise, so 100 stays the
 	// default and large datasets that need the recall can raise it.
 	DefaultEfConstruction = 100
+	// DefaultMl makes each layer about a quarter the size of the one below.
+	DefaultMl = 0.25
 	// DefaultBatchParallelThreshold: below this many nodes in one Add() call,
 	// round-based parallelism (see addRound) is skipped entirely in favor of
 	// addSerial -- goroutine/WaitGroup overhead isn't worth paying for a
@@ -708,17 +738,15 @@ func defaultRand() *rand.Rand {
 	return rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
-// NewGraph returns a new graph with default parameters, roughly designed for
-// storing OpenAI embeddings.
+// NewGraph returns an empty graph that compares vectors with m and is built
+// and searched as cfg says, with this package's defaults for its zero fields.
 // K is the key type (e.g., uint32).
 // V is the vector type (e.g., []float32, []int8).
-func NewGraph[K cmp.Ordered, V VectorType]() *Graph[K, V] {
+func NewGraph[K cmp.Ordered, V VectorType](m metric.Metric[V], cfg Config) *Graph[K, V] {
 	return &Graph[K, V]{
-		M:              DefaultM,
-		Ml:             0.25,
-		EfSearch:       DefaultEfSearch,
-		EfConstruction: DefaultEfConstruction,
-		Rng:            defaultRand(),
+		Metric: m,
+		Config: cfg.withDefaults(),
+		Rng:    defaultRand(),
 	}
 }
 

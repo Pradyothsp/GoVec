@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/test/fixtures"
 )
 
@@ -26,9 +27,7 @@ func newTestHNSWIndex(t testing.TB) *HNSWIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() })
 
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	return NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, testCosineMetric, 16, 20, 200, core.NewMetadataIndex(), nil)
+	return NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 }
 
 func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
@@ -39,10 +38,7 @@ func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() })
 
-	invertedIndex := make(map[uint32][]core.Posting)
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, testCosineMetric, 16, 20, 200, core.NewMetadataIndex(), nil)
+	return NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, HybridSearch: true, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 }
 
 // =============================================================================
@@ -270,8 +266,7 @@ func TestHNSWIndex_LoadFromFile_KeepsConfiguredEfSearch(t *testing.T) {
 	wal, err := NewWAL(filepath.Join(t.TempDir(), "loaded.wal"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = wal.Close() })
-	identityFunc := func(v []float32) []float32 { return v }
-	loaded := NewHNSWIndex[[]float32](wal, nil, core.NewIDMapper(), identityFunc, testCosineMetric, 16, 100, 200, core.NewMetadataIndex(), nil)
+	loaded := NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 100, EfConstruction: 200})
 
 	// Act
 	err = loaded.LoadFromFile(ctx, path)
@@ -449,10 +444,7 @@ func TestHNSWIndex_WALReplay_HybridRankingSurvives(t *testing.T) {
 	wal, err := NewWAL(walPath)
 	require.NoError(t, err)
 
-	invertedIndex := make(map[uint32][]core.Posting)
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, testCosineMetric, 16, 20, 200, nil, nil)
+	idx := NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, HybridSearch: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 
 	// Insert with sparse data — WAL entries carry the full SparseVector.
 	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
@@ -468,9 +460,7 @@ func TestHNSWIndex_WALReplay_HybridRankingSurvives(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = wal2.Close() })
 
-	invertedIndex2 := make(map[uint32][]core.Posting)
-	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, invertedIndex2, idMapper2, identityFunc, testCosineMetric, 16, 20, 200, nil, nil)
+	recovered := NewHNSWIndex(Options[[]float32]{WAL: wal2, Metric: testCosineMetric, HybridSearch: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 
 	require.NoError(t, recovered.ReplayWAL(walPath))
 	require.Equal(t, 2, recovered.Len(), "both docs must be recovered from WAL")

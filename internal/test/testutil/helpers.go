@@ -29,10 +29,17 @@ func NewTestIndex(t testing.TB) *index.VectorIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
 
-	// Create index with IDMapper, identity encode function and cosine similarity
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	return index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
+	return NewIndexOnWAL(t, wal)
+}
+
+// NewIndexOnWAL creates an empty brute-force cosine VectorIndex that logs to
+// wal, or logs nothing when wal is nil.
+func NewIndexOnWAL(t testing.TB, wal *index.WAL) *index.VectorIndex[[]float32] {
+	t.Helper()
+	m, err := metric.Resolve[[]float32](metric.Cosine)
+	require.NoError(t, err)
+
+	return index.NewVectorIndex(index.Options[[]float32]{WAL: wal, Metric: m})
 }
 
 // NewTestVectorIndex creates a pre-populated VectorIndex for testing.

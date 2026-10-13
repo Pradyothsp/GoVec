@@ -7,33 +7,22 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 // VectorIndex is a thread-safe in-memory store for vector embeddings, searched
 // by an exact linear scan. T is the vector storage type (e.g., []float32 for no
 // quantization, []int8 for scalar quantization). Everything about storing a
 // record is in the embedded records; VectorIndex adds only the scan.
-type VectorIndex[T any] struct {
+type VectorIndex[T metric.VectorType] struct {
 	records[T]
-	distanceFunc func(T, T) (float32, error) // similarity between a query and a stored vector, higher = closer
 }
 
-// NewVectorIndex creates an empty VectorIndex ready for use.
-// Pass a non-nil vectorStore to enable mmap-backed vector storage.
-func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, idMapper *core.IDMapper, encodeFunc func([]float32) T, distanceFunc func(T, T) (float32, error), vectorStore *storage.MmapStore) *VectorIndex[T] {
-	return &VectorIndex[T]{
-		records: records[T]{
-			Store:         make(map[uint32]*core.VectorNode[T]),
-			InvertedIndex: invertedIndex,
-			IDMapper:      idMapper,
-			indexType:     config.IndexTypeBrute,
-			wal:           wal,
-			encodeFunc:    encodeFunc,
-			vectorStore:   vectorStore,
-		},
-		distanceFunc: distanceFunc,
-	}
+// NewVectorIndex creates an empty VectorIndex, ready for use.
+func NewVectorIndex[T metric.VectorType](opts Options[T]) *VectorIndex[T] {
+	idx := &VectorIndex[T]{}
+	idx.init(opts, config.IndexTypeBrute)
+	return idx
 }
 
 // Insert adds or updates a vector in the index with thread-safety.
@@ -104,7 +93,7 @@ func (idx *VectorIndex[T]) Search(_ context.Context, query []float32, sparseQuer
 	score := idx.scorer(sparseQuery)
 	results := make([]SearchResult, 0, len(candidates))
 	for _, node := range candidates {
-		dense, err := idx.distanceFunc(encodedQuery, node.Vector)
+		dense, err := idx.metric.Similarity(encodedQuery, node.Vector)
 		if err != nil {
 			return nil, err
 		}

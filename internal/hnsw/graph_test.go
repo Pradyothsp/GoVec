@@ -86,12 +86,14 @@ func Test_layerNode_search(t *testing.T) {
 
 func newTestGraph[K cmp.Ordered]() *Graph[K, []float32] {
 	return &Graph[K, []float32]{
-		M:              6,
-		Metric:         metric.Metric[[]float32]{Distance: metric.EuclideanDistanceFloat32},
-		Ml:             0.5,
-		EfSearch:       20,
-		EfConstruction: 200,
-		Rng:            rand.New(rand.NewSource(0)),
+		Metric: metric.Metric[[]float32]{Distance: metric.EuclideanDistanceFloat32},
+		Rng:    rand.New(rand.NewSource(0)),
+		Config: Config{
+			M:              6,
+			Ml:             0.5,
+			EfSearch:       20,
+			EfConstruction: 200,
+		},
 	}
 }
 
@@ -316,8 +318,7 @@ func Benchmark_HNSW_1536(b *testing.B) {
 }
 
 func TestGraph_DefaultCosine(t *testing.T) {
-	g := NewGraph[int, []float32]()
-	g.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
+	g := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 	g.Add(
 		Node[int, []float32]{Key: 1, Value: []float32{1, 1}},
 		Node[int, []float32]{Key: 2, Value: []float32{0, 1}},
@@ -342,8 +343,7 @@ func TestGraph_RemoveAllNodes(t *testing.T) {
 	var vec = []float32{1}
 
 	for i := 0; i < 10; i++ {
-		g := NewGraph[int, []float32]()
-		g.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
+		g := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 		g.Add(MakeNode(1, vec))
 		g.Delete(1)
 		g.Add(MakeNode(1, vec))
@@ -354,8 +354,7 @@ func TestGraph_RemoveAllNodes(t *testing.T) {
 func TestGraph_Int8_AddSearch(t *testing.T) {
 	t.Parallel()
 
-	g := NewGraph[int, []int8]()
-	g.Metric = metric.Metric[[]int8]{Distance: metric.CosineDistanceInt8}
+	g := NewGraph[int, []int8](metric.Metric[[]int8]{Distance: metric.CosineDistanceInt8}, Config{})
 	g.M = 6
 	g.Ml = 0.5
 	g.EfSearch = 20
@@ -476,11 +475,13 @@ func TestGraph_SearchWithDistance_ConnectivityPreservation(t *testing.T) {
 	// With M=2 and deterministic RNG, the graph forms a sparse structure where
 	// lower-numbered nodes act as stepping stones.
 	g := &Graph[int, []float32]{
-		M:        2,
-		Metric:   metric.Metric[[]float32]{Distance: metric.EuclideanDistanceFloat32},
-		Ml:       0.5,
-		EfSearch: 50, // high efSearch to ensure thorough exploration
-		Rng:      rand.New(rand.NewSource(42)),
+		Metric: metric.Metric[[]float32]{Distance: metric.EuclideanDistanceFloat32},
+		Rng:    rand.New(rand.NewSource(42)),
+		Config: Config{
+			M:        2,
+			Ml:       0.5,
+			EfSearch: 50, // high efSearch to ensure thorough exploration
+		},
 	}
 	for i := 1; i <= 10; i++ {
 		g.Add(MakeNode(i, []float32{float32(i)}))
@@ -535,11 +536,10 @@ func TestGraph_EfConstruction_AffectsGraphQuality(t *testing.T) {
 	}
 
 	buildGraph := func(efConstruction int) *Graph[int, []float32] {
-		g := NewGraph[int, []float32]()
+		g := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 		g.M = 6 // deliberately low, so construction quality (not connection count) dominates recall
 		g.EfConstruction = efConstruction
-		g.EfSearch = 200 // held generous and constant across both graphs
-		g.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
+		g.EfSearch = 200                    // held generous and constant across both graphs
 		g.Rng = rand.New(rand.NewSource(1)) // deterministic level assignment for a fair comparison
 
 		nodes := make([]Node[int, []float32], n)
@@ -647,11 +647,10 @@ func TestGraph_BatchParallelAdd_Race(t *testing.T) {
 
 	const dim, n = 16, 300
 
-	g := NewGraph[int, []float32]()
+	g := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 	g.M = 12
 	g.EfConstruction = 64
 	g.EfSearch = 32
-	g.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
 	g.Rng = rand.New(rand.NewSource(7))
 	g.BatchParallelism = runtime.GOMAXPROCS(0)
 	g.BatchParallelThreshold = 1
@@ -688,12 +687,11 @@ func TestGraph_AddRound_EmptyLayerHazard(t *testing.T) {
 
 	const dim, n = 8, 40
 
-	g := NewGraph[int, []float32]()
+	g := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 	g.M = 6
 	g.Ml = 0.9 // deliberately high: pushes many nodes to non-zero levels, maximizing how often multiple items in round 1 fight over the same new layer
 	g.EfConstruction = 32
 	g.EfSearch = 16
-	g.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
 	g.Rng = rand.New(rand.NewSource(11))
 	g.BatchParallelism = n // >= n: the whole batch is one round
 	g.BatchParallelThreshold = 1
@@ -739,11 +737,10 @@ func TestGraph_BatchParallelAdd_StructuralSoundness(t *testing.T) {
 	}
 
 	build := func(parallel bool) *Graph[int, []float32] {
-		g := NewGraph[int, []float32]()
+		g := NewGraph[int, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{})
 		g.M = 10
 		g.EfConstruction = 48
 		g.EfSearch = 24
-		g.Metric = metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}
 		g.Rng = rand.New(rand.NewSource(1)) // same seed -- same level assignment sequence either way
 		if parallel {
 			g.BatchParallelism = runtime.GOMAXPROCS(0)

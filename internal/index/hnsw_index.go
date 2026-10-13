@@ -12,8 +12,6 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
-	"github.com/Pradyothsp/govec/internal/metric"
-	"github.com/Pradyothsp/govec/internal/storage"
 )
 
 // HNSWIndex is a thread-safe vector index backed by an HNSW graph for
@@ -25,68 +23,21 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	records[T]
 	graph *hnsw.Graph[uint32, T]
 
-	metric                     metric.Metric[T] // stored for the graph rebuilt by Reset; Score converts its distances
-	hnswM                      int              // stored for the graph rebuilt by Reset
-	hnswEfSearch               int              // stored for the graph rebuilt by Reset
-	hnswEfConstruction         int              // stored for the graph rebuilt by Reset
-	hnswBatchParallelism       int              // stored for the graph rebuilt by Reset
-	hnswBatchParallelThreshold int              // stored for the graph rebuilt by Reset
+	graphConfig hnsw.Config // kept for the graph Reset rebuilds
 }
 
-// NewHNSWIndex creates an empty HNSWIndex ready for use.
-// Pass a non-nil metaIndex to enable metadata-accelerated filtered search.
-// Pass a non-nil vectorStore to enable mmap-backed vector storage.
-func NewHNSWIndex[T hnsw.VectorType](
-	wal *WAL,
-	invertedIndex map[uint32][]core.Posting,
-	idMapper *core.IDMapper,
-	encodeFunc func([]float32) T,
-	distMetric metric.Metric[T],
-	m int,
-	efSearch int,
-	efConstruction int,
-	metaIndex *core.MetadataIndex,
-	vectorStore *storage.MmapStore,
-) *HNSWIndex[T] {
-	idx := &HNSWIndex[T]{
-		records: records[T]{
-			Store:         make(map[uint32]*core.VectorNode[T]),
-			InvertedIndex: invertedIndex,
-			IDMapper:      idMapper,
-			metaIndex:     metaIndex,
-			indexType:     config.IndexTypeHNSW,
-			wal:           wal,
-			encodeFunc:    encodeFunc,
-			vectorStore:   vectorStore,
-		},
-		metric:             distMetric,
-		hnswM:              m,
-		hnswEfSearch:       efSearch,
-		hnswEfConstruction: efConstruction,
-	}
+// NewHNSWIndex creates an empty HNSWIndex, ready for use. graph's zero fields
+// take hnsw's defaults.
+func NewHNSWIndex[T hnsw.VectorType](opts Options[T], graph hnsw.Config) *HNSWIndex[T] {
+	idx := &HNSWIndex[T]{graphConfig: graph}
+	idx.init(opts, config.IndexTypeHNSW)
 	idx.graph = idx.newGraph()
 	return idx
 }
 
-// newGraph builds an empty graph from the index's settings.
+// newGraph builds an empty graph from the index's metric and graph config.
 func (idx *HNSWIndex[T]) newGraph() *hnsw.Graph[uint32, T] {
-	g := hnsw.NewGraph[uint32, T]()
-	g.M = idx.hnswM
-	g.EfSearch = idx.hnswEfSearch
-	g.EfConstruction = idx.hnswEfConstruction
-	g.Metric = idx.metric
-	g.BatchParallelism = idx.hnswBatchParallelism
-	g.BatchParallelThreshold = idx.hnswBatchParallelThreshold
-	return g
-}
-
-// setBatchParallelism sets how batch inserts parallelise graph construction,
-// now and after a Reset.
-func (idx *HNSWIndex[T]) setBatchParallelism(parallelism, threshold int) {
-	idx.hnswBatchParallelism = parallelism
-	idx.hnswBatchParallelThreshold = threshold
-	idx.graph.BatchParallelism = parallelism
-	idx.graph.BatchParallelThreshold = threshold
+	return hnsw.NewGraph[uint32](idx.metric, idx.graphConfig)
 }
 
 // Insert adds or updates a vector in the index with thread-safety.
@@ -220,7 +171,7 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 			if scale > maxEfScale {
 				scale = maxEfScale
 			}
-			scaledEf = int(float64(idx.hnswEfSearch) * scale)
+			scaledEf = int(float64(idx.graph.EfSearch) * scale)
 		}
 	}
 

@@ -15,7 +15,6 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
-	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
@@ -563,9 +562,7 @@ func TestBatchInsert_WALFailureReturns500AndInsertsNothing(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
+	idx := testutil.NewIndexOnWAL(t, wal)
 
 	// Force the WAL write the handler triggers to fail.
 	require.NoError(t, wal.Close())
@@ -636,9 +633,7 @@ func TestInsert_EngineFailureStillReturns500(t *testing.T) {
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
 
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := index.NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
+	idx := testutil.NewIndexOnWAL(t, wal)
 	require.NoError(t, wal.Close())
 
 	handler := NewVectorHandler(idx)

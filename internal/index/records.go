@@ -25,16 +25,16 @@ import (
 // These rules used to be written out in both engines, and the copies drifted:
 // HNSW learned the index's width from a vector it then rejected, and its Info
 // never reported mmap.
-type records[T any] struct {
+type records[T metric.VectorType] struct {
 	Store         map[uint32]*core.VectorNode[T]
 	InvertedIndex map[uint32][]core.Posting // nil when hybrid search is off
 	IDMapper      *core.IDMapper
 	metaIndex     *core.MetadataIndex // nil when the metadata index is off
 
-	quantization   config.Quantization
-	indexType      config.IndexType
-	distanceMetric metric.Name
-	dimensions     int // 0 until set by config or the first insert
+	quantization config.Quantization // follows from T
+	indexType    config.IndexType
+	metric       metric.Metric[T] // brute force ranks on its Similarity, HNSW scores with its Score
+	dimensions   int              // 0 until set by config or the first insert
 	// configuredDimensions is engine.dimensions from config, 0 when unset.
 	// Kept apart from dimensions so clear can tell a width the operator chose
 	// from one the index happened to learn, and release only the latter.
@@ -44,14 +44,6 @@ type records[T any] struct {
 	wal         *WAL
 	encodeFunc  func([]float32) T  // converts input vectors to the stored type
 	vectorStore *storage.MmapStore // nil when mmap is disabled
-}
-
-// configure applies the engine settings from config.
-func (r *records[T]) configure(cfg *config.EngineConfig) {
-	r.quantization = cfg.Quantization
-	r.distanceMetric = cfg.DistanceMetric
-	r.dimensions = cfg.Dimensions
-	r.configuredDimensions = cfg.Dimensions
 }
 
 // GetByID retrieves a VectorRecord by its external ID, returning
@@ -101,7 +93,7 @@ func (r *records[T]) Info() EngineInfo {
 	return EngineInfo{
 		Quantization:   string(r.quantization),
 		IndexType:      string(r.indexType),
-		DistanceMetric: string(r.distanceMetric),
+		DistanceMetric: string(r.metric.Name),
 		Dimensions:     r.dimensions,
 		VectorCount:    len(r.Store),
 		EnableMmap:     r.vectorStore != nil,
@@ -119,7 +111,7 @@ func (r *records[T]) check(vec []float32, sparse core.SparseVector, width int) e
 	if err := validateSparse(sparse); err != nil {
 		return err
 	}
-	return checkEncodable(vec, r.quantization, r.distanceMetric)
+	return checkEncodable(vec, r.quantization, r.metric.Name)
 }
 
 // insert is Engine.Insert for both engines: the write is checked, goes to the
@@ -377,7 +369,7 @@ func (r *records[T]) clear() {
 // encode converts vec to the stored type, after the fix-up scalar
 // quantization needs (see prepareForEncode).
 func (r *records[T]) encode(vec []float32) (T, error) {
-	input, err := prepareForEncode(vec, r.quantization, r.distanceMetric)
+	input, err := prepareForEncode(vec, r.quantization, r.metric.Name)
 	if err != nil {
 		var zero T
 		return zero, err
@@ -527,7 +519,7 @@ func (r *records[T]) removePostings(docID uint32, sparse core.SparseVector) {
 func (r *records[T]) snapshotContents() snapshotContents[T] {
 	return snapshotContents[T]{
 		indexType:      r.indexType,
-		distanceMetric: r.distanceMetric,
+		distanceMetric: r.metric.Name,
 		dimensions:     r.dimensions,
 		idMapper:       r.IDMapper,
 		nodes:          r.Store,

@@ -47,8 +47,8 @@ if err != nil {
     panic(err)
 }
 
-g := hnsw.NewGraph[uint32, []float32]()
-g.Metric = m
+// A zero Config field takes this package's default (hnsw.DefaultM, ...).
+g := hnsw.NewGraph[uint32](m, hnsw.Config{M: 16, EfSearch: 100})
 
 g.Add(
     hnsw.MakeNode[uint32, []float32](1, []float32{1, 1, 1}),

@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/test/fixtures"
 )
 
@@ -83,9 +81,7 @@ func TestVectorIndex_BatchInsert_RecoversViaReplayWAL(t *testing.T) {
 	wal, err := NewWAL(walPath)
 	require.NoError(t, err)
 
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
+	idx := NewVectorIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric})
 
 	items := []BatchInsertItem{
 		{ID: "v1", Vector: fixtures.Vec3dSimple, Meta: fixtures.MetaSimple},

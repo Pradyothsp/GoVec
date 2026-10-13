@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/hnsw"
 )
 
 // TestHNSWFilteredSearch_ReturnsKMatches pins the filtered-search contract: a
@@ -113,13 +114,7 @@ func TestHNSWFilteredSearch_ReturnsKMatches(t *testing.T) {
 // on every run.
 func newSeededHNSWIndex(t *testing.T, withMetaIndex bool) *HNSWIndex[[]float32] {
 	t.Helper()
-	var metaIndex *core.MetadataIndex
-	if withMetaIndex {
-		metaIndex = core.NewMetadataIndex()
-	}
-	idx := NewHNSWIndex[[]float32](newTestWAL(t), nil, core.NewIDMapper(),
-		func(v []float32) []float32 { return v },
-		testCosineMetric, 16, 20, 200, metaIndex, nil)
+	idx := NewHNSWIndex(Options[[]float32]{WAL: newTestWAL(t), Metric: testCosineMetric, MetadataIndex: withMetaIndex}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 	idx.graph.Rng = rand.New(rand.NewSource(1))
 	return idx
 }

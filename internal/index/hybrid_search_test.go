@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 // newTestIndexWithHybrid creates a VectorIndex with hybrid search enabled
@@ -21,12 +20,7 @@ func newTestIndexWithHybrid(t testing.TB) *VectorIndex[[]float32] {
 	}
 	t.Cleanup(func() { _ = wal.Close() })
 
-	// Create inverted index (enables hybrid search)
-	invertedIndex := make(map[uint32][]core.Posting)
-
-	idMapper := core.NewIDMapper()
-	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, metric.CosineSimilarity, nil)
+	return NewVectorIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, HybridSearch: true})
 }
 
 func TestHybridSearch_DenseOnly(t *testing.T) {
