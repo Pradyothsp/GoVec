@@ -12,164 +12,76 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewLoader(t *testing.T) {
-	loader := NewLoader("config.yaml")
-	assert.NotNil(t, loader)
-	assert.Equal(t, "config.yaml", loader.configPath)
-}
-
-func TestLoader_Load_WithMissingFile(t *testing.T) {
-	// Missing file should fall back to defaults
-	loader := NewLoader("nonexistent.yaml")
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-
-	// Should have default values
-	assert.Equal(t, 9697, cfg.Server.Port)
-	assert.Equal(t, "./govec_data.bin", cfg.Storage.DataPath)
-}
-
-func TestLoader_Load_WithValidYAML(t *testing.T) {
-	// Create temporary YAML file
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	yamlContent := `
+// TestLoader_Load: settings come from the defaults, then the YAML file, then
+// GOVEC_* variables, each overriding the one before; a file that can't be
+// parsed, or settings that fail validation, are an error rather than a
+// half-loaded config.
+func TestLoader_Load(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string // "" means no file
+		env     map[string]string
+		wantErr string
+		check   func(t *testing.T, cfg *Config)
+	}{
+		{name: "no file: the defaults", check: func(t *testing.T, cfg *Config) {
+			assert.Equal(t, DefaultConfig(), cfg)
+		}},
+		{name: "file values replace the defaults", yaml: `
 server:
   host: "localhost"
   port: 9000
   shutdown_timeout: 15s
-
 storage:
   data_path: "/tmp/test.bin"
   auto_save_enabled: false
   auto_save_interval: 120s
-`
+`, check: func(t *testing.T, cfg *Config) {
+			assert.Equal(t, "localhost", cfg.Server.Host)
+			assert.Equal(t, 9000, cfg.Server.Port)
+			assert.Equal(t, 15*time.Second, cfg.Server.ShutdownTimeout)
+			assert.Equal(t, "/tmp/test.bin", cfg.Storage.DataPath)
+			assert.False(t, cfg.Storage.AutoSaveEnabled)
+			assert.Equal(t, 120*time.Second, cfg.Storage.AutoSaveInterval)
+		}},
+		{name: "fields the file leaves out keep their defaults", yaml: "server:\n  port: 9999\n", check: func(t *testing.T, cfg *Config) {
+			want := DefaultConfig()
+			want.Server.Port = 9999
+			assert.Equal(t, want, cfg)
+		}},
+		{name: "environment beats the file", yaml: "server:\n  host: \"localhost\"\n  port: 9000\n",
+			env: map[string]string{"GOVEC_SERVER_PORT": "7777"},
+			check: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 7777, cfg.Server.Port)
+				assert.Equal(t, "localhost", cfg.Server.Host)
+			}},
+		{name: "unparseable YAML", yaml: "server:\n  port: invalid_port\n    bad_indent: true\n", wantErr: "failed to load config file"},
+		{name: "values that fail validation", yaml: "server:\n  port: 99999\n", wantErr: "invalid configuration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if tt.yaml != "" {
+				require.NoError(t, os.WriteFile(path, []byte(tt.yaml), 0o600))
+			}
+			for key, val := range tt.env {
+				t.Setenv(key, val)
+			}
 
-	err := os.WriteFile(configPath, []byte(yamlContent), 0644)
-	require.NoError(t, err)
+			// Act
+			cfg, err := NewLoader(path).Load()
 
-	loader := NewLoader(configPath)
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-
-	// Verify values from YAML
-	assert.Equal(t, "localhost", cfg.Server.Host)
-	assert.Equal(t, 9000, cfg.Server.Port)
-	assert.Equal(t, 15*time.Second, cfg.Server.ShutdownTimeout)
-
-	assert.Equal(t, "/tmp/test.bin", cfg.Storage.DataPath)
-	assert.Equal(t, false, cfg.Storage.AutoSaveEnabled)
-	assert.Equal(t, 120*time.Second, cfg.Storage.AutoSaveInterval)
-}
-
-func TestLoader_Load_WithInvalidYAML(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	// Invalid YAML syntax
-	yamlContent := `
-server:
-  host: "localhost"
-  port: invalid_port
-    bad_indent: true
-`
-
-	err := os.WriteFile(configPath, []byte(yamlContent), 0644)
-	require.NoError(t, err)
-
-	loader := NewLoader(configPath)
-	cfg, err := loader.Load()
-
-	assert.Error(t, err)
-	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "failed to load config file")
-}
-
-func TestLoader_Load_WithInvalidConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	// Valid YAML but invalid config (port out of range)
-	yamlContent := `
-server:
-  host: ""
-  port: 99999
-  shutdown_timeout: 10s
-`
-
-	err := os.WriteFile(configPath, []byte(yamlContent), 0644)
-	require.NoError(t, err)
-
-	loader := NewLoader(configPath)
-	cfg, err := loader.Load()
-
-	assert.Error(t, err)
-	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "invalid configuration")
-}
-
-func TestLoader_Load_EnvironmentOverridesFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	// Create YAML with some values
-	yamlContent := `
-server:
-  host: "localhost"
-  port: 9000
-  shutdown_timeout: 15s
-`
-
-	err := os.WriteFile(configPath, []byte(yamlContent), 0644)
-	require.NoError(t, err)
-
-	// Set environment variable to override port
-	t.Setenv("GOVEC_SERVER_PORT", "7777")
-
-	loader := NewLoader(configPath)
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-
-	// Port should be from environment, not file
-	assert.Equal(t, 7777, cfg.Server.Port)
-
-	// Other values should be from file
-	assert.Equal(t, "localhost", cfg.Server.Host)
-	assert.Equal(t, 15*time.Second, cfg.Server.ShutdownTimeout)
-}
-
-func TestLoader_Load_PartialYAML(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	// Only override server config, leave others as defaults
-	yamlContent := `
-server:
-  port: 9999
-`
-
-	err := os.WriteFile(configPath, []byte(yamlContent), 0644)
-	require.NoError(t, err)
-
-	loader := NewLoader(configPath)
-	cfg, err := loader.Load()
-
-	require.NoError(t, err)
-	assert.NotNil(t, cfg)
-
-	// Server port should be from file
-	assert.Equal(t, 9999, cfg.Server.Port)
-
-	// Other values should be defaults
-	assert.Equal(t, "", cfg.Server.Host)
-	assert.Equal(t, "./govec_data.bin", cfg.Storage.DataPath)
+			// Assert
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				assert.Nil(t, cfg)
+				return
+			}
+			require.NoError(t, err)
+			tt.check(t, cfg)
+		})
+	}
 }
 
 func TestLoader_Load_BooleanEnvironmentVariable(t *testing.T) {

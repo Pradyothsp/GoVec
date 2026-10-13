@@ -107,7 +107,7 @@ narrate what the code does line by line.
 ## Testing
 
 - testify everywhere: `require` for preconditions that make the rest meaningless, `assert` for
-  the checks themselves. Integration suites use `testify/suite`.
+  the checks themselves. Prefer table-driven tests over one function per case.
 - Structure every test as Arrange / Act / Assert, each section marked with a `// Arrange`,
   `// Act` or `// Assert` comment. In a table-driven test the markers go inside the `t.Run` body.
 - Use `t.TempDir()` for any WAL or snapshot path. Never write into the repo.
@@ -116,8 +116,17 @@ narrate what the code does line by line.
 - Coverage target: ~100% for `internal/core` and `internal/config`.
 - Known, unfixed bugs get a regression test committed with `t.Skip("<link to doc>")`, so the
   fix has a ready-made test to un-skip (example: `hnsw_filtered_search_test.go`).
-- Before adding a test, check that the behaviour isn't already covered. The suite already has
-  real redundancy, so don't add to it.
+- **Test each rule once, where it lives.** Both engines keep records through the same `records`
+  code, so a record rule (insert, delete, WAL order, persistence, filters, hybrid scoring) is one
+  test run over `bothEngines` in `internal/index`, not a copy per engine. `hnsw_index_test.go`
+  holds only what HNSW does differently. Each transport has one lifecycle test through every
+  route (`rest_test.go`, `TestGRPC_VectorLifecycle`) and one table of bad requests; don't add
+  happy-path tests per handler.
+- Before adding a test, check that the behaviour isn't already covered, and assert outcomes
+  exactly: an assertion like `len(results) <= k` passes on an empty result.
+- Benchmarks (`task test:benchmark`) must time real work in a `b.Loop` and fail when results are
+  wrong, not just log a warning: `BenchmarkSearch` fails below a recall@10 floor, and
+  `BenchmarkSnapshot` when int8 isn't stored as int8. Query with vectors that aren't in the index.
 
 ## Traps
 

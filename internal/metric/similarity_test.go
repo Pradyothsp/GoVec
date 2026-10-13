@@ -3,214 +3,57 @@ package metric
 import (
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// Cosine similarity is the cosine of the angle between two vectors: 1 for the
+// same direction, whatever the lengths, 0 at right angles, -1 opposite. The
+// unrolled loop is checked against the float64 formula on every length in
+// similarity_reference_test.go.
 func TestCosineSimilarity(t *testing.T) {
 	tests := []struct {
-		name          string
-		a             []float32
-		b             []float32
-		expectedScore float32
-		expectError   bool
-		errorMsg      string
+		name string
+		a, b []float32
+		want float32
 	}{
-		{
-			name:          "identical vectors",
-			a:             []float32{1.0, 2.0, 3.0},
-			b:             []float32{1.0, 2.0, 3.0},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "opposite vectors",
-			a:             []float32{1.0, 2.0, 3.0},
-			b:             []float32{-1.0, -2.0, -3.0},
-			expectedScore: -1.0,
-			expectError:   false,
-		},
-		{
-			name:          "orthogonal vectors",
-			a:             []float32{1.0, 0.0},
-			b:             []float32{0.0, 1.0},
-			expectedScore: 0.0,
-			expectError:   false,
-		},
-		{
-			name:          "normalized vectors - high similarity",
-			a:             []float32{0.6, 0.8},
-			b:             []float32{0.6, 0.8},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "similar direction different magnitude",
-			a:             []float32{1.0, 1.0},
-			b:             []float32{2.0, 2.0},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:        "dimension mismatch",
-			a:           []float32{1.0, 2.0},
-			b:           []float32{1.0, 2.0, 3.0},
-			expectError: true,
-			errorMsg:    "vector dimensions mismatch",
-		},
-		{
-			name:          "zero vector a",
-			a:             []float32{0.0, 0.0, 0.0},
-			b:             []float32{1.0, 2.0, 3.0},
-			expectedScore: 0.0, // Zero vectors have no meaningful similarity
-			expectError:   false,
-		},
-		{
-			name:          "zero vector b",
-			a:             []float32{1.0, 2.0, 3.0},
-			b:             []float32{0.0, 0.0, 0.0},
-			expectedScore: 0.0, // Zero vectors have no meaningful similarity
-			expectError:   false,
-		},
-		{
-			name:          "both zero vectors",
-			a:             []float32{0.0, 0.0},
-			b:             []float32{0.0, 0.0},
-			expectedScore: 0.0, // Zero vectors have no meaningful similarity
-			expectError:   false,
-		},
-		{
-			name:          "single dimension vectors",
-			a:             []float32{5.0},
-			b:             []float32{5.0},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "high dimensional vectors - identical",
-			a:             []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0},
-			b:             []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "negative values",
-			a:             []float32{-1.0, -2.0, -3.0},
-			b:             []float32{-1.0, -2.0, -3.0},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "mixed positive and negative",
-			a:             []float32{1.0, -2.0, 3.0},
-			b:             []float32{1.0, -2.0, 3.0},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "very small values",
-			a:             []float32{0.0001, 0.0002, 0.0003},
-			b:             []float32{0.0001, 0.0002, 0.0003},
-			expectedScore: 1.0,
-			expectError:   false,
-		},
-		{
-			name:          "partial similarity",
-			a:             []float32{1.0, 0.0, 0.0},
-			b:             []float32{1.0, 1.0, 0.0},
-			expectedScore: float32(1.0 / math.Sqrt(2.0)), // ~0.707
-			expectError:   false,
-		},
+		{"identical", []float32{1, -2, 3}, []float32{1, -2, 3}, 1},
+		{"same direction, different length", []float32{1, 1}, []float32{2, 2}, 1},
+		{"opposite", []float32{1, 2, 3}, []float32{-1, -2, -3}, -1},
+		{"orthogonal", []float32{1, 0}, []float32{0, 1}, 0},
+		{"45 degrees", []float32{1, 0, 0}, []float32{1, 1, 0}, float32(1 / math.Sqrt2)},
+		{"tiny values", []float32{0.0001, 0.0002}, []float32{0.0001, 0.0002}, 1},
+		// A zero vector has no direction, so no meaningful similarity: 0, not NaN.
+		{"zero vector", []float32{0, 0, 0}, []float32{1, 2, 3}, 0},
+		{"both zero", []float32{0, 0}, []float32{0, 0}, 0},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score, err := CosineSimilarity(tt.a, tt.b)
+			// Act
+			ab, errAB := CosineSimilarity(tt.a, tt.b)
+			ba, errBA := CosineSimilarity(tt.b, tt.a)
 
-			if tt.expectError {
-				if err == nil {
-					t.Errorf("expected error but got none")
-				} else if err.Error() != tt.errorMsg {
-					t.Errorf("expected error '%s', got '%s'", tt.errorMsg, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				// Use tolerance for floating point comparison
-				tolerance := float32(0.0001)
-				if math.Abs(float64(score-tt.expectedScore)) > float64(tolerance) {
-					t.Errorf("expected score %f, got %f", tt.expectedScore, score)
-				}
-			}
+			// Assert
+			require.NoError(t, errAB)
+			require.NoError(t, errBA)
+			assert.InDelta(t, tt.want, ab, 1e-5)
+			assert.Equal(t, ab, ba, "must be symmetric")
 		})
 	}
-}
 
-func TestCosineSimilarity_EdgeCases(t *testing.T) {
-	t.Run("empty vectors", func(t *testing.T) {
-		a := []float32{}
-		b := []float32{}
-		_, err := CosineSimilarity(a, b)
-		if err == nil {
-			t.Error("expected error for empty vectors")
-		}
+	t.Run("dimension mismatch", func(t *testing.T) {
+		// Act
+		_, err := CosineSimilarity([]float32{1, 2}, []float32{1, 2, 3})
+
+		// Assert
+		assert.EqualError(t, err, "vector dimensions mismatch")
 	})
+	t.Run("empty", func(t *testing.T) {
+		// Act
+		_, err := CosineSimilarity([]float32{}, []float32{})
 
-	t.Run("one empty one non-empty", func(t *testing.T) {
-		a := []float32{}
-		b := []float32{1.0, 2.0}
-		_, err := CosineSimilarity(a, b)
-		if err == nil {
-			t.Error("expected error for dimension mismatch")
-		}
-	})
-
-	t.Run("128 dimensional vectors", func(t *testing.T) {
-		a := make([]float32, 128)
-		b := make([]float32, 128)
-		for i := range a {
-			a[i] = float32(i) / 128.0
-			b[i] = float32(i) / 128.0
-		}
-		score, err := CosineSimilarity(a, b)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if math.Abs(float64(score-1.0)) > 0.0001 {
-			t.Errorf("expected score 1.0 for identical vectors, got %f", score)
-		}
-	})
-
-	t.Run("1536 dimensional vectors (OpenAI embeddings)", func(t *testing.T) {
-		a := make([]float32, 1536)
-		b := make([]float32, 1536)
-		for i := range a {
-			a[i] = 0.5
-			b[i] = 0.5
-		}
-		score, err := CosineSimilarity(a, b)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if math.Abs(float64(score-1.0)) > 0.0001 {
-			t.Errorf("expected score 1.0, got %f", score)
-		}
-	})
-}
-
-func TestCosineSimilarity_Symmetry(t *testing.T) {
-	t.Run("cosine similarity should be symmetric", func(t *testing.T) {
-		a := []float32{1.0, 2.0, 3.0, 4.0}
-		b := []float32{5.0, 6.0, 7.0, 8.0}
-
-		scoreAB, err1 := CosineSimilarity(a, b)
-		scoreBA, err2 := CosineSimilarity(b, a)
-
-		if err1 != nil || err2 != nil {
-			t.Errorf("unexpected errors: %v, %v", err1, err2)
-		}
-
-		if scoreAB != scoreBA {
-			t.Errorf("cosine similarity not symmetric: AB=%f, BA=%f", scoreAB, scoreBA)
-		}
+		// Assert
+		assert.Error(t, err)
 	})
 }
