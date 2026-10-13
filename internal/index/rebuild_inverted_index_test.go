@@ -97,3 +97,27 @@ func newTestMmapStore(t *testing.T, dir string) *storage.MmapStore {
 	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
+
+// An index with hybrid search off keeps no inverted index, even when it loads
+// a snapshot saved with hybrid search on.
+func TestLoadFromFile_HybridOff_BuildsNoInvertedIndex(t *testing.T) {
+	ctx := context.Background()
+	saved := map[string]FileEngine{"brute": newTestIndexWithHybrid(t), "hnsw": newTestHNSWIndexWithHybrid(t)}
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "hybrid.bin")
+			require.NoError(t, saved[e.name].Insert(ctx, "doc", []float32{1, 0, 0}, core.SparseVector{Indices: []uint32{10}, Values: []float32{1}}, nil))
+			require.NoError(t, saved[e.name].SaveToFile(ctx, path))
+			loaded, r := e.open(t)
+
+			// Act
+			err := loaded.LoadFromFile(ctx, path)
+
+			// Assert
+			require.NoError(t, err)
+			assert.Equal(t, 1, loaded.Len())
+			assert.Nil(t, r.inverted)
+		})
+	}
+}

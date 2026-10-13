@@ -43,3 +43,15 @@ var testCosineMetric = func() metric.Metric[[]float32] {
 
 	return m
 }()
+
+// newTestIndexWithHybrid creates a VectorIndex with hybrid search enabled.
+func newTestIndexWithHybrid(t testing.TB) *VectorIndex[[]float32] {
+	t.Helper()
+	wal, err := NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	if err != nil {
+		t.Fatalf("newTestIndexWithHybrid: failed to create WAL: %v", err)
+	}
+	t.Cleanup(func() { _ = wal.Close() })
+
+	return NewVectorIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, HybridSearch: true})
+}
