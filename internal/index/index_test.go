@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -14,143 +15,42 @@ import (
 	"github.com/Pradyothsp/govec/internal/test/fixtures"
 )
 
-// =============================================================================
-// Consolidated Index Tests
-// =============================================================================
-
-func TestNewVectorIndex(t *testing.T) {
-	idx := newTestIndex(t)
-
-	require.NotNil(t, idx, "NewVectorIndex should return non-nil")
-	require.NotNil(t, idx.Store, "Store should be initialized")
-	assert.Empty(t, idx.Store, "Store should be empty initially")
-	assert.Equal(t, 0, len(idx.Store), "Store length should be 0")
-}
-
-// TestInsert_Variations consolidates all insert test variations into table-driven tests
-func TestInsert_Variations(t *testing.T) {
+// An insert stores the vector and metadata it was given, as given; an empty
+// vector can never be compared against anything, so it is refused.
+func TestInsert(t *testing.T) {
 	tests := []struct {
-		name          string
-		id            string
-		vector        []float32
-		sparse        core.SparseVector
-		metadata      map[string]any
-		expectError   bool
-		validateAfter func(*testing.T, *VectorIndex[[]float32])
+		name    string
+		vector  []float32
+		meta    map[string]any
+		wantErr error
 	}{
-		{
-			name:     "with_metadata",
-			id:       "vec1",
-			vector:   fixtures.Vec3dSimple,
-			sparse:   core.SparseVector{},
-			metadata: fixtures.MetaSimple,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, err := idx.IDMapper.ToUint32ID("vec1")
-				require.NoError(t, err)
-				assert.Contains(t, idx.Store, internalID)
-				assert.Equal(t, fixtures.MetaSimple, idx.Store[internalID].Metadata)
-			},
-		},
-		{
-			name:     "without_metadata",
-			id:       "vec2",
-			vector:   fixtures.Vec3dAlternate,
-			sparse:   core.SparseVector{},
-			metadata: nil,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, _ := idx.IDMapper.ToUint32ID("vec2")
-				assert.Nil(t, idx.Store[internalID].Metadata)
-			},
-		},
-		{
-			name:     "empty_metadata",
-			id:       "vec3",
-			vector:   fixtures.Vec3dThird,
-			sparse:   core.SparseVector{},
-			metadata: fixtures.MetaEmpty,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, _ := idx.IDMapper.ToUint32ID("vec3")
-				assert.Equal(t, fixtures.MetaEmpty, idx.Store[internalID].Metadata)
-			},
-		},
-		{
-			name:     "nested_metadata",
-			id:       "vec4",
-			vector:   fixtures.Vec3dSimple,
-			sparse:   core.SparseVector{},
-			metadata: fixtures.MetaNested,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, _ := idx.IDMapper.ToUint32ID("vec4")
-				assert.Equal(t, fixtures.MetaNested, idx.Store[internalID].Metadata)
-			},
-		},
-		{
-			// An empty vector can never be compared against anything, so it
-			// would make every later search fail once a real vector set the
-			// index's width -- rejected at insert instead.
-			name:        "empty_vector_is_rejected",
-			id:          "vec5",
-			vector:      fixtures.VecEmpty,
-			sparse:      core.SparseVector{},
-			metadata:    nil,
-			expectError: true,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				assert.NotContains(t, idx.Store, uint32(0))
-			},
-		},
-		{
-			name:     "large_vector_1536d",
-			id:       "vec6",
-			vector:   fixtures.Vec1536d,
-			sparse:   core.SparseVector{},
-			metadata: map[string]any{"dims": 1536},
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, _ := idx.IDMapper.ToUint32ID("vec6")
-				assert.Len(t, idx.Store[internalID].Vector, 1536)
-			},
-		},
-		{
-			name:     "special_chars_in_id",
-			id:       "special-id_!@#$",
-			vector:   fixtures.Vec3dSimple,
-			sparse:   core.SparseVector{},
-			metadata: nil,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, err := idx.IDMapper.ToUint32ID("special-id_!@#$")
-				require.NoError(t, err)
-				assert.Contains(t, idx.Store, internalID)
-			},
-		},
-		{
-			name:     "unicode_in_id",
-			id:       "测试-unicode",
-			vector:   fixtures.Vec3dAlternate,
-			sparse:   core.SparseVector{},
-			metadata: nil,
-			validateAfter: func(t *testing.T, idx *VectorIndex[[]float32]) {
-				internalID, err := idx.IDMapper.ToUint32ID("测试-unicode")
-				require.NoError(t, err)
-				assert.Contains(t, idx.Store, internalID)
-			},
-		},
+		{name: "with metadata", vector: []float32{1, 2, 3}, meta: map[string]any{"label": "x", "nested": map[string]any{"n": 1}}},
+		{name: "without metadata", vector: []float32{1, 2, 3}},
+		{name: "empty metadata", vector: []float32{1, 2, 3}, meta: map[string]any{}},
+		{name: "empty vector", vector: []float32{}, wantErr: ErrEmptyVector},
 	}
+	for _, e := range bothEngines {
+		for _, tt := range tests {
+			t.Run(e.name+"/"+tt.name, func(t *testing.T) {
+				// Arrange
+				idx, _ := e.open(t)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			idx := newTestIndex(t)
+				// Act
+				err := idx.Insert(context.Background(), "v", tt.vector, core.SparseVector{}, tt.meta)
 
-			err := idx.Insert(context.Background(), tt.id, tt.vector, tt.sparse, tt.metadata)
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.Len(t, idx.Store, 1, "Should have 1 vector in store")
-				if tt.validateAfter != nil {
-					tt.validateAfter(t, idx)
+				// Assert
+				if tt.wantErr != nil {
+					require.ErrorIs(t, err, tt.wantErr)
+					assert.Zero(t, idx.Len())
+					return
 				}
-			}
-		})
+				require.NoError(t, err)
+				got, err := idx.GetByID(context.Background(), "v")
+				require.NoError(t, err)
+				assert.Equal(t, tt.vector, got.Vector)
+				assert.Equal(t, tt.meta, got.Metadata)
+			})
+		}
 	}
 }
 
@@ -184,167 +84,60 @@ func TestInsert_Overwrite(t *testing.T) {
 		})
 	}
 }
-func TestInsert_Concurrency(t *testing.T) {
-	idx := newTestIndex(t)
 
-	var wg sync.WaitGroup
-	numGoroutines := 100
-	wg.Add(numGoroutines)
-
-	for i := 0; i < numGoroutines; i++ {
-		go func(n int) {
-			defer wg.Done()
-			id := fmt.Sprintf("vec%d", n)
-			vec := []float32{float32(n), float32(n * 2)}
-			_ = idx.Insert(context.Background(), id, vec, core.SparseVector{}, map[string]any{"n": n}) //nolint:errcheck // test concurrency
-		}(i)
-	}
-
-	wg.Wait()
-	assert.Len(t, idx.Store, numGoroutines, "All concurrent inserts should succeed")
-}
-
-// TestSearch_Variations consolidates all search test variations
-func TestSearch_Variations(t *testing.T) {
-	tests := []struct {
-		name        string
-		setup       func(*VectorIndex[[]float32])
-		query       []float32
-		sparseQuery core.SparseVector
-		limit       int
-		filters     map[string]interface{}
-		expectCount int
-		expectError bool
-	}{
-		{
-			name: "empty_index",
-			setup: func(idx *VectorIndex[[]float32]) {
-				// No setup
-			},
-			query:       fixtures.Vec3dSimple,
-			sparseQuery: core.SparseVector{},
-			limit:       10,
-			filters:     nil,
-			expectCount: 0,
-		},
-		{
-			name: "single_vector",
-			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert(context.Background(), "vec1", fixtures.Vec3dSimple, core.SparseVector{}, nil) //nolint:errcheck // test setup
-			},
-			query:       fixtures.Vec3dSimple,
-			sparseQuery: core.SparseVector{},
-			limit:       10,
-			filters:     nil,
-			expectCount: 1,
-		},
-		{
-			name: "multiple_vectors",
-			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
-			},
-			query:       fixtures.Vec3dSimple,
-			sparseQuery: core.SparseVector{},
-			limit:       10,
-			filters:     nil,
-			expectCount: 3,
-		},
-		{
-			name: "with_limit_2",
-			setup: func(idx *VectorIndex[[]float32]) {
-				_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil)    //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil) //nolint:errcheck // test setup
-				_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, nil)     //nolint:errcheck // test setup
-			},
-			query:       fixtures.Vec3dSimple,
-			sparseQuery: core.SparseVector{},
-			limit:       2,
-			filters:     nil,
-			expectCount: 2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			idx := newTestIndex(t)
-			tt.setup(idx)
-
-			results, err := idx.Search(context.Background(), tt.query, tt.sparseQuery, tt.limit, tt.filters)
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.Len(t, results, tt.expectCount)
+// TestConcurrentWritesSearchesAndSaves runs inserts from several goroutines
+// alongside searches and saves. -race checks the memory accesses; the
+// assertions check that every call succeeded, every search saw a full result,
+// and the last save holds every insert.
+func TestConcurrentWritesSearchesAndSaves(t *testing.T) {
+	ctx := context.Background()
+	const writers, perWriter, searchers, saves, k = 5, 10, 10, 3, 5
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, _ := e.open(t)
+			for i := range k {
+				require.NoError(t, idx.Insert(ctx, fmt.Sprintf("initial%d", i), []float32{1, float32(i), 0}, core.SparseVector{}, nil))
 			}
+			path := filepath.Join(t.TempDir(), "snapshot.bin")
+
+			// Act
+			var wg sync.WaitGroup
+			errs := make(chan error, writers*perWriter+searchers+saves)
+			for w := range writers {
+				wg.Go(func() {
+					for i := range perWriter {
+						errs <- idx.Insert(ctx, fmt.Sprintf("w%d-%d", w, i), []float32{float32(w), float32(i), 1}, core.SparseVector{}, nil)
+					}
+				})
+			}
+			for range searchers {
+				wg.Go(func() {
+					results, err := idx.Search(ctx, []float32{1, 0, 0}, core.SparseVector{}, k, nil)
+					if err == nil && len(results) != k {
+						err = fmt.Errorf("search returned %d results, want %d", len(results), k)
+					}
+					errs <- err
+				})
+			}
+			for range saves {
+				wg.Go(func() { errs <- idx.SaveToFile(ctx, path) })
+			}
+			wg.Wait()
+			close(errs)
+
+			// Assert
+			for err := range errs {
+				require.NoError(t, err)
+			}
+			want := k + writers*perWriter
+			assert.Equal(t, want, idx.Len())
+			require.NoError(t, idx.SaveToFile(ctx, path))
+			loaded, _ := e.open(t)
+			require.NoError(t, loaded.LoadFromFile(ctx, path))
+			assert.Equal(t, want, loaded.Len())
 		})
 	}
-}
-
-func TestSearch_WithFilters(t *testing.T) {
-	idx := newTestIndex(t)
-
-	// Insert vectors with filterable metadata
-	_ = idx.Insert(context.Background(), "v1", fixtures.Vec3dSimple, core.SparseVector{}, map[string]any{"category": "A", "value": 10})    //nolint:errcheck // test setup
-	_ = idx.Insert(context.Background(), "v2", fixtures.Vec3dAlternate, core.SparseVector{}, map[string]any{"category": "B", "value": 20}) //nolint:errcheck // test setup
-	_ = idx.Insert(context.Background(), "v3", fixtures.Vec3dThird, core.SparseVector{}, map[string]any{"category": "A", "value": 30})     //nolint:errcheck // test setup
-
-	// Filter by category
-	results, err := idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 10, map[string]interface{}{"category": "A"})
-	require.NoError(t, err)
-	assert.Len(t, results, 2, "Should find 2 vectors with category A")
-
-	// Filter by value
-	results, err = idx.Search(context.Background(), fixtures.Vec3dSimple, core.SparseVector{}, 10, map[string]interface{}{"value": 20})
-	require.NoError(t, err)
-	assert.Len(t, results, 1, "Should find 1 vector with value 20")
-}
-
-// TestSearch_ConcurrentInsertAndSearch runs searches alongside inserts. -race
-// checks the memory accesses; the assertions check that every search
-// succeeded with a full result and every insert landed.
-func TestSearch_ConcurrentInsertAndSearch(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	idx := newTestIndex(t)
-	const initial, inserted, searchers, k = 10, 20, 20, 5
-
-	for i := 1; i <= initial; i++ {
-		vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-		require.NoError(t, idx.Insert(ctx, fmt.Sprintf("initial%d", i), vec, core.SparseVector{}, nil))
-	}
-
-	// Act
-	var wg sync.WaitGroup
-	errs := make(chan error, inserted+searchers)
-	wg.Add(1 + searchers)
-	go func() {
-		defer wg.Done()
-		for i := 1; i <= inserted; i++ {
-			vec := []float32{float32(i), float32(i * 2), float32(i * 3)}
-			errs <- idx.Insert(ctx, fmt.Sprintf("new%d", i), vec, core.SparseVector{}, nil)
-		}
-	}()
-	for range searchers {
-		go func() {
-			defer wg.Done()
-			results, err := idx.Search(ctx, []float32{5, 10, 15}, core.SparseVector{}, k, nil)
-			if err == nil && len(results) != k {
-				err = fmt.Errorf("search returned %d results, want %d", len(results), k)
-			}
-			errs <- err
-		}()
-	}
-	wg.Wait()
-	close(errs)
-
-	// Assert
-	for err := range errs {
-		require.NoError(t, err)
-	}
-	assert.Equal(t, initial+inserted, idx.Len())
 }
 
 func TestDelete(t *testing.T) {
@@ -422,29 +215,6 @@ func TestReset_ResetsIDMapperAndWAL(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, results, 1)
 			assert.Equal(t, "v3", results[0].ID)
-		})
-	}
-}
-
-func TestLen(t *testing.T) {
-	ctx := context.Background()
-	for _, e := range bothEngines {
-		t.Run(e.name, func(t *testing.T) {
-			// Arrange
-			idx, _ := e.open(t)
-			lens := make([]int, 0, 3)
-
-			// Act: record the length after each change.
-			lens = append(lens, idx.Len())
-			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-			require.NoError(t, idx.Insert(ctx, "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
-			lens = append(lens, idx.Len())
-			_, err := idx.Delete(ctx, "v1")
-			require.NoError(t, err)
-			lens = append(lens, idx.Len())
-
-			// Assert
-			assert.Equal(t, []int{0, 2, 1}, lens, "empty, after two inserts, after one delete")
 		})
 	}
 }

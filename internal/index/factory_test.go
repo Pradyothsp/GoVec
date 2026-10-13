@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,52 +65,27 @@ func TestNewEngine_RejectsUnknownSettings(t *testing.T) {
 	}
 }
 
-func TestNewEngine_HNSW_EuclideanMetric(t *testing.T) {
-	walPath := t.TempDir() + "/test.wal"
-	wal, err := NewWAL(walPath)
-	if err != nil {
-		t.Fatalf("failed to create WAL: %v", err)
-	}
-	defer wal.Close()
-	defer os.Remove(walPath)
+// Under Euclidean distance the nearer vector must score higher, on both
+// engines: distance is turned into a similarity, not used as the score.
+func TestNewEngine_EuclideanMetric(t *testing.T) {
+	ctx := context.Background()
+	for _, indexType := range parityIndexTypes {
+		t.Run(string(indexType), func(t *testing.T) {
+			// Arrange
+			engine := newParityEngine(t,
+				config.EngineConfig{IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricEuclidean},
+				config.StorageConfig{})
+			require.NoError(t, engine.Insert(ctx, "far", []float32{10, 0, 0}, core.SparseVector{}, nil))
+			require.NoError(t, engine.Insert(ctx, "near", []float32{1, 0, 0}, core.SparseVector{}, nil))
 
-	cfg := config.EngineConfig{
-		IndexType:      config.IndexTypeHNSW,
-		Quantization:   "none",
-		DistanceMetric: config.DistanceMetricEuclidean,
-	}
+			// Act
+			results, err := engine.Search(ctx, []float32{0, 0, 0}, core.SparseVector{}, 2, nil)
 
-	engine, err := NewEngine(cfg, config.StorageConfig{}, wal)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
-
-	if engine.Info().DistanceMetric != config.DistanceMetricEuclidean {
-		t.Fatalf("expected distance metric 'euclidean', got '%s'", engine.Info().DistanceMetric)
-	}
-
-	origin := []float32{0, 0, 0}
-	near := []float32{1, 0, 0}
-	far := []float32{10, 0, 0}
-
-	if err := engine.Insert(context.Background(), "near", near, core.SparseVector{}, nil); err != nil {
-		t.Fatalf("Insert(near) failed: %v", err)
-	}
-	if err := engine.Insert(context.Background(), "far", far, core.SparseVector{}, nil); err != nil {
-		t.Fatalf("Insert(far) failed: %v", err)
-	}
-
-	results, err := engine.Search(context.Background(), origin, core.SparseVector{}, 2, nil)
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if results[0].ID != "near" {
-		t.Errorf("expected 'near' ranked first under Euclidean distance, got '%s'", results[0].ID)
-	}
-	if results[0].Score <= results[1].Score {
-		t.Errorf("expected closer vector to score higher: near=%f far=%f", results[0].Score, results[1].Score)
+			// Assert
+			require.NoError(t, err)
+			assert.Equal(t, config.DistanceMetricEuclidean, engine.Info().DistanceMetric)
+			assert.Equal(t, []string{"near", "far"}, resultIDs(results))
+			assert.Greater(t, results[0].Score, results[1].Score)
+		})
 	}
 }
