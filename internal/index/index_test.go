@@ -71,10 +71,10 @@ func TestInsert_Overwrite(t *testing.T) {
 			// Assert
 			require.NoError(t, err)
 			assert.Equal(t, 2, idx.Len(), "an overwrite must not add a record")
-			internalID, err := r.IDMapper.ToUint32ID("vec1")
+			internalID, err := r.ids.ToUint32ID("vec1")
 			require.NoError(t, err)
-			assert.Equal(t, fixtures.Vec3dAlternate, r.Store[internalID].Vector)
-			assert.Equal(t, fixtures.MetaNested, r.Store[internalID].Metadata)
+			assert.Equal(t, fixtures.Vec3dAlternate, r.nodes[internalID].Vector)
+			assert.Equal(t, fixtures.MetaNested, r.nodes[internalID].Metadata)
 
 			results, err := idx.Search(ctx, fixtures.Vec3dAlternate, core.SparseVector{}, 1, nil)
 			require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestDelete(t *testing.T) {
 			idx, r := e.open(t)
 			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 			require.NoError(t, idx.Insert(ctx, "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
-			internalID, err := r.IDMapper.ToUint32ID("v1")
+			internalID, err := r.ids.ToUint32ID("v1")
 			require.NoError(t, err)
 
 			// Act
@@ -159,10 +159,10 @@ func TestDelete(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, deleted)
 			assert.Equal(t, 1, idx.Len())
-			assert.NotContains(t, r.Store, internalID)
-			_, err = r.IDMapper.ToUint32ID("v1")
+			assert.NotContains(t, r.nodes, internalID)
+			_, err = r.ids.ToUint32ID("v1")
 			assert.Error(t, err, "a deleted ID must not resolve")
-			assert.True(t, r.IDMapper.IsTombstone(internalID))
+			assert.True(t, r.ids.IsTombstone(internalID))
 
 			results, err := idx.Search(ctx, fixtures.Vec3dSimple, core.SparseVector{}, 5, nil)
 			require.NoError(t, err)
@@ -197,10 +197,10 @@ func TestReset_ResetsIDMapperAndWAL(t *testing.T) {
 			require.NoError(t, idx.Reset(ctx))
 
 			// Assert
-			assert.Empty(t, r.Store)
+			assert.Empty(t, r.nodes)
 			assert.Equal(t, 0, idx.Len())
-			assert.Equal(t, 0, r.IDMapper.Count(), "IDMapper should have no active mappings after Reset")
-			assert.Equal(t, uint32(0), r.IDMapper.NextID(), "IDMapper's ID counter should restart at 0 after Reset")
+			assert.Equal(t, 0, r.ids.Count(), "IDMapper should have no active mappings after Reset")
+			assert.Equal(t, uint32(0), r.ids.NextID(), "IDMapper's ID counter should restart at 0 after Reset")
 			info, err = os.Stat(walPath)
 			require.NoError(t, err)
 			assert.Zero(t, info.Size(), "WAL should be truncated after Reset")
@@ -208,7 +208,7 @@ func TestReset_ResetsIDMapperAndWAL(t *testing.T) {
 			// Re-inserting after a full Reset may reuse ID 0 -- safe here because
 			// the entire collection was wiped alongside it, unlike a plain Delete.
 			require.NoError(t, idx.Insert(ctx, "v3", fixtures.Vec3dSimple, core.SparseVector{}, nil))
-			newID, err := r.IDMapper.ToUint32ID("v3")
+			newID, err := r.ids.ToUint32ID("v3")
 			require.NoError(t, err)
 			assert.Equal(t, uint32(0), newID)
 			results, err := idx.Search(ctx, fixtures.Vec3dSimple, core.SparseVector{}, 1, nil)

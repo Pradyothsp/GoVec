@@ -77,13 +77,13 @@ func (idx *VectorIndex[T]) Search(_ context.Context, query []float32, sparseQuer
 		}
 		candidates = make([]*core.VectorNode[T], 0, len(allowlist))
 		for id := range allowlist {
-			if node, ok := idx.Store[id]; ok {
+			if node, ok := idx.nodes[id]; ok {
 				candidates = append(candidates, node)
 			}
 		}
 	} else {
-		candidates = make([]*core.VectorNode[T], 0, len(idx.Store))
-		for _, node := range idx.Store {
+		candidates = make([]*core.VectorNode[T], 0, len(idx.nodes))
+		for _, node := range idx.nodes {
 			if core.MatchFilter(node.Metadata, filters) {
 				candidates = append(candidates, node)
 			}

@@ -26,8 +26,8 @@ import (
 // HNSW learned the index's width from a vector it then rejected, and its Info
 // never reported mmap.
 type records[T metric.VectorType] struct {
-	Store     map[uint32]*core.VectorNode[T]
-	IDMapper  *core.IDMapper
+	nodes     map[uint32]*core.VectorNode[T]
+	ids       *core.IDMapper
 	metaIndex *core.MetadataIndex // nil when the metadata index is off
 	inverted  *core.InvertedIndex // nil when hybrid search is off
 
@@ -53,11 +53,11 @@ func (r *records[T]) GetByID(_ context.Context, id string) (*VectorRecord, error
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	internalID, err := r.IDMapper.ToUint32ID(id)
+	internalID, err := r.ids.ToUint32ID(id)
 	if err != nil {
 		return nil, core.ErrNotFound
 	}
-	node, ok := r.Store[internalID]
+	node, ok := r.nodes[internalID]
 	if !ok {
 		return nil, core.ErrNotFound
 	}
@@ -84,7 +84,7 @@ func (r *records[T]) GetByID(_ context.Context, id string) (*VectorRecord, error
 func (r *records[T]) Len() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.Store)
+	return len(r.nodes)
 }
 
 // Info returns engine configuration and runtime statistics.
@@ -96,7 +96,7 @@ func (r *records[T]) Info() EngineInfo {
 		IndexType:      r.indexType,
 		DistanceMetric: r.metric.Name,
 		Dimensions:     r.dimensions,
-		VectorCount:    len(r.Store),
+		VectorCount:    len(r.nodes),
 		EnableMmap:     r.vectorStore != nil,
 	}
 }
@@ -171,11 +171,11 @@ func (r *records[T]) delete(ctx context.Context, id string, apply func(string) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	internalID, err := r.IDMapper.ToUint32ID(id)
+	internalID, err := r.ids.ToUint32ID(id)
 	if err != nil {
 		return false, nil
 	}
-	if _, exists := r.Store[internalID]; !exists {
+	if _, exists := r.nodes[internalID]; !exists {
 		return false, nil
 	}
 
@@ -228,7 +228,7 @@ func (r *records[T]) put(id string, vec []float32, sparse core.SparseVector, met
 		return nil, false, err
 	}
 
-	internalID, err := r.IDMapper.GetOrCreate(id)
+	internalID, err := r.ids.GetOrCreate(id)
 	if err != nil {
 		return nil, false, err
 	}
@@ -245,7 +245,7 @@ func (r *records[T]) put(id string, vec []float32, sparse core.SparseVector, met
 		encoded = storedCopy(encoded)
 	}
 
-	old, replaced := r.Store[internalID]
+	old, replaced := r.nodes[internalID]
 	if r.inverted != nil {
 		if replaced {
 			r.inverted.Remove(internalID, old.Sparse)
@@ -270,7 +270,7 @@ func (r *records[T]) put(id string, vec []float32, sparse core.SparseVector, met
 		Sparse:     sparse,
 		Metadata:   meta,
 	}
-	r.Store[internalID] = node
+	r.nodes[internalID] = node
 	return node, replaced, nil
 }
 
@@ -280,11 +280,11 @@ func (r *records[T]) put(id string, vec []float32, sparse core.SparseVector, met
 // own structures for it.
 // PRECONDITION: r.mu.Lock() held.
 func (r *records[T]) remove(id string, detach func(internalID uint32)) error {
-	internalID, err := r.IDMapper.ToUint32ID(id)
+	internalID, err := r.ids.ToUint32ID(id)
 	if err != nil {
 		return core.ErrNotFound
 	}
-	node, exists := r.Store[internalID]
+	node, exists := r.nodes[internalID]
 	if !exists {
 		return core.ErrNotFound
 	}
@@ -295,12 +295,12 @@ func (r *records[T]) remove(id string, detach func(internalID uint32)) error {
 	if r.metaIndex != nil {
 		r.metaIndex.Remove(internalID, node.Metadata)
 	}
-	delete(r.Store, internalID)
+	delete(r.nodes, internalID)
 	if detach != nil {
 		detach(internalID)
 	}
 
-	return r.IDMapper.Delete(id)
+	return r.ids.Delete(id)
 }
 
 // reset is Engine.Reset for both engines, on snapshotPath. The empty state reaches disk first
@@ -343,7 +343,7 @@ func (r *records[T]) emptyContents() snapshotContents[T] {
 // reset's to truncate: only after the empty state is on disk.
 // PRECONDITION: r.mu.Lock() held.
 func (r *records[T]) clear() {
-	r.Store = make(map[uint32]*core.VectorNode[T])
+	r.nodes = make(map[uint32]*core.VectorNode[T])
 	if r.inverted != nil {
 		r.inverted.Clear()
 	}
@@ -356,8 +356,8 @@ func (r *records[T]) clear() {
 			log.Error().Err(err).Msg("failed to reset mmap vector store")
 		}
 	}
-	if r.IDMapper != nil {
-		r.IDMapper.Clear()
+	if r.ids != nil {
+		r.ids.Clear()
 	}
 
 	// An empty index has no width to enforce. Keeping a learned one here left
@@ -460,13 +460,13 @@ func rankTop(results []SearchResult, k int) []SearchResult {
 func (r *records[T]) rebuildIndexes() {
 	if r.metaIndex != nil {
 		r.metaIndex.Clear()
-		for internalID, node := range r.Store {
+		for internalID, node := range r.nodes {
 			r.metaIndex.Add(internalID, node.Metadata)
 		}
 	}
 	if r.inverted != nil {
 		r.inverted.Clear()
-		for internalID, node := range r.Store {
+		for internalID, node := range r.nodes {
 			r.inverted.Add(internalID, node.Sparse)
 		}
 	}
@@ -479,8 +479,8 @@ func (r *records[T]) snapshotContents() snapshotContents[T] {
 		indexType:      r.indexType,
 		distanceMetric: r.metric.Name,
 		dimensions:     r.dimensions,
-		idMapper:       r.IDMapper,
-		nodes:          r.Store,
+		idMapper:       r.ids,
+		nodes:          r.nodes,
 		vectorStore:    r.vectorStore,
 	}
 }

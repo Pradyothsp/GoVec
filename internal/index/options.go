@@ -62,8 +62,8 @@ func graphConfigFrom(cfg config.EngineConfig) hnsw.Config {
 
 // init sets up empty records for an engine of indexType built from opts.
 func (r *records[T]) init(opts Options[T], indexType config.IndexType) {
-	r.Store = make(map[uint32]*core.VectorNode[T])
-	r.IDMapper = core.NewIDMapper()
+	r.nodes = make(map[uint32]*core.VectorNode[T])
+	r.ids = core.NewIDMapper()
 	if opts.HybridSearch {
 		r.inverted = core.NewInvertedIndex()
 	}

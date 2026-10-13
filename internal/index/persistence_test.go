@@ -48,8 +48,8 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			assert.NoFileExists(t, path+".tmp", "the temporary file is renamed into place")
 			assert.Equal(t, len(records), loaded.Len())
-			assert.Equal(t, r.IDMapper.Count(), lr.IDMapper.Count())
-			assert.Equal(t, r.IDMapper.NextID(), lr.IDMapper.NextID(), "a freed ID must not be handed out again")
+			assert.Equal(t, r.ids.Count(), lr.ids.Count())
+			assert.Equal(t, r.ids.NextID(), lr.ids.NextID(), "a freed ID must not be handed out again")
 
 			for _, want := range records {
 				got, err := loaded.GetByID(ctx, want.id)

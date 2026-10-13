@@ -92,8 +92,8 @@ func TestInsert_DimensionMismatch_DoesNotCorruptIndex(t *testing.T) {
 
 			// Assert
 			require.Error(t, err, "a 2-d vector must not enter a 3-d index")
-			assert.Len(t, r.Store, 1, "the rejected vector must not be stored")
-			_, idErr := r.IDMapper.ToUint32ID("bad")
+			assert.Len(t, r.nodes, 1, "the rejected vector must not be stored")
+			_, idErr := r.ids.ToUint32ID("bad")
 			assert.Error(t, idErr, "a rejected insert must not leave an id mapping behind")
 
 			// The whole point: search still works afterwards.
@@ -124,7 +124,7 @@ func TestBatchInsert_DimensionMismatch_RejectsOnlyTheBadItem(t *testing.T) {
 			require.NoError(t, err, "one bad item must not abort the whole batch")
 			require.Len(t, failures, 1)
 			assert.Equal(t, "bad", failures[0].ID)
-			assert.Len(t, r.Store, 2, "the two well-formed items must still be stored")
+			assert.Len(t, r.nodes, 2, "the two well-formed items must still be stored")
 
 			results, searchErr := idx.Search(ctx, []float32{1, 2, 3}, core.SparseVector{}, 2, nil)
 			require.NoError(t, searchErr, "search must survive a partially-rejected batch")
