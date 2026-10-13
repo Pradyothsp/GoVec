@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -22,689 +21,140 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// =============================================================================
-// Consolidated Handler Tests - HTTP Layer Validation Only
-// =============================================================================
+// The successful path of every route, through the real router, is in
+// internal/test/integration/rest_test.go; the JSON shape of each response is
+// pinned in responses_test.go. These tests cover what a handler decides
+// itself: which requests are the caller's fault, and which failures are ours.
 
-func TestNewVectorHandler(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	assert.NotNil(t, handler)
-	assert.Equal(t, index, handler.Engine)
+// newVectorRouter mounts every vector handler over engine, as the real router
+// does but without its middleware.
+func newVectorRouter(engine index.Engine) *gin.Engine {
+	h := NewVectorHandler(engine)
+	router := gin.New()
+	router.POST("/vectors", h.Insert)
+	router.POST("/vectors/batch", h.BatchInsert)
+	router.GET("/vectors/:id", h.GetByID)
+	router.POST("/vectors/search", h.Search)
+	router.DELETE("/vectors/:id", h.Delete)
+	return router
 }
 
-// TestInsert_Validation tests HTTP request validation for insert endpoint
-func TestInsert_Validation(t *testing.T) {
+func serve(router *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestVectorRoutes_BadRequests: a request the caller got wrong is a 4xx that
+// says what is wrong -- never a 500, which would blame the server. Wrong-width
+// vectors used to come back as 500s; a missing k used to decode as 0 and
+// return every vector.
+func TestVectorRoutes_BadRequests(t *testing.T) {
 	tests := []struct {
-		name           string
-		body           string
-		contentType    string
-		expectedStatus int
-		errorContains  string
+		name         string
+		method, path string
+		body         string
+		wantCode     int
+		wantError    string
 	}{
-		{
-			name:           "invalid_json",
-			body:           `{"id": "test", "vector": [1,2,3`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "missing_id_field",
-			body:           `{"vector": [1.0, 2.0, 3.0]}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "missing_vector_field",
-			body:           `{"id": "test"}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "empty_id",
-			body:           `{"id": "", "vector": [1.0, 2.0]}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "invalid_vector_type",
-			body:           `{"id": "test", "vector": "not_an_array"}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "wrong_content_type_ignored",
-			body:           `{"id": "test", "vector": [1.0, 2.0]}`,
-			contentType:    "text/plain",
-			expectedStatus: http.StatusCreated, // Content-Type not currently validated
-			errorContains:  "",
-		},
-		{
-			name:           "empty_request_body",
-			body:           ``,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			index := testutil.NewTestIndex(t)
-			handler := NewVectorHandler(index)
-
-			router := gin.New()
-			router.POST("/vectors", handler.Insert)
-
-			req := httptest.NewRequest("POST", "/vectors", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", tt.contentType)
-			rec := httptest.NewRecorder()
-
-			router.ServeHTTP(rec, req)
-
-			assert.Equal(t, tt.expectedStatus, rec.Code)
-			if tt.errorContains != "" {
-				assert.Contains(t, rec.Body.String(), tt.errorContains)
-			}
-		})
-	}
-}
-
-// TestQuery_Validation tests HTTP request validation for query endpoint
-func TestQuery_Validation(t *testing.T) {
-	tests := []struct {
-		name           string
-		body           string
-		contentType    string
-		expectedStatus int
-		errorContains  string
-	}{
-		{
-			name:           "invalid_json",
-			body:           `{"vector": [1,2,3, "k": 5}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "invalid",
-		},
-		{
-			name:           "missing_vector_field",
-			body:           `{"k": 5}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "empty_vector",
-			body:           `{"vector": [], "k": 5}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "must not be empty",
-		},
-		{
-			name:           "negative_k",
-			body:           `{"vector": [1.0, 2.0], "k": -1}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "invalid_vector_type",
-			body:           `{"vector": "not_an_array", "k": 5}`,
-			contentType:    "application/json",
-			expectedStatus: http.StatusBadRequest,
-			errorContains:  "",
-		},
-		{
-			name:           "wrong_content_type_ignored",
-			body:           `{"vector": [1.0, 2.0], "k": 5}`,
-			contentType:    "application/xml",
-			expectedStatus: http.StatusOK, // Content-Type not currently validated
-			errorContains:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			index := testutil.NewTestIndex(t)
-			handler := NewVectorHandler(index)
-
-			router := gin.New()
-			router.POST("/query", handler.Search)
-
-			req := httptest.NewRequest("POST", "/query", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", tt.contentType)
-			rec := httptest.NewRecorder()
-
-			router.ServeHTTP(rec, req)
-
-			assert.Equal(t, tt.expectedStatus, rec.Code, "Response: %s", rec.Body.String())
-			if tt.errorContains != "" {
-				assert.Contains(t, rec.Body.String(), tt.errorContains)
-			}
-		})
-	}
-}
-
-// TestDelete_Validation tests HTTP request validation for delete endpoint
-func TestDelete_Validation(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	router := gin.New()
-	router.DELETE("/vectors/:id", handler.Delete)
-
-	// Test nonexistent ID
-	req := httptest.NewRequest("DELETE", "/vectors/nonexistent", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
-}
-
-// TestInsert_SuccessResponse tests the JSON response format for successful inserts
-func TestInsert_SuccessResponse(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	router := gin.New()
-	router.POST("/vectors", handler.Insert)
-
-	body := `{"id": "test1", "vector": [1.0, 2.0, 3.0], "metadata": {"label": "test"}}`
-	req := httptest.NewRequest("POST", "/vectors", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusCreated, rec.Code) // Changed to match actual handler
-
-	var response map[string]interface{}
-	err := json.Unmarshal(rec.Body.Bytes(), &response)
-	require.NoError(t, err)
-
-	assert.True(t, response["success"].(bool))
-	assert.Contains(t, response, "data")
-}
-
-// TestQuery_SuccessResponse tests the JSON response format for successful queries
-func TestQuery_SuccessResponse(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	// Pre-populate index
-	_, vec, meta := testutil.CreateTestVector("vec1", 3)
-	_ = index.Insert(context.Background(), "vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
-
-	router := gin.New()
-	router.POST("/query", handler.Search)
-
-	body := `{"vector": [1.0, 2.0, 3.0], "k": 5}`
-	req := httptest.NewRequest("POST", "/query", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var response map[string]interface{}
-	err := json.Unmarshal(rec.Body.Bytes(), &response)
-	require.NoError(t, err)
-
-	assert.True(t, response["success"].(bool))
-	assert.Contains(t, response, "data")
-	results, ok := response["data"].([]interface{})
-	require.True(t, ok)
-	require.Len(t, results, 1, "the index holds one vector and k=5")
-	result, ok := results[0].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "vec1", result["id"])
-}
-
-// TestDelete_SuccessResponse tests the JSON response format for successful deletes
-func TestDelete_SuccessResponse(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	// Pre-populate index
-	_, vec, meta := testutil.CreateTestVector("vec1", 3)
-	_ = index.Insert(context.Background(), "vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
-
-	router := gin.New()
-	router.DELETE("/vectors/:id", handler.Delete) // Path parameter
-
-	req := httptest.NewRequest("DELETE", "/vectors/vec1", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var response map[string]interface{}
-	err := json.Unmarshal(rec.Body.Bytes(), &response)
-	require.NoError(t, err)
-
-	assert.True(t, response["success"].(bool), "Response should indicate success")
-	assert.Contains(t, response, "data")
-}
-
-// TestGetByID_NotFound verifies 404 when the ID does not exist.
-func TestGetByID_NotFound(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	router := gin.New()
-	router.GET("/vectors/:id", handler.GetByID)
-
-	req := httptest.NewRequest("GET", "/vectors/nonexistent", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "not found")
-}
-
-// TestGetByID_Success verifies that a stored vector is returned with all fields intact.
-func TestGetByID_Success(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	// Pre-populate index
-	_, vec, meta := testutil.CreateTestVector("vec1", 3)
-	_ = index.Insert(context.Background(), "vec1", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
-
-	router := gin.New()
-	router.GET("/vectors/:id", handler.GetByID)
-
-	req := httptest.NewRequest("GET", "/vectors/vec1", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var resp map[string]interface{}
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	assert.Equal(t, true, resp["success"].(bool))
-
-	data, ok := resp["data"].(map[string]interface{})
-	require.True(t, ok, "data field should be an object")
-
-	// ID round-trip
-	assert.Equal(t, "vec1", data["id"])
-
-	// Vector round-trip: JSON unmarshals numbers as float64
-	rawVec, ok := data["vector"].([]interface{})
-	require.True(t, ok, "vector should be an array")
-	require.Len(t, rawVec, len(vec))
-	for i, v := range vec {
-		assert.InDelta(t, float64(v), rawVec[i].(float64), 1e-6)
-	}
-
-	// Metadata round-trip
-	rawMeta, ok := data["metadata"].(map[string]interface{})
-	require.True(t, ok, "metadata should be an object")
-	assert.Equal(t, meta["type"], rawMeta["type"])
-	assert.Equal(t, meta["id"], rawMeta["id"])
-}
-
-// TestGetByID_DenseOnlyRecord_ReportsNoSparseComponent checks the response body
-// text, not the decoded struct.
-//
-// A dense-only record used to come back with
-// "sparse_vector":{"indices":null,"values":null} -- the field claiming to be
-// present and empty rather than being absent. TestGetByID_Success above passes
-// either way, because it only inspects the keys it names. The govec-python SDK
-// did not: it built a SparseVector from those nulls and raised ValueError on
-// every dense-only record.
-func TestGetByID_DenseOnlyRecord_ReportsNoSparseComponent(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	_, vec, meta := testutil.CreateTestVector("dense-only", 3)
-	_ = index.Insert(context.Background(), "dense-only", vec, core.SparseVector{}, meta) //nolint:errcheck // test setup
-
-	router := gin.New()
-	router.GET("/vectors/:id", handler.GetByID)
-
-	req := httptest.NewRequest("GET", "/vectors/dense-only", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	assert.NotContains(t, rec.Body.String(), "sparse_vector")
-}
-
-// TestGetByID_SparseRecord_StillReportsItsSparseComponent is the other half:
-// omitting the field must mean "there is none", not "we stopped sending it".
-func TestGetByID_SparseRecord_StillReportsItsSparseComponent(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	_, vec, meta := testutil.CreateTestVector("hybrid", 3)
-	sparse := core.SparseVector{Indices: []uint32{0, 7}, Values: []float32{0.5, 0.25}}
-	_ = index.Insert(context.Background(), "hybrid", vec, sparse, meta) //nolint:errcheck // test setup
-
-	router := gin.New()
-	router.GET("/vectors/:id", handler.GetByID)
-
-	req := httptest.NewRequest("GET", "/vectors/hybrid", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	var resp struct {
-		Data struct {
-			SparseVector *core.SparseVector `json:"sparse_vector"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-
-	require.NotNil(t, resp.Data.SparseVector)
-	assert.Equal(t, []uint32{0, 7}, resp.Data.SparseVector.Indices)
-	assert.Equal(t, []float32{0.5, 0.25}, resp.Data.SparseVector.Values)
-}
-
-// TestMalformedJSON verifies error handling for invalid JSON payloads
-func TestMalformedJSON(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	router := gin.New()
-	router.POST("/vectors", handler.Insert)
-	router.POST("/query", handler.Search)
-
-	tests := []struct {
-		name     string
-		endpoint string
-		method   string
-		body     string
-	}{
-		{
-			name:     "insert_malformed_json",
-			endpoint: "/vectors",
-			method:   "POST",
-			body:     `{"id": "test", "vector": [1,2,3`,
-		},
-		{
-			name:     "query_malformed_json",
-			endpoint: "/query",
-			method:   "POST",
-			body:     `{"vector": [1,2,3, "k": 5}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.endpoint, bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-
-			router.ServeHTTP(rec, req)
-
-			assert.Equal(t, http.StatusBadRequest, rec.Code)
-		})
-	}
-}
-
-// =============================================================================
-// BatchInsert
-// =============================================================================
-
-func TestBatchInsert_EmptyArray(t *testing.T) {
-	index := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(index)
-
-	router := gin.New()
-	router.POST("/vectors/batch", handler.BatchInsert)
-
-	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(`{"vectors": []}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestBatchInsert_Success(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(idx)
-
-	router := gin.New()
-	router.POST("/vectors/batch", handler.BatchInsert)
-
-	body := `{"vectors": [
-		{"id": "v1", "vector": [1.0, 2.0, 3.0]},
-		{"id": "v2", "vector": [4.0, 5.0, 6.0]},
-		{"id": "v3", "vector": [7.0, 8.0, 9.0]}
-	]}`
-	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.True(t, resp["success"].(bool))
-
-	data, ok := resp["data"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, float64(3), data["inserted_count"])
-	assert.NotContains(t, data, "errors")
-	assert.Equal(t, 3, idx.Len())
-}
-
-// TestBatchInsert_InvalidItemsDontBlockValidOnes verifies the existing per-item
-// validation (invalid sparse_vector) still short-circuits before an item ever
-// reaches the engine, and that the valid items in the same request still get
-// batched and inserted -- one bad item shouldn't sink the whole request.
-func TestBatchInsert_InvalidItemsDontBlockValidOnes(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(idx)
-
-	router := gin.New()
-	router.POST("/vectors/batch", handler.BatchInsert)
-
-	body := `{"vectors": [
-		{"id": "good1", "vector": [1.0, 2.0, 3.0]},
-		{"id": "bad1", "vector": [1.0, 2.0, 3.0], "sparse_vector": {"indices": [0, 1], "values": [0.5]}},
-		{"id": "good2", "vector": [4.0, 5.0, 6.0]}
-	]}`
-	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-
-	data, ok := resp["data"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, float64(2), data["inserted_count"])
-
-	errs, ok := data["errors"].([]interface{})
-	require.True(t, ok)
-	require.Len(t, errs, 1)
-	firstErr, ok := errs[0].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "bad1", firstErr["id"])
-
-	assert.Equal(t, 2, idx.Len())
-}
-
-// TestBatchInsert_WALFailureReturns500AndInsertsNothing exercises the batch's
-// all-or-nothing durability contract from the HTTP layer down: if the engine
-// can't make the batch durable (WAL write fails), the handler must surface a
-// server error rather than reporting a misleading partial success, and none of
-// the batch's vectors should be queryable afterward.
-func TestBatchInsert_WALFailureReturns500AndInsertsNothing(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := index.NewWAL(walPath)
-	require.NoError(t, err)
-
-	idx := testutil.NewIndexOnWAL(t, wal)
-
-	// Force the WAL write the handler triggers to fail.
-	require.NoError(t, wal.Close())
-
-	handler := NewVectorHandler(idx)
-	router := gin.New()
-	router.POST("/vectors/batch", handler.BatchInsert)
-
-	body := `{"vectors": [
-		{"id": "v1", "vector": [1.0, 2.0, 3.0]},
-		{"id": "v2", "vector": [4.0, 5.0, 6.0]}
-	]}`
-	req := httptest.NewRequest("POST", "/vectors/batch", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.False(t, resp["success"].(bool))
-
-	assert.Equal(t, 0, idx.Len(), "no vector from the failed batch should have been applied")
-}
-
-// TestInsert_DimensionMismatchReturns400 pins the status for the one insert
-// failure that is unambiguously the caller's fault. The dimension guard makes
-// a wrong-width vector fail instead of quietly bricking search, but the
-// handler mapped every engine error to 500 -- telling a client that sent a
-// bad request that the server broke.
-func TestInsert_DimensionMismatchReturns400(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(idx)
-
-	router := gin.New()
-	router.POST("/vectors", handler.Insert)
-
-	// The first insert fixes the index at 3 dimensions.
-	first := httptest.NewRequest("POST", "/vectors",
-		bytes.NewBufferString(`{"id": "v1", "vector": [1.0, 2.0, 3.0]}`))
-	first.Header.Set("Content-Type", "application/json")
-	firstRec := httptest.NewRecorder()
-	router.ServeHTTP(firstRec, first)
-	require.Equal(t, http.StatusCreated, firstRec.Code)
-
-	req := httptest.NewRequest("POST", "/vectors",
-		bytes.NewBufferString(`{"id": "v2", "vector": [1.0, 2.0]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.False(t, resp["success"].(bool))
-	assert.Contains(t, resp["error"], "index requires 3",
-		"the client needs to be told what width to send")
-}
-
-// A genuine server fault must still read as one -- the 400 above is a
-// narrowing of the 500 case, not a replacement for it.
-func TestInsert_EngineFailureStillReturns500(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := index.NewWAL(walPath)
-	require.NoError(t, err)
-
-	idx := testutil.NewIndexOnWAL(t, wal)
-	require.NoError(t, wal.Close())
-
-	handler := NewVectorHandler(idx)
-	router := gin.New()
-	router.POST("/vectors", handler.Insert)
-
-	req := httptest.NewRequest("POST", "/vectors",
-		bytes.NewBufferString(`{"id": "v1", "vector": [1.0, 2.0, 3.0]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
-// Search is the call clients make in a loop, so a wrong-width query reported
-// as a 500 is what would dominate a server's error rate. It must read as the
-// bad request it is, and say what width the index wants.
-func TestSearch_DimensionMismatchReturns400(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	handler := NewVectorHandler(idx)
-	_, vec, _ := testutil.CreateTestVector("vec1", 3)
-	require.NoError(t, idx.Insert(context.Background(), "vec1", vec, core.SparseVector{}, nil))
-
-	router := gin.New()
-	router.POST("/query", handler.Search)
-
-	req := httptest.NewRequest("POST", "/query",
-		bytes.NewBufferString(`{"vector": [1.0, 2.0], "k": 5}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "index requires 3")
-}
-
-// k is required: a missing k used to decode as 0 and return every vector on
-// brute force. 0 asks for nothing and gets an empty list; negative is a 400.
-func TestSearch_K(t *testing.T) {
-	tests := []struct {
-		name     string
-		body     string
-		wantCode int
-		wantBody string
-	}{
-		{"missing k", `{"vector": [1, 2, 3]}`, http.StatusBadRequest, ""},
-		{"k=0", `{"vector": [1, 2, 3], "k": 0}`, http.StatusOK, `{"success":true,"data":[]}`},
-		{"negative k", `{"vector": [1, 2, 3], "k": -1}`, http.StatusBadRequest, ""},
+		{"insert: malformed JSON", http.MethodPost, "/vectors", `{"id": "x", "vector": [1,2,3`, http.StatusBadRequest, ""},
+		{"insert: empty body", http.MethodPost, "/vectors", ``, http.StatusBadRequest, ""},
+		{"insert: missing id", http.MethodPost, "/vectors", `{"vector": [1, 2, 3]}`, http.StatusBadRequest, ""},
+		{"insert: empty id", http.MethodPost, "/vectors", `{"id": "", "vector": [1, 2, 3]}`, http.StatusBadRequest, ""},
+		{"insert: missing vector", http.MethodPost, "/vectors", `{"id": "x"}`, http.StatusBadRequest, ""},
+		{"insert: vector not an array", http.MethodPost, "/vectors", `{"id": "x", "vector": "abc"}`, http.StatusBadRequest, ""},
+		{"insert: wrong width", http.MethodPost, "/vectors", `{"id": "x", "vector": [1, 2]}`, http.StatusBadRequest, "index requires 3"},
+		{"batch: no vectors", http.MethodPost, "/vectors/batch", `{"vectors": []}`, http.StatusBadRequest, ""},
+		{"search: malformed JSON", http.MethodPost, "/vectors/search", `{"vector": [1,2,3, "k": 5}`, http.StatusBadRequest, "invalid"},
+		{"search: missing vector", http.MethodPost, "/vectors/search", `{"k": 5}`, http.StatusBadRequest, ""},
+		{"search: empty vector", http.MethodPost, "/vectors/search", `{"vector": [], "k": 5}`, http.StatusBadRequest, "must not be empty"},
+		{"search: wrong width", http.MethodPost, "/vectors/search", `{"vector": [1, 2], "k": 5}`, http.StatusBadRequest, "index requires 3"},
+		{"search: missing k", http.MethodPost, "/vectors/search", `{"vector": [1, 2, 3]}`, http.StatusBadRequest, ""},
+		{"search: negative k", http.MethodPost, "/vectors/search", `{"vector": [1, 2, 3], "k": -1}`, http.StatusBadRequest, ""},
+		{"get: unknown id", http.MethodGet, "/vectors/missing", ``, http.StatusNotFound, "not found"},
+		{"delete: unknown id", http.MethodDelete, "/vectors/missing", ``, http.StatusNotFound, "not found"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
+			// Arrange: an index 3 dimensions wide.
 			idx := testutil.NewTestIndex(t)
-			require.NoError(t, idx.Insert(context.Background(), "vec1", []float32{1, 2, 3}, core.SparseVector{}, nil))
-			router := gin.New()
-			router.POST("/query", NewVectorHandler(idx).Search)
-			req := httptest.NewRequest(http.MethodPost, "/query", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
+			require.NoError(t, idx.Insert(context.Background(), "stored", []float32{1, 2, 3}, core.SparseVector{}, nil))
+			router := newVectorRouter(idx)
 
 			// Act
-			router.ServeHTTP(rec, req)
+			rec := serve(router, tt.method, tt.path, tt.body)
 
 			// Assert
 			assert.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
-			if tt.wantBody != "" {
-				assert.JSONEq(t, tt.wantBody, rec.Body.String())
-			}
+			assert.Contains(t, rec.Body.String(), `"success":false`)
+			assert.Contains(t, rec.Body.String(), tt.wantError)
+			assert.Equal(t, 1, idx.Len(), "a rejected request must change nothing")
 		})
 	}
+}
+
+// k=0 is a valid request for nothing: an empty list, not an error.
+func TestSearch_KZero_ReturnsEmptyList(t *testing.T) {
+	// Arrange
+	idx := testutil.NewTestIndex(t)
+	require.NoError(t, idx.Insert(context.Background(), "stored", []float32{1, 2, 3}, core.SparseVector{}, nil))
+
+	// Act
+	rec := serve(newVectorRouter(idx), http.MethodPost, "/vectors/search", `{"vector": [1, 2, 3], "k": 0}`)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"success":true,"data":[]}`, rec.Body.String())
+}
+
+// A genuine server fault must still read as one: the 400s above narrow the
+// 500 case rather than replace it. A batch the WAL can't record is not a
+// partial success either -- none of it may be applied.
+func TestVectorRoutes_EngineFailure_Returns500(t *testing.T) {
+	tests := []struct {
+		name, path, body string
+	}{
+		{"insert", "/vectors", `{"id": "v1", "vector": [1, 2, 3]}`},
+		{"batch", "/vectors/batch", `{"vectors": [{"id": "v1", "vector": [1, 2, 3]}, {"id": "v2", "vector": [4, 5, 6]}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a closed WAL makes every write fail.
+			wal, err := index.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+			require.NoError(t, err)
+			idx := testutil.NewIndexOnWAL(t, wal)
+			require.NoError(t, wal.Close())
+
+			// Act
+			rec := serve(newVectorRouter(idx), http.MethodPost, tt.path, tt.body)
+
+			// Assert
+			assert.Equal(t, http.StatusInternalServerError, rec.Code)
+			assert.Contains(t, rec.Body.String(), `"success":false`)
+			assert.Zero(t, idx.Len())
+		})
+	}
+}
+
+// One bad item in a batch is reported against its ID; the good ones are
+// still inserted.
+func TestBatchInsert_BadItem_DoesNotBlockTheRest(t *testing.T) {
+	// Arrange
+	idx := testutil.NewTestIndex(t)
+	body := `{"vectors": [
+		{"id": "good1", "vector": [1, 2, 3]},
+		{"id": "bad1", "vector": [1, 2, 3], "sparse_vector": {"indices": [0, 1], "values": [0.5]}},
+		{"id": "good2", "vector": [4, 5, 6]}
+	]}`
+
+	// Act
+	rec := serve(newVectorRouter(idx), http.MethodPost, "/vectors/batch", body)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"inserted_count":2`)
+	assert.Contains(t, rec.Body.String(), `"id":"bad1"`)
+	assert.Equal(t, 2, idx.Len())
 }

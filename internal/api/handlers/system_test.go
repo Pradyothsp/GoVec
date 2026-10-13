@@ -15,17 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/release"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
-
-func TestNewSystemHandler(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	h := NewSystemHandler(idx)
-
-	assert.NotNil(t, h)
-	assert.Equal(t, idx, h.Engine)
-}
 
 // Stats and Info report the vector count, and Info the width, which an
 // empty index doesn't have yet and the first insert sets.
@@ -72,81 +63,43 @@ func TestStatsAndInfo_EmptyThenAfterInsert(t *testing.T) {
 	}
 }
 
-func TestInfo_ReportsServerVersion(t *testing.T) {
-	original := release.Version
-	release.Version = "v9.9.9-test"
-	t.Cleanup(func() { release.Version = original })
-
-	h := NewSystemHandler(testutil.NewTestIndex(t))
-
-	router := gin.New()
-	router.GET("/info", h.Info)
-
-	req := httptest.NewRequest(http.MethodGet, "/info", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	var env struct {
-		Data map[string]interface{} `json:"data"`
+// Flush writes the snapshot to the engine's own path; a path it can't write
+// is a server fault.
+func TestFlush(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     func(t *testing.T) string
+		wantCode int
+		wantBody string
+	}{
+		{"writes the snapshot", func(t *testing.T) string { return filepath.Join(t.TempDir(), "test.bin") },
+			http.StatusOK, `{"success":true,"data":{"status":"flushed"}}`},
+		{"unwritable path", func(t *testing.T) string {
+			// A path under a regular file can't be created by anyone, root included.
+			notADir := filepath.Join(t.TempDir(), "a-file")
+			require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+			return filepath.Join(notADir, "test.bin")
+		}, http.StatusInternalServerError, ""},
 	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
-	assert.Equal(t, "v9.9.9-test", env.Data["version"])
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := tt.path(t)
+			idx := testutil.NewTestIndexAt(t, path)
+			require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1, 2}, core.SparseVector{}, nil))
+			router := gin.New()
+			router.POST("/admin/flush", NewSystemHandler(idx).Flush)
+			rec := httptest.NewRecorder()
 
-func TestFlush_Success(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "test.bin")
-	idx := testutil.NewTestIndexAt(t, path)
-	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
+			// Act
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/flush", nil))
 
-	h := NewSystemHandler(idx)
-
-	router := gin.New()
-	router.POST("/admin/flush", h.Flush)
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/flush", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"success":true,"data":{"status":"flushed"}}`, rec.Body.String())
-
-	_, err := os.Stat(path)
-	assert.NoError(t, err, "flush should create the snapshot at the index's snapshot path")
-}
-
-func TestFlush_InvalidPath(t *testing.T) {
-	// A path under a regular file can't be created by anyone, root included.
-	notADir := filepath.Join(t.TempDir(), "a-file")
-	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
-	idx := testutil.NewTestIndexAt(t, filepath.Join(notADir, "test.bin"))
-	h := NewSystemHandler(idx)
-
-	router := gin.New()
-	router.POST("/admin/flush", h.Flush)
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/flush", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
-func TestReset_Success(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
-	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
-	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{3.0, 4.0}, core.SparseVector{}, nil))
-	require.Equal(t, 2, idx.Len())
-
-	h := NewSystemHandler(idx)
-
-	router := gin.New()
-	router.POST("/admin/reset", h.Reset)
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/reset", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"success":true,"data":{"status":"reset"}}`, rec.Body.String())
-	assert.Equal(t, 0, idx.Len(), "index should be empty after reset")
+			// Assert
+			assert.Equal(t, tt.wantCode, rec.Code)
+			if tt.wantBody != "" {
+				assert.JSONEq(t, tt.wantBody, rec.Body.String())
+				assert.FileExists(t, path)
+			}
+		})
+	}
 }

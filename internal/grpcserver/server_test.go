@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -18,373 +17,181 @@ import (
 
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
 	"github.com/Pradyothsp/govec/internal/grpcserver"
-	"github.com/Pradyothsp/govec/internal/release"
+	"github.com/Pradyothsp/govec/internal/index"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
 
-// bufconnDialer returns a grpc.WithContextDialer using a bufconn.Listener.
-func bufconnDialer(lis *bufconn.Listener) func(context.Context, string) (net.Conn, error) {
-	return func(ctx context.Context, _ string) (net.Conn, error) {
-		return lis.DialContext(ctx)
-	}
-}
-
-// GoVecServerSuite is the bufconn integration suite.
-type GoVecServerSuite struct {
-	suite.Suite
-	lis    *bufconn.Listener
-	conn   *grpc.ClientConn
-	client pb.GoVecServiceClient
-}
-
-func TestGoVecServerSuite(t *testing.T) {
-	suite.Run(t, new(GoVecServerSuite))
-}
-
-func (s *GoVecServerSuite) SetupTest() {
-	engine := testutil.NewTestIndex(s.T())
-	s.lis = bufconn.Listen(1024 * 1024)
-	srv := grpcserver.SetupGRPCServer(engine, "", 4)
-	go srv.Serve(s.lis) //nolint:errcheck // test server
-	s.T().Cleanup(srv.GracefulStop)
+// newClient serves engine over an in-memory gRPC connection, requiring apiKey
+// when it isn't empty, and returns a client for it.
+func newClient(t *testing.T, engine index.Engine, apiKey string) pb.GoVecServiceClient {
+	t.Helper()
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpcserver.SetupGRPCServer(engine, apiKey, 4)
+	go srv.Serve(lis) //nolint:errcheck // test server
+	t.Cleanup(srv.GracefulStop)
 
 	conn, err := grpc.NewClient(
 		"passthrough:///bufnet",
-		grpc.WithContextDialer(bufconnDialer(s.lis)),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
-	require.NoError(s.T(), err)
-	s.conn = conn
-	s.T().Cleanup(func() { _ = conn.Close() })
-	s.client = pb.NewGoVecServiceClient(conn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return pb.NewGoVecServiceClient(conn)
 }
 
-// --- Insert ---
-
-func (s *GoVecServerSuite) TestInsert_HappyPath() {
-	resp, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "vec-001",
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "inserted", resp.Status)
-}
-
-func (s *GoVecServerSuite) TestInsert_MissingID() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
-}
-
-func (s *GoVecServerSuite) TestInsert_MissingVector() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id: "vec-002",
-	})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
-}
-
-// A wrong-width vector is a bad request, not a server fault. The dimension
-// guard rejects it; this pins the status code the client sees.
-func (s *GoVecServerSuite) TestInsert_DimensionMismatch() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "vec-seed",
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.NoError(s.T(), err)
-
-	_, err = s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "vec-wrong-width",
-		Vector: []float32{1.0, 2.0},
-	})
-
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
-	assert.Contains(s.T(), status.Convert(err).Message(), "index requires 3")
-}
-
-func (s *GoVecServerSuite) TestInsert_WithMetadata() {
-	meta := map[string]*structpb.Value{
-		"label": structpb.NewStringValue("test"),
-		"score": structpb.NewNumberValue(0.99),
-	}
-	resp, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:       "vec-meta",
-		Vector:   []float32{1.0, 0.0, 0.0},
-		Metadata: meta,
-	})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "inserted", resp.Status)
-}
-
-// --- BatchInsert ---
-
-func (s *GoVecServerSuite) TestBatchInsert_HappyPath() {
-	stream, err := s.client.BatchInsert(context.Background())
-	require.NoError(s.T(), err)
-
-	for i, id := range []string{"b1", "b2", "b3"} {
-		require.NoError(s.T(), stream.Send(&pb.InsertRequest{
-			Id:     id,
-			Vector: []float32{float32(i), float32(i + 1), float32(i + 2)},
-		}))
-	}
-
-	resp, err := stream.CloseAndRecv()
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), int32(3), resp.InsertedCount)
-	assert.Empty(s.T(), resp.Errors)
-}
-
-func (s *GoVecServerSuite) TestBatchInsert_InvalidSparseVector() {
-	stream, err := s.client.BatchInsert(context.Background())
-	require.NoError(s.T(), err)
-
-	// Send one valid and one with mismatched sparse indices/values
-	require.NoError(s.T(), stream.Send(&pb.InsertRequest{
-		Id:     "good",
-		Vector: []float32{1.0, 2.0, 3.0},
-	}))
-	require.NoError(s.T(), stream.Send(&pb.InsertRequest{
-		Id:     "bad-sparse",
-		Vector: []float32{1.0, 2.0, 3.0},
-		Sparse: &pb.SparseVector{
-			Indices: []uint32{0, 1},
-			Values:  []float32{0.5}, // length mismatch
-		},
-	}))
-
-	resp, err := stream.CloseAndRecv()
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), int32(1), resp.InsertedCount)
-	assert.Len(s.T(), resp.Errors, 1)
-	assert.Equal(s.T(), "bad-sparse", resp.Errors[0].Id)
-}
-
-// --- Search ---
-
-func (s *GoVecServerSuite) TestSearch_HappyPath() {
-	// Insert a vector first
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "search-vec",
-		Vector: []float32{1.0, 0.0, 0.0},
-	})
-	require.NoError(s.T(), err)
-
-	resp, err := s.client.Search(context.Background(), &pb.SearchRequest{
-		QueryVector: []float32{1.0, 0.0, 0.0},
-		K:           proto.Int32(1),
-	})
-	require.NoError(s.T(), err)
-	assert.Len(s.T(), resp.Results, 1)
-	assert.Equal(s.T(), "search-vec", resp.Results[0].Id)
-}
-
-func (s *GoVecServerSuite) TestSearch_EmptyVector() {
-	_, err := s.client.Search(context.Background(), &pb.SearchRequest{K: proto.Int32(1)})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
-}
-
-// k is required: a missing k is InvalidArgument, as it is a 400 over REST.
-// 0 asks for nothing and gets no results; negative is InvalidArgument.
-func (s *GoVecServerSuite) TestSearch_K() {
+// TestGRPC_VectorLifecycle drives one index through every RPC, as
+// TestREST_VectorLifecycle does over REST; the status strings the two answer
+// with are compared in internal/test/integration/transport_parity_test.go.
+func TestGRPC_VectorLifecycle(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	_, err := s.client.Insert(ctx, &pb.InsertRequest{Id: "v1", Vector: []float32{1, 0, 0}})
-	s.Require().NoError(err)
-	query := []float32{1, 0, 0}
+	client := newClient(t, testutil.NewTestIndexAt(t, t.TempDir()+"/snapshot.bin"), "")
 
-	// Act
-	_, missingErr := s.client.Search(ctx, &pb.SearchRequest{QueryVector: query})
-	zero, zeroErr := s.client.Search(ctx, &pb.SearchRequest{QueryVector: query, K: proto.Int32(0)})
-	_, negativeErr := s.client.Search(ctx, &pb.SearchRequest{QueryVector: query, K: proto.Int32(-1)})
+	// Act + Assert, one step at a time: each step depends on the ones before.
+	health, err := client.Health(ctx, &pb.HealthRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", health.Status)
 
-	// Assert
-	s.Equal(codes.InvalidArgument, status.Code(missingErr), "a missing k must be rejected")
-	s.Require().NoError(zeroErr)
-	s.Empty(zero.Results)
-	s.Equal(codes.InvalidArgument, status.Code(negativeErr))
-}
-
-// Search carried the same miscategorisation Insert did: a wrong-width query
-// came back as Internal, blaming the server for a bad request.
-func (s *GoVecServerSuite) TestSearch_DimensionMismatch() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "search-width-seed",
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.NoError(s.T(), err)
-
-	_, err = s.client.Search(context.Background(), &pb.SearchRequest{
-		QueryVector: []float32{1.0, 2.0},
-		K:           proto.Int32(1),
-	})
-
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
-	assert.Contains(s.T(), status.Convert(err).Message(), "index requires 3")
-}
-
-// --- Delete ---
-
-func (s *GoVecServerSuite) TestDelete_HappyPath() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "to-delete",
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.NoError(s.T(), err)
-
-	resp, err := s.client.Delete(context.Background(), &pb.DeleteRequest{Id: "to-delete"})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "deleted", resp.Status)
-	assert.Equal(s.T(), "to-delete", resp.Id)
-}
-
-func (s *GoVecServerSuite) TestDelete_NotFound() {
-	_, err := s.client.Delete(context.Background(), &pb.DeleteRequest{Id: "nonexistent"})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.NotFound, status.Code(err))
-}
-
-// --- GetByID ---
-
-func (s *GoVecServerSuite) TestGetByID_HappyPath() {
-	meta := map[string]*structpb.Value{
-		"label": structpb.NewStringValue("stored"),
-	}
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:       "fetch-me",
-		Vector:   []float32{1.0, 2.0, 3.0},
-		Metadata: meta,
+	inserted, err := client.Insert(ctx, &pb.InsertRequest{
+		Id:       "doc1",
+		Vector:   []float32{1, 0, 0},
+		Metadata: map[string]*structpb.Value{"label": structpb.NewStringValue("stored")},
 		Sparse:   &pb.SparseVector{Indices: []uint32{0, 2}, Values: []float32{0.5, 0.25}},
 	})
-	require.NoError(s.T(), err)
+	require.NoError(t, err)
+	assert.Equal(t, "inserted", inserted.Status)
 
-	resp, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "fetch-me"})
+	stream, err := client.BatchInsert(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&pb.InsertRequest{Id: "doc2", Vector: []float32{0.9, 0.1, 0}}))
+	require.NoError(t, stream.Send(&pb.InsertRequest{Id: "bad", Vector: []float32{0, 1, 0}, Sparse: &pb.SparseVector{Indices: []uint32{0, 1}, Values: []float32{0.5}}}))
+	require.NoError(t, stream.Send(&pb.InsertRequest{Id: "doc3", Vector: []float32{0, 1, 0}}))
+	batch, err := stream.CloseAndRecv()
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), batch.InsertedCount)
+	require.Len(t, batch.Errors, 1)
+	assert.Equal(t, "bad", batch.Errors[0].Id, "a bad item is reported against its ID and doesn't sink the batch")
 
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "fetch-me", resp.Id)
-	assert.Equal(s.T(), []float32{1.0, 2.0, 3.0}, resp.Vector)
-	assert.Equal(s.T(), "stored", resp.Metadata["label"].GetStringValue())
-	require.NotNil(s.T(), resp.Sparse, "a stored sparse vector must come back")
-	assert.Equal(s.T(), []uint32{0, 2}, resp.Sparse.Indices)
+	got, err := client.GetByID(ctx, &pb.GetByIDRequest{Id: "doc1"})
+	require.NoError(t, err)
+	assert.Equal(t, []float32{1, 0, 0}, got.Vector)
+	assert.Equal(t, "stored", got.Metadata["label"].GetStringValue())
+	require.NotNil(t, got.Sparse)
+	assert.Equal(t, []uint32{0, 2}, got.Sparse.Indices)
+
+	denseOnly, err := client.GetByID(ctx, &pb.GetByIDRequest{Id: "doc2"})
+	require.NoError(t, err)
+	assert.Nil(t, denseOnly.Sparse, "a record with no sparse part must not carry an empty one")
+
+	found, err := client.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 0, 0}, K: proto.Int32(2)})
+	require.NoError(t, err)
+	require.Len(t, found.Results, 2)
+	assert.Equal(t, "doc1", found.Results[0].Id)
+	assert.Equal(t, "doc2", found.Results[1].Id)
+
+	none, err := client.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 0, 0}, K: proto.Int32(0)})
+	require.NoError(t, err)
+	assert.Empty(t, none.Results, "k=0 asks for nothing")
+
+	deleted, err := client.Delete(ctx, &pb.DeleteRequest{Id: "doc2"})
+	require.NoError(t, err)
+	assert.Equal(t, "deleted", deleted.Status)
+	assert.Equal(t, "doc2", deleted.Id)
+
+	stats, err := client.Stats(ctx, &pb.StatsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), stats.VectorCount)
+
+	info, err := client.Info(ctx, &pb.InfoRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), info.Dimensions)
+
+	flushed, err := client.Flush(ctx, &pb.FlushRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "flushed", flushed.Status)
+
+	reset, err := client.Reset(ctx, &pb.ResetRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "reset", reset.Status)
+	_, err = client.GetByID(ctx, &pb.GetByIDRequest{Id: "doc1"})
+	assert.Equal(t, codes.NotFound, status.Code(err), "a reset must remove every vector")
+
+	_, err = client.Insert(ctx, &pb.InsertRequest{Id: "after", Vector: []float32{0, 1}})
+	require.NoError(t, err, "a reset index takes a new width")
+	found, err = client.Search(ctx, &pb.SearchRequest{QueryVector: []float32{0, 1}, K: proto.Int32(5)})
+	require.NoError(t, err)
+	require.Len(t, found.Results, 1)
+	assert.Equal(t, "after", found.Results[0].Id)
 }
 
-// A record with no sparse vector must not carry an empty message back --
-// SparseToProto returns nil for that case and this pins it over the wire.
-func (s *GoVecServerSuite) TestGetByID_OmitsEmptySparse() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "dense-only",
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.NoError(s.T(), err)
-
-	resp, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "dense-only"})
-
-	require.NoError(s.T(), err)
-	assert.Nil(s.T(), resp.Sparse)
-}
-
-func (s *GoVecServerSuite) TestGetByID_NotFound() {
-	_, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "nonexistent"})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.NotFound, status.Code(err))
-}
-
-func (s *GoVecServerSuite) TestGetByID_MissingID() {
-	_, err := s.client.GetByID(context.Background(), &pb.GetByIDRequest{})
-	require.Error(s.T(), err)
-	assert.Equal(s.T(), codes.InvalidArgument, status.Code(err))
-}
-
-// --- Reset ---
-
-func (s *GoVecServerSuite) TestReset_ClearsEveryVector() {
-	for _, id := range []string{"r1", "r2"} {
-		_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-			Id:     id,
-			Vector: []float32{1.0, 2.0, 3.0},
-		})
-		require.NoError(s.T(), err)
+// TestGRPC_BadRequests: a request the caller got wrong is InvalidArgument or
+// NotFound, saying what is wrong -- never Internal, which would blame the
+// server. Wrong-width vectors used to come back as Internal.
+func TestGRPC_BadRequests(t *testing.T) {
+	tests := []struct {
+		name     string
+		call     func(ctx context.Context, c pb.GoVecServiceClient) error
+		wantCode codes.Code
+		wantMsg  string
+	}{
+		{"insert: missing id", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Insert(ctx, &pb.InsertRequest{Vector: []float32{1, 2, 3}})
+			return err
+		}, codes.InvalidArgument, ""},
+		{"insert: missing vector", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Insert(ctx, &pb.InsertRequest{Id: "x"})
+			return err
+		}, codes.InvalidArgument, ""},
+		{"insert: wrong width", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Insert(ctx, &pb.InsertRequest{Id: "x", Vector: []float32{1, 2}})
+			return err
+		}, codes.InvalidArgument, "index requires 3"},
+		{"search: empty vector", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Search(ctx, &pb.SearchRequest{K: proto.Int32(1)})
+			return err
+		}, codes.InvalidArgument, ""},
+		{"search: wrong width", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 2}, K: proto.Int32(1)})
+			return err
+		}, codes.InvalidArgument, "index requires 3"},
+		{"search: missing k", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 2, 3}})
+			return err
+		}, codes.InvalidArgument, ""},
+		{"search: negative k", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 2, 3}, K: proto.Int32(-1)})
+			return err
+		}, codes.InvalidArgument, ""},
+		{"get: missing id", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.GetByID(ctx, &pb.GetByIDRequest{})
+			return err
+		}, codes.InvalidArgument, ""},
+		{"get: unknown id", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.GetByID(ctx, &pb.GetByIDRequest{Id: "missing"})
+			return err
+		}, codes.NotFound, ""},
+		{"delete: unknown id", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Delete(ctx, &pb.DeleteRequest{Id: "missing"})
+			return err
+		}, codes.NotFound, ""},
 	}
-	before, err := s.client.Stats(context.Background(), &pb.StatsRequest{})
-	require.NoError(s.T(), err)
-	require.Equal(s.T(), int32(2), before.VectorCount)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: an index 3 dimensions wide.
+			ctx := context.Background()
+			engine := testutil.NewTestIndex(t)
+			client := newClient(t, engine, "")
+			_, err := client.Insert(ctx, &pb.InsertRequest{Id: "stored", Vector: []float32{1, 2, 3}})
+			require.NoError(t, err)
 
-	resp, err := s.client.Reset(context.Background(), &pb.ResetRequest{})
+			// Act
+			err = tt.call(ctx, client)
 
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "reset", resp.Status)
-
-	after, err := s.client.Stats(context.Background(), &pb.StatsRequest{})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), int32(0), after.VectorCount)
-
-	_, err = s.client.GetByID(context.Background(), &pb.GetByIDRequest{Id: "r1"})
-	assert.Equal(s.T(), codes.NotFound, status.Code(err), "a cleared vector must not be fetchable")
-}
-
-// Reset must leave the index usable, not just empty -- clearing the ID mapper
-// and then inserting again is where a half-finished Clear would show up.
-func (s *GoVecServerSuite) TestReset_IndexStillUsableAfterwards() {
-	_, err := s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "before-reset",
-		Vector: []float32{1.0, 2.0, 3.0},
-	})
-	require.NoError(s.T(), err)
-
-	_, err = s.client.Reset(context.Background(), &pb.ResetRequest{})
-	require.NoError(s.T(), err)
-
-	_, err = s.client.Insert(context.Background(), &pb.InsertRequest{
-		Id:     "after-reset",
-		Vector: []float32{3.0, 2.0, 1.0},
-	})
-	require.NoError(s.T(), err)
-
-	found, err := s.client.Search(context.Background(), &pb.SearchRequest{
-		QueryVector: []float32{3.0, 2.0, 1.0},
-		K:           proto.Int32(5),
-	})
-	require.NoError(s.T(), err)
-	require.Len(s.T(), found.Results, 1)
-	assert.Equal(s.T(), "after-reset", found.Results[0].Id)
-}
-
-// --- Stats ---
-
-func (s *GoVecServerSuite) TestStats() {
-	resp, err := s.client.Stats(context.Background(), &pb.StatsRequest{})
-	require.NoError(s.T(), err)
-	assert.GreaterOrEqual(s.T(), resp.VectorCount, int32(0))
-}
-
-// --- Info ---
-
-func (s *GoVecServerSuite) TestInfo() {
-	resp, err := s.client.Info(context.Background(), &pb.InfoRequest{})
-	require.NoError(s.T(), err)
-	// The test engine (created via testutil.NewTestIndex) bypasses the factory
-	// and does not populate indexType/distanceMetric — assert the RPC succeeds.
-	assert.GreaterOrEqual(s.T(), resp.VectorCount, int32(0))
-	assert.Equal(s.T(), release.Version, resp.Version)
-}
-
-// --- Flush ---
-
-func (s *GoVecServerSuite) TestFlush() {
-	resp, err := s.client.Flush(context.Background(), &pb.FlushRequest{})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "flushed", resp.Status)
-}
-
-// --- Health ---
-
-func (s *GoVecServerSuite) TestHealth() {
-	resp, err := s.client.Health(context.Background(), &pb.HealthRequest{})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "ok", resp.Status)
+			// Assert
+			assert.Equal(t, tt.wantCode, status.Code(err), "%v", err)
+			assert.Contains(t, status.Convert(err).Message(), tt.wantMsg)
+			assert.Equal(t, 1, engine.Len(), "a rejected request must change nothing")
+		})
+	}
 }
