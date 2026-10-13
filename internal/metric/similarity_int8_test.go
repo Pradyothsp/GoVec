@@ -1,10 +1,12 @@
-package core
+package metric
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 func TestCosineSimilarityInt8(t *testing.T) {
@@ -70,7 +72,7 @@ func TestCosineSimilarityInt8_CloseToFloat32(t *testing.T) {
 
 	// Act
 	scoreFloat, errFloat := CosineSimilarity(vecA, vecB)
-	scoreInt8, errInt8 := CosineSimilarityInt8(QuantizeVector(vecA), QuantizeVector(vecB))
+	scoreInt8, errInt8 := CosineSimilarityInt8(core.QuantizeVector(vecA), core.QuantizeVector(vecB))
 
 	// Assert
 	require.NoError(t, errFloat)

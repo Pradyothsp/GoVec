@@ -18,9 +18,10 @@ topology-only persistence. Upstream's whole-graph `Export`/`Import`,
 ## Boundary
 
 `hnsw` is a graph algorithm over keys and vectors, with the metric passed in as
-a `core.Metric`. It knows nothing of GoVec's records, WAL, config, metadata or
-transports; that belongs in `internal/index`. Keep it that way, so the graph can
-be tested and benchmarked on its own.
+a `metric.Metric`. `internal/metric` is the only GoVec package it imports: it
+knows nothing of GoVec's records, WAL, config, metadata or transports, which
+belong in `internal/index`. Keep it that way, so the graph can be tested and
+benchmarked on its own.
 
 | Operation | Complexity            | Description                                  |
 | --------- | --------------------- | -------------------------------------------- |
@@ -37,17 +38,17 @@ be tested and benchmarked on its own.
 
 ```go
 import (
-    "github.com/Pradyothsp/govec/internal/core"
     "github.com/Pradyothsp/govec/internal/hnsw"
+    "github.com/Pradyothsp/govec/internal/metric"
 )
 
-metric, err := core.ResolveMetric[[]float32](core.MetricCosine)
+m, err := metric.Resolve[[]float32](metric.Cosine)
 if err != nil {
     panic(err)
 }
 
 g := hnsw.NewGraph[uint32, []float32]()
-g.Metric = metric
+g.Metric = m
 
 g.Add(
     hnsw.MakeNode[uint32, []float32](1, []float32{1, 1, 1}),
@@ -58,7 +59,7 @@ g.Add(
 neighbors := g.Search([]float32{0.5, 0.5, 0.5}, 1)
 ```
 
-For `[]int8` vectors, resolve `core.ResolveMetric[[]int8]` and quantize with
+For `[]int8` vectors, resolve `metric.Resolve[[]int8]` and quantize with
 `core.QuantizeVector`. The graph uses the metric's `Distance`, plus its optional
 `Precompute`/`CachedDistance` and `SquaredDistance`/`FromSquaredDistance` pairs
 when they are set.

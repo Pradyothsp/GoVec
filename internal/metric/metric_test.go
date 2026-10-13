@@ -1,4 +1,4 @@
-package core
+package metric
 
 import (
 	"math/rand/v2"
@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // metricPairs returns deterministic vector pairs for checking a metric's
@@ -15,7 +17,7 @@ func metricPairs() (f32 [][2][]float32, i8 [][2][]int8) {
 	for range 20 {
 		a, b := signedFloats(rng, 128), signedFloats(rng, 128)
 		f32 = append(f32, [2][]float32{a, b})
-		i8 = append(i8, [2][]int8{QuantizeVector(NormalizeVector(a)), QuantizeVector(NormalizeVector(b))})
+		i8 = append(i8, [2][]int8{core.QuantizeVector(core.NormalizeVector(a)), core.QuantizeVector(core.NormalizeVector(b))})
 	}
 
 	return f32, i8
@@ -54,10 +56,10 @@ func checkMetric[T VectorType](t *testing.T, m Metric[T], pairs [][2]T) {
 // brute force (Similarity) or HNSW (Score of Distance) found it.
 func TestMetrics_FunctionsAgree(t *testing.T) {
 	f32, i8 := metricPairs()
-	for _, name := range MetricNames() {
+	for _, name := range Names() {
 		t.Run(name+"/float32", func(t *testing.T) {
 			// Arrange
-			m, err := ResolveMetric[[]float32](MetricName(name))
+			m, err := Resolve[[]float32](Name(name))
 			require.NoError(t, err)
 
 			// Act + Assert
@@ -65,7 +67,7 @@ func TestMetrics_FunctionsAgree(t *testing.T) {
 		})
 		t.Run(name+"/int8", func(t *testing.T) {
 			// Arrange
-			m, err := ResolveMetric[[]int8](MetricName(name))
+			m, err := Resolve[[]int8](Name(name))
 			require.NoError(t, err)
 
 			// Act + Assert
@@ -74,20 +76,20 @@ func TestMetrics_FunctionsAgree(t *testing.T) {
 	}
 }
 
-func TestResolveMetric_SetsNameAndScore(t *testing.T) {
+func TestResolve_SetsNameAndScore(t *testing.T) {
 	tests := []struct {
-		name     MetricName
+		name     Name
 		distance float32
 		want     float32
 	}{
-		{MetricCosine, 0.25, 0.75},  // 1 - distance
-		{MetricEuclidean, 4, 0.2},   // 1 / (1 + distance)
-		{MetricEuclidean, 99, 0.01}, // farther is lower, never negative
+		{Cosine, 0.25, 0.75},  // 1 - distance
+		{Euclidean, 4, 0.2},   // 1 / (1 + distance)
+		{Euclidean, 99, 0.01}, // farther is lower, never negative
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.name), func(t *testing.T) {
 			// Act
-			m, err := ResolveMetric[[]float32](tt.name)
+			m, err := Resolve[[]float32](tt.name)
 
 			// Assert
 			require.NoError(t, err)
@@ -97,12 +99,12 @@ func TestResolveMetric_SetsNameAndScore(t *testing.T) {
 	}
 }
 
-func TestResolveMetric_Unknown(t *testing.T) {
+func TestResolve_Unknown(t *testing.T) {
 	// Act
-	_, err := ResolveMetric[[]int8]("manhattan")
+	_, err := Resolve[[]int8]("manhattan")
 
 	// Assert
 	require.ErrorContains(t, err, "unknown distance metric 'manhattan', must be one of: cosine, euclidean")
-	assert.False(t, IsMetric("manhattan"))
-	assert.True(t, IsMetric(MetricCosine))
+	assert.False(t, IsKnown("manhattan"))
+	assert.True(t, IsKnown(Cosine))
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -23,12 +24,12 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	records[T]
 	graph *hnsw.Graph[uint32, T]
 
-	metric                     core.Metric[T] // stored for the graph rebuilt by Reset; Score converts its distances
-	hnswM                      int            // stored for the graph rebuilt by Reset
-	hnswEfSearch               int            // stored for the graph rebuilt by Reset
-	hnswEfConstruction         int            // stored for the graph rebuilt by Reset
-	hnswBatchParallelism       int            // stored for the graph rebuilt by Reset
-	hnswBatchParallelThreshold int            // stored for the graph rebuilt by Reset
+	metric                     metric.Metric[T] // stored for the graph rebuilt by Reset; Score converts its distances
+	hnswM                      int              // stored for the graph rebuilt by Reset
+	hnswEfSearch               int              // stored for the graph rebuilt by Reset
+	hnswEfConstruction         int              // stored for the graph rebuilt by Reset
+	hnswBatchParallelism       int              // stored for the graph rebuilt by Reset
+	hnswBatchParallelThreshold int              // stored for the graph rebuilt by Reset
 }
 
 // NewHNSWIndex creates an empty HNSWIndex ready for use.
@@ -39,7 +40,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 	invertedIndex map[uint32][]core.Posting,
 	idMapper *core.IDMapper,
 	encodeFunc func([]float32) T,
-	metric core.Metric[T],
+	distMetric metric.Metric[T],
 	m int,
 	efSearch int,
 	efConstruction int,
@@ -57,7 +58,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 			encodeFunc:    encodeFunc,
 			vectorStore:   vectorStore,
 		},
-		metric:             metric,
+		metric:             distMetric,
 		hnswM:              m,
 		hnswEfSearch:       efSearch,
 		hnswEfConstruction: efConstruction,

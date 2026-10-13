@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 // uncreatableDir returns a directory path that can never be created: its
@@ -33,13 +34,13 @@ func newTestIndex(t testing.TB) *VectorIndex[[]float32] {
 	// Create an index with IDMapper, identity encode function and cosine similarity
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
+	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, metric.CosineSimilarity, nil)
 }
 
 // testCosineMetric is the cosine metric as an HNSW index built by the factory
 // gets it, for tests that construct one directly.
-var testCosineMetric = func() core.Metric[[]float32] {
-	m, err := core.ResolveMetric[[]float32](core.MetricCosine)
+var testCosineMetric = func() metric.Metric[[]float32] {
+	m, err := metric.Resolve[[]float32](metric.Cosine)
 	if err != nil {
 		panic(err)
 	}

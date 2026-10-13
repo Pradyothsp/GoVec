@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/metric"
 
 	"github.com/Pradyothsp/govec/internal/api"
 	"github.com/Pradyothsp/govec/internal/core"
@@ -43,7 +44,7 @@ func (s *WALRecoveryTestSuite) SetupTest() {
 	s.T().Cleanup(func() { _ = wal.Close() })
 
 	idMapper := core.NewIDMapper()
-	s.index = index.NewVectorIndex[[]float32](wal, nil, idMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	s.index = index.NewVectorIndex[[]float32](wal, nil, idMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	s.router = api.SetupRouter(s.index, "", "")
 }
 
@@ -83,7 +84,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashAfterInserts() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 
 	// Load from missing snapshot
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
@@ -161,7 +162,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashDuringMixedOperations() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -193,7 +194,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_EmptyWAL() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
@@ -253,7 +254,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_CrashBetweenAutoSaves() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -321,7 +322,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_SnapshotAfterDeletes() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -397,7 +398,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MultipleSnapshots() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -447,7 +448,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_ConcurrentInsertsBeforeCrash() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -502,7 +503,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_InterleavedInsertsDeletes() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -550,7 +551,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_TornLastLineIsCutOff() {
 
 	// Recovery
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err)
 	err = recoveredIdx.ReplayWAL(s.walPath)
@@ -610,7 +611,7 @@ func (s *WALRecoveryTestSuite) TestWALRecovery_MissingSnapshotButValidWAL() {
 	defer newWal.Close()
 
 	recoveredIDMapper := core.NewIDMapper()
-	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, core.CosineSimilarity, nil)
+	recoveredIdx := index.NewVectorIndex[[]float32](newWal, nil, recoveredIDMapper, func(v []float32) []float32 { return v }, metric.CosineSimilarity, nil)
 	err = recoveredIdx.LoadFromFile(context.Background(), s.snapPath)
 	s.Require().NoError(err, "Missing snapshot should be handled gracefully")
 	err = recoveredIdx.ReplayWAL(s.walPath)
