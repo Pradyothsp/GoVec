@@ -5,6 +5,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
@@ -26,7 +27,7 @@ func NewVectorIndex[T any](wal *WAL, invertedIndex map[uint32][]core.Posting, id
 			Store:         make(map[uint32]*core.VectorNode[T]),
 			InvertedIndex: invertedIndex,
 			IDMapper:      idMapper,
-			indexType:     "brute",
+			indexType:     config.IndexTypeBrute,
 			wal:           wal,
 			encodeFunc:    encodeFunc,
 			vectorStore:   vectorStore,

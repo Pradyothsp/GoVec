@@ -11,6 +11,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
 )
 
@@ -30,9 +31,9 @@ type records[T any] struct {
 	IDMapper      *core.IDMapper
 	metaIndex     *core.MetadataIndex // nil when the metadata index is off
 
-	quantization   string
-	indexType      string
-	distanceMetric string
+	quantization   config.Quantization
+	indexType      config.IndexType
+	distanceMetric metric.Name
 	dimensions     int // 0 until set by config or the first insert
 	// configuredDimensions is engine.dimensions from config, 0 when unset.
 	// Kept apart from dimensions so clear can tell a width the operator chose
@@ -47,8 +48,8 @@ type records[T any] struct {
 
 // configure applies the engine settings from config.
 func (r *records[T]) configure(cfg *config.EngineConfig) {
-	r.quantization = string(cfg.Quantization)
-	r.distanceMetric = string(cfg.DistanceMetric)
+	r.quantization = cfg.Quantization
+	r.distanceMetric = cfg.DistanceMetric
 	r.dimensions = cfg.Dimensions
 	r.configuredDimensions = cfg.Dimensions
 }
@@ -98,9 +99,9 @@ func (r *records[T]) Info() EngineInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return EngineInfo{
-		Quantization:   r.quantization,
-		IndexType:      r.indexType,
-		DistanceMetric: r.distanceMetric,
+		Quantization:   string(r.quantization),
+		IndexType:      string(r.indexType),
+		DistanceMetric: string(r.distanceMetric),
 		Dimensions:     r.dimensions,
 		VectorCount:    len(r.Store),
 		EnableMmap:     r.vectorStore != nil,

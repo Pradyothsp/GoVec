@@ -3,34 +3,37 @@ package index
 import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 // prepareForEncode applies the metric-dependent fix-up QuantizeVector's
 // [-1, 1] precondition needs, when scalar quantization is active. A vector
 // outside that range would otherwise be silently clamped to a different
 // vector -- SIFT-scale features (unnormalized, values well outside [-1, 1])
-// clamp to near-uniform int8 vectors this way, destroying recall. Under
-// cosine distance the fix is always safe (unit-normalize); under Euclidean,
-// normalizing would corrupt the distance itself, so out-of-range vectors are
-// rejected instead. No-op when quantization is "none".
-func prepareForEncode(vec []float32, quantization, distanceMetric string) ([]float32, error) {
-	if quantization != string(config.QuantizationScalar) {
+// clamp to near-uniform int8 vectors this way, destroying recall. Under a
+// scale-invariant metric such as cosine the fix is always safe
+// (unit-normalize); under one that isn't, such as Euclidean, normalizing would
+// corrupt the distance itself, so out-of-range vectors are rejected instead.
+// No-op without scalar quantization.
+func prepareForEncode(vec []float32, quantization config.Quantization, distanceMetric metric.Name) ([]float32, error) {
+	if quantization != config.QuantizationScalar {
 		return vec, nil
 	}
 
 	if err := checkEncodable(vec, quantization, distanceMetric); err != nil {
 		return nil, err
 	}
-	if distanceMetric == string(config.DistanceMetricCosine) {
+	if distanceMetric.ScaleInvariant() {
 		return core.NormalizeVector(vec), nil
 	}
 	return vec, nil
 }
 
 // checkEncodable reports whether prepareForEncode would reject vec, without
-// normalizing it: only scalar quantization under Euclidean can reject.
-func checkEncodable(vec []float32, quantization, distanceMetric string) error {
-	if quantization == string(config.QuantizationScalar) && distanceMetric == string(config.DistanceMetricEuclidean) {
+// normalizing it: only scalar quantization under a metric that isn't
+// scale-invariant can reject.
+func checkEncodable(vec []float32, quantization config.Quantization, distanceMetric metric.Name) error {
+	if quantization == config.QuantizationScalar && !distanceMetric.ScaleInvariant() {
 		return core.ValidateQuantizationRange(vec)
 	}
 	return nil

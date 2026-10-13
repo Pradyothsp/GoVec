@@ -14,6 +14,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Pradyothsp/govec/internal/config"
+	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 func TestGobChunkStream_RoundTrip(t *testing.T) {
@@ -63,13 +67,46 @@ func TestGobChunkStream_RoundTrip(t *testing.T) {
 func TestLoadFromFile_OtherSnapshotVersion_RejectedWithClearError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.bin")
 	var file bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&file).Encode(SnapshotHeader{Version: 1, Quantization: "none", DistanceMetric: "cosine", IndexType: "hnsw"}))
+	require.NoError(t, gob.NewEncoder(&file).Encode(SnapshotHeader{Version: 1, Quantization: config.QuantizationNone, DistanceMetric: metric.Cosine, IndexType: config.IndexTypeHNSW}))
 	require.NoError(t, os.WriteFile(path, file.Bytes(), 0o600))
 
 	err := newTestHNSWIndex(t).LoadFromFile(context.Background(), path)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "snapshot format version 1")
+}
+
+// TestLoadFromFile_RejectsIndexTypeMismatch: a brute-force snapshot has no
+// graph and an HNSW one does, so neither engine can load the other's. The
+// error names the snapshot's index type, which is what the operator must set.
+func TestLoadFromFile_RejectsIndexTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		save      func(t *testing.T) Engine
+		load      func(t *testing.T) Engine
+		savedType string
+	}{
+		{"brute snapshot into hnsw", func(t *testing.T) Engine { return newTestIndex(t) }, func(t *testing.T) Engine { return newTestHNSWIndex(t) }, "brute"},
+		{"hnsw snapshot into brute", func(t *testing.T) Engine { return newTestHNSWIndex(t) }, func(t *testing.T) Engine { return newTestIndex(t) }, "hnsw"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "snapshot.bin")
+			saved := tt.save(t)
+			require.NoError(t, saved.Insert(ctx, "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
+			require.NoError(t, saved.SaveToFile(ctx, path))
+			loaded := tt.load(t)
+
+			// Act
+			err := loaded.LoadFromFile(ctx, path)
+
+			// Assert
+			require.ErrorContains(t, err, "snapshot was created with index_type '"+tt.savedType+"'")
+			assert.Equal(t, 0, loaded.Len(), "a rejected snapshot must not be partly loaded")
+		})
+	}
 }
 
 // TestSaveToFile_HNSW_WritesVectorsOnceAndStreams guards the two properties

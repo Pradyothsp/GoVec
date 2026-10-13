@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/metric"
 )
 
 // TestLoadFromFile_RejectsDistanceMetricMismatch is the regression test for
@@ -20,7 +21,7 @@ import (
 func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
 	type metricIndex interface {
 		Engine
-		setMetric(string)
+		setMetric(metric.Name)
 	}
 
 	engines := []struct {
@@ -37,20 +38,20 @@ func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "snapshot.bin")
 
 			saved := e.open(t)
-			saved.setMetric("euclidean")
+			saved.setMetric(metric.Euclidean)
 			require.NoError(t, saved.Insert(ctx, "v1", []float32{1, 0, 0}, core.SparseVector{}, nil))
 			require.NoError(t, saved.SaveToFile(ctx, path))
 
 			t.Run("same_metric_loads", func(t *testing.T) {
 				loaded := e.open(t)
-				loaded.setMetric("euclidean")
+				loaded.setMetric(metric.Euclidean)
 				require.NoError(t, loaded.LoadFromFile(ctx, path))
 				assert.Equal(t, 1, loaded.Len())
 			})
 
 			t.Run("other_metric_is_rejected", func(t *testing.T) {
 				loaded := e.open(t)
-				loaded.setMetric("cosine")
+				loaded.setMetric(metric.Cosine)
 				err := loaded.LoadFromFile(ctx, path)
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "distance metric mismatch")
@@ -63,8 +64,8 @@ func TestLoadFromFile_RejectsDistanceMetricMismatch(t *testing.T) {
 
 type bruteMetric struct{ *VectorIndex[[]float32] }
 
-func (b bruteMetric) setMetric(m string) { b.distanceMetric = m }
+func (b bruteMetric) setMetric(m metric.Name) { b.distanceMetric = m }
 
 type hnswMetric struct{ *HNSWIndex[[]float32] }
 
-func (h hnswMetric) setMetric(m string) { h.distanceMetric = m }
+func (h hnswMetric) setMetric(m metric.Name) { h.distanceMetric = m }

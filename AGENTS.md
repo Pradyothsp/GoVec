@@ -135,8 +135,8 @@ narrate what the code does line by line.
 - **A distance metric lives in one place.** Each metric is one entry in `internal/metric/metric.go`'s
   `metrics` table: brute force's `Similarity`, HNSW's `Distance` and optional pairs, and the
   `Score` that puts a distance on the similarity scale. `TestMetrics_FunctionsAgree` checks they
-  agree. Don't add a switch on a metric name elsewhere; the one left, in `encode_guard.go`'s
-  quantization checks, is due to move into the metric.
+  agree. Never switch on a metric name elsewhere: give the table entry a property and ask it,
+  as `encode_guard.go` asks `Name.ScaleInvariant` whether it may normalize.
 
 ## Before you finish
 
