@@ -73,10 +73,10 @@ func (r *records[T]) GetByID(_ context.Context, id string) (*VectorRecord, error
 	}
 
 	return &VectorRecord{
-		ID:           node.ExternalID,
-		Vector:       vec,
-		SparseVector: sparseOrNil(node.Sparse),
-		Metadata:     node.Metadata,
+		ID:       node.ExternalID,
+		Vector:   vec,
+		Sparse:   node.Sparse,
+		Metadata: node.Metadata,
 	}, nil
 }
 
@@ -92,9 +92,9 @@ func (r *records[T]) Info() EngineInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return EngineInfo{
-		Quantization:   string(r.quantization),
-		IndexType:      string(r.indexType),
-		DistanceMetric: string(r.metric.Name),
+		Quantization:   r.quantization,
+		IndexType:      r.indexType,
+		DistanceMetric: r.metric.Name,
 		Dimensions:     r.dimensions,
 		VectorCount:    len(r.Store),
 		EnableMmap:     r.vectorStore != nil,

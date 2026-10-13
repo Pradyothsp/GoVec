@@ -36,8 +36,8 @@ func TestNewEngine(t *testing.T) {
 				require.Len(t, results, 1)
 				assert.Equal(t, "test1", results[0].ID)
 				info := engine.Info()
-				assert.Equal(t, string(indexType), info.IndexType)
-				assert.Equal(t, string(quant), info.Quantization)
+				assert.Equal(t, indexType, info.IndexType)
+				assert.Equal(t, quant, info.Quantization)
 			})
 		}
 	}
@@ -182,7 +182,7 @@ func TestNewEngine_HNSW_EuclideanMetric(t *testing.T) {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
 
-	if engine.Info().DistanceMetric != string(config.DistanceMetricEuclidean) {
+	if engine.Info().DistanceMetric != config.DistanceMetricEuclidean {
 		t.Fatalf("expected distance metric 'euclidean', got '%s'", engine.Info().DistanceMetric)
 	}
 

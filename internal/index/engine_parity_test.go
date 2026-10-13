@@ -158,7 +158,7 @@ func TestSparseVector_Empty_MeansNone(t *testing.T) {
 
 			record, err := engine.GetByID(ctx, "dense-only")
 			require.NoError(t, err)
-			assert.Nil(t, record.SparseVector)
+			assert.True(t, record.Sparse.IsEmpty(), "an empty sparse vector is stored as none")
 		})
 	}
 }

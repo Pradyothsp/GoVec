@@ -74,7 +74,9 @@ Dependencies point inward: transports (`api`, `grpcserver`) → `index` → `cor
 **Transports are thin and must agree.** REST and gRPC are two wire formats over one `Engine`. An
 operation must return the same result and status string over either one.
 `internal/test/integration/transport_parity_test.go` enforces this. If you add or change an
-operation, change both transports and extend the parity test.
+operation, change both transports and extend the parity test. The engine's result types
+(`VectorRecord`, `SearchResult`, `EngineInfo`) carry no JSON or Swagger tags: REST maps them to its
+own types in `handlers/responses.go`, as gRPC does in `grpcserver/convert`.
 
 **Classify errors where they originate.** The `index` layer defines sentinel errors and
 classifiers such as `IsInvalidVectorError`. Transports call the classifier to choose HTTP 400 or
