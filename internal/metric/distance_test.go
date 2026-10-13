@@ -34,15 +34,6 @@ func TestCosineDistanceFloat32(t *testing.T) {
 	require.InDelta(t, 0, CosineDistanceFloat32(a, b), 0.000001)
 }
 
-func BenchmarkCosineDistanceFloat32(b *testing.B) {
-	rng := rand.New(rand.NewPCG(1, 1536)) //nolint:gosec // deterministic benchmark data
-	v1, v2 := signedFloats(rng, 1536), signedFloats(rng, 1536)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		CosineDistanceFloat32(v1, v2)
-	}
-}
-
 // cosineDistanceReference is the textbook formula in float64, the yardstick
 // for the fast float32 kernel.
 func cosineDistanceReference(a, b []float32) float64 {
@@ -110,33 +101,4 @@ func TestCachedCosineDistanceFloat32_ExactCases(t *testing.T) {
 
 	// No zero-vector guard, matching vek32.CosineSimilarity: 0/0 is NaN.
 	assert.True(t, math.IsNaN(float64(cachedCosine(a, make([]float32, len(a))))))
-}
-
-// BenchmarkCachedCosineDistanceFloat32 measures the cosine kernel HNSW calls
-// on every comparison:
-//
-//	go test ./internal/hnsw/ -run '^$' -bench CachedCosine
-func BenchmarkCachedCosineDistanceFloat32(b *testing.B) {
-	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic benchmark data
-	for _, dims := range []int{128, 1536} {
-		x, y := signedFloats(rng, dims), signedFloats(rng, dims)
-		nx, ny := PrecomputeSquaredNormFloat32(x), PrecomputeSquaredNormFloat32(y)
-		b.Run(fmt.Sprintf("d%d", dims), func(b *testing.B) {
-			for b.Loop() {
-				CachedCosineDistanceFloat32(x, nx, y, ny)
-			}
-		})
-	}
-}
-
-func BenchmarkSquaredEuclideanDistanceFloat32(b *testing.B) {
-	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic benchmark data
-	for _, dims := range []int{128, 1536} {
-		x, y := signedFloats(rng, dims), signedFloats(rng, dims)
-		b.Run(fmt.Sprintf("d%d", dims), func(b *testing.B) {
-			for b.Loop() {
-				SquaredEuclideanDistanceFloat32(x, y)
-			}
-		})
-	}
 }

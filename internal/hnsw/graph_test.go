@@ -253,33 +253,39 @@ func Test_selectNeighborsHeuristic_FewerCandidatesThanMReturnsAllUnpruned(t *tes
 	require.Len(t, selected, 2, "fewer candidates than m means nothing to prune, matching hnswlib's size() < M early return")
 }
 
-func Benchmark_HSNW(b *testing.B) {
-	b.ReportAllocs()
-
-	sizes := []int{100, 1000, 10000}
-
-	// Use this to ensure that complexity is O(log n) where n = h.Len().
-	for _, size := range sizes {
+// BenchmarkGraph_Search times one top-10 search of a cosine graph built with
+// the production defaults, isolating the graph from the engine around it
+// (internal/test/integration's BenchmarkSearch times the whole engine).
+func BenchmarkGraph_Search(b *testing.B) {
+	const dims, k = 128, 10
+	m, err := metric.Resolve[[]float32](metric.Cosine)
+	require.NoError(b, err)
+	for _, size := range []int{1_000, 10_000} {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
-			g := Graph[int, []float32]{}
-			g.Ml = 0.5
-			g.Metric = metric.Metric[[]float32]{Distance: metric.EuclideanDistanceFloat32}
-			for i := 0; i < size; i++ {
-				g.Add(Node[int, []float32]{
-					Key:   i,
-					Value: []float32{float32(i)},
-				})
-			}
-			b.ResetTimer()
-
-			b.Run("Search", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					g.Search(
-						[]float32{float32(i % size)},
-						4,
-					)
+			rng := rand.New(rand.NewSource(int64(size))) //nolint:gosec // deterministic benchmark data
+			vector := func() []float32 {
+				v := make([]float32, dims)
+				for i := range v {
+					v[i] = float32(rng.NormFloat64())
 				}
-			})
+				return v
+			}
+			g := NewGraph[int](m, Config{})
+			g.Rng = rng
+			for i := range size {
+				g.Add(Node[int, []float32]{Key: i, Value: vector()})
+			}
+			queries := make([][]float32, 100)
+			for i := range queries {
+				queries[i] = vector()
+			}
+
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				g.Search(queries[i%len(queries)], k)
+				i++
+			}
 		})
 	}
 }
@@ -290,31 +296,6 @@ func randFloats(n int) []float32 {
 		x[i] = rand.Float32()
 	}
 	return x
-}
-
-func Benchmark_HNSW_1536(b *testing.B) {
-	b.ReportAllocs()
-
-	g := newTestGraph[int]()
-	const size = 1000
-	points := make([]Node[int, []float32], size)
-	for i := 0; i < size; i++ {
-		points[i] = Node[int, []float32]{
-			Key:   i,
-			Value: randFloats(1536),
-		}
-		g.Add(points[i])
-	}
-	b.ResetTimer()
-
-	b.Run("Search", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			g.Search(
-				points[i%size].Value,
-				4,
-			)
-		}
-	})
 }
 
 func TestGraph_DefaultCosine(t *testing.T) {

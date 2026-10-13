@@ -214,17 +214,3 @@ func TestCosineSimilarity_Symmetry(t *testing.T) {
 		}
 	})
 }
-
-func BenchmarkCosineSimilarity_128D(b *testing.B) {
-	vec1 := make([]float32, 128)
-	vec2 := make([]float32, 128)
-	for i := range vec1 {
-		vec1[i] = float32(i) / 128.0
-		vec2[i] = float32(i) / 64.0
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = CosineSimilarity(vec1, vec2)
-	}
-}

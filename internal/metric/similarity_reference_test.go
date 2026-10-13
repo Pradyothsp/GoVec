@@ -86,15 +86,3 @@ func TestEuclideanSimilarity_MatchesReference(t *testing.T) {
 		})
 	}
 }
-
-func BenchmarkEuclideanSimilarity(b *testing.B) {
-	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic benchmark data
-	for _, dims := range []int{128, 1536} {
-		x, y := signedFloats(rng, dims), signedFloats(rng, dims)
-		b.Run(fmt.Sprintf("d%d", dims), func(b *testing.B) {
-			for b.Loop() {
-				_, _ = EuclideanSimilarity(x, y)
-			}
-		})
-	}
-}
