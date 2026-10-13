@@ -231,7 +231,7 @@ tasks:
   install-tools:
     desc: Install all development tools (gotestsum, golangci-lint, govulncheck, swag, buf)
     vars:
-      GOLANGCI_LINT_VERSION: v2.9.0
+      GOLANGCI_LINT_VERSION: v2.14.0
     cmds:
       - echo "==> Installing gotestsum..."
       - go install gotest.tools/gotestsum@latest
