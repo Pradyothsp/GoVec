@@ -100,7 +100,7 @@ func runBenchmarkWithIndex(b *testing.B, quantization, indexType string,
 
 // newHNSWEngineForBench creates an engine for use inside benchmark functions.
 // Caller is responsible for closing the returned WAL.
-func newHNSWEngineForBench(b *testing.B, quantization, indexType string) (index.Engine, *index.WAL) {
+func newHNSWEngineForBench(b *testing.B, quantization, indexType string) (index.FileEngine, *index.WAL) {
 	b.Helper()
 	tmpDir := b.TempDir()
 	walPath := tmpDir + "/bench.wal"

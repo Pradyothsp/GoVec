@@ -21,11 +21,10 @@ import (
 
 func TestNewSystemHandler(t *testing.T) {
 	idx := testutil.NewTestIndex(t)
-	h := NewSystemHandler(idx, "/tmp/test.bin")
+	h := NewSystemHandler(idx)
 
 	assert.NotNil(t, h)
 	assert.Equal(t, idx, h.Engine)
-	assert.Equal(t, "/tmp/test.bin", h.DataPath)
 }
 
 // Stats and Info report the vector count, and Info the width, which an
@@ -47,7 +46,7 @@ func TestStatsAndInfo_EmptyThenAfterInsert(t *testing.T) {
 			for i, vec := range tt.inserted {
 				require.NoError(t, idx.Insert(context.Background(), fmt.Sprintf("v%d", i), vec, core.SparseVector{}, nil))
 			}
-			h := NewSystemHandler(idx, "")
+			h := NewSystemHandler(idx)
 			router := gin.New()
 			router.GET("/stats", h.Stats)
 			router.GET("/info", h.Info)
@@ -78,7 +77,7 @@ func TestInfo_ReportsServerVersion(t *testing.T) {
 	release.Version = "v9.9.9-test"
 	t.Cleanup(func() { release.Version = original })
 
-	h := NewSystemHandler(testutil.NewTestIndex(t), "")
+	h := NewSystemHandler(testutil.NewTestIndex(t))
 
 	router := gin.New()
 	router.GET("/info", h.Info)
@@ -95,11 +94,11 @@ func TestInfo_ReportsServerVersion(t *testing.T) {
 }
 
 func TestFlush_Success(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
+	path := filepath.Join(t.TempDir(), "test.bin")
+	idx := testutil.NewTestIndexAt(t, path)
 	require.NoError(t, idx.Insert(context.Background(), "v1", []float32{1.0, 2.0}, core.SparseVector{}, nil))
 
-	path := filepath.Join(t.TempDir(), "test.bin")
-	h := NewSystemHandler(idx, path)
+	h := NewSystemHandler(idx)
 
 	router := gin.New()
 	router.POST("/admin/flush", h.Flush)
@@ -112,15 +111,15 @@ func TestFlush_Success(t *testing.T) {
 	assert.JSONEq(t, `{"success":true,"data":{"status":"flushed"}}`, rec.Body.String())
 
 	_, err := os.Stat(path)
-	assert.NoError(t, err, "flush should create file at DataPath")
+	assert.NoError(t, err, "flush should create the snapshot at the index's snapshot path")
 }
 
 func TestFlush_InvalidPath(t *testing.T) {
-	idx := testutil.NewTestIndex(t)
 	// A path under a regular file can't be created by anyone, root included.
 	notADir := filepath.Join(t.TempDir(), "a-file")
 	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
-	h := NewSystemHandler(idx, filepath.Join(notADir, "test.bin"))
+	idx := testutil.NewTestIndexAt(t, filepath.Join(notADir, "test.bin"))
+	h := NewSystemHandler(idx)
 
 	router := gin.New()
 	router.POST("/admin/flush", h.Flush)
@@ -138,7 +137,7 @@ func TestReset_Success(t *testing.T) {
 	require.NoError(t, idx.Insert(context.Background(), "v2", []float32{3.0, 4.0}, core.SparseVector{}, nil))
 	require.Equal(t, 2, idx.Len())
 
-	h := NewSystemHandler(idx, "")
+	h := NewSystemHandler(idx)
 
 	router := gin.New()
 	router.POST("/admin/reset", h.Reset)

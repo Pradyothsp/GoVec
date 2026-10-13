@@ -27,7 +27,7 @@ type APITestSuite struct {
 func (s *APITestSuite) SetupTest() {
 	gin.SetMode(gin.TestMode)
 	s.index = testutil.NewTestIndex(s.T())
-	s.router = api.SetupRouter(s.index, "", s.T().TempDir()+"/test.bin")
+	s.router = api.SetupRouter(s.index, "")
 }
 
 func (s *APITestSuite) TearDownTest() {

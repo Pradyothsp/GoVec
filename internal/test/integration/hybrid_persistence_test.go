@@ -50,7 +50,7 @@ func TestHybridSearch_SurvivesSnapshotReload(t *testing.T) {
 				MmapStorePath: filepath.Join(dir, "mmap"),
 			}
 
-			newEngine := func(walName string) index.Engine {
+			newEngine := func(walName string) index.FileEngine {
 				t.Helper()
 				wal, err := index.NewWAL(filepath.Join(dir, walName))
 				require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestHybridSearch_SurvivesSnapshotReload(t *testing.T) {
 			}, nil))
 
 			sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{1.0}}
-			assertSparseBoostWins := func(t *testing.T, engine index.Engine) {
+			assertSparseBoostWins := func(t *testing.T, engine index.FileEngine) {
 				t.Helper()
 				results, err := engine.Search(ctx, []float32{1, 0, 0}, sparseQuery, 2, nil)
 				require.NoError(t, err)

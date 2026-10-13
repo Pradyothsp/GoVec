@@ -121,12 +121,22 @@ func (idx *VectorIndex[T]) ReplayWAL(walPath string) error {
 }
 
 // Reset removes every vector durably (see Engine.Reset).
-func (idx *VectorIndex[T]) Reset(ctx context.Context, snapshotPath string) error {
-	err := idx.reset(snapshotPath, func(path string) error {
+func (idx *VectorIndex[T]) Reset(ctx context.Context) error {
+	err := idx.reset(idx.snapshotPath, func(path string) error {
 		return idx.writeSnapshot(path, idx.emptyContents())
 	}, nil)
 	if err == nil {
-		zerolog.Ctx(ctx).Info().Str("path", snapshotPath).Msg("index reset")
+		zerolog.Ctx(ctx).Info().Str("path", idx.snapshotPath).Msg("index reset")
 	}
 	return err
+}
+
+// Flush writes a snapshot to the index's snapshot path (see Engine.Flush).
+func (idx *VectorIndex[T]) Flush(ctx context.Context) error {
+	return flush(ctx, idx, idx.snapshotPath)
+}
+
+// Recover loads the index's snapshot and replays its WAL (see Engine.Recover).
+func (idx *VectorIndex[T]) Recover(ctx context.Context) error {
+	return recoverFrom(ctx, idx, idx.snapshotPath, idx.wal)
 }

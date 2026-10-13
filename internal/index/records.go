@@ -40,10 +40,11 @@ type records[T metric.VectorType] struct {
 	// from one the index happened to learn, and release only the latter.
 	configuredDimensions int
 
-	mu          sync.RWMutex
-	wal         *WAL
-	encodeFunc  func([]float32) T  // converts input vectors to the stored type
-	vectorStore *storage.MmapStore // nil when mmap is disabled
+	mu           sync.RWMutex
+	wal          *WAL
+	snapshotPath string             // "" when the engine has no snapshot
+	encodeFunc   func([]float32) T  // converts input vectors to the stored type
+	vectorStore  *storage.MmapStore // nil when mmap is disabled
 }
 
 // GetByID retrieves a VectorRecord by its external ID, returning
@@ -302,7 +303,7 @@ func (r *records[T]) remove(id string, detach func(internalID uint32)) error {
 	return r.IDMapper.Delete(id)
 }
 
-// reset is Engine.Reset for both engines. The empty state reaches disk first
+// reset is Engine.Reset for both engines, on snapshotPath. The empty state reaches disk first
 // -- writeEmpty publishes an empty snapshot, which truncates the WAL last --
 // and only then is memory cleared, with clearEngine for engine-specific
 // state. A reset used to clear memory and the WAL but leave the snapshot, so a

@@ -19,7 +19,7 @@ import (
 // a bad last record is a write torn by a crash and is cut off; anything else
 // that can't be replayed is corruption and must stop recovery.
 
-func engineOnly(e Engine, _ *records[[]float32]) Engine { return e }
+func engineOnly(e FileEngine, _ *records[[]float32]) FileEngine { return e }
 
 // walRecord encodes entry as the WAL writes it.
 func walRecord(t *testing.T, entry *WALEntry) []byte {

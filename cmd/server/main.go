@@ -72,7 +72,7 @@ func main() {
 	// The generated spec carries the static @version annotation; report the running release.
 	swagger.SwaggerInfo.Version = release.Version
 
-	router := api.SetupRouter(engine, cfg.Server.APIKey, cfg.Storage.DataPath)
+	router := api.SetupRouter(engine, cfg.Server.APIKey)
 
 	// RECOVERY SEQUENCE -- before any server starts, so no request (REST or
 	// gRPC) ever sees a partly loaded index.
@@ -152,7 +152,7 @@ func startGRPCServer(cfg *config.Config, engine index.Engine) (*grpc.Server, err
 		return nil, nil
 	}
 
-	srv := grpcserver.SetupGRPCServer(engine, cfg.Server.APIKey, cfg.Storage.DataPath, cfg.GRPC.MaxRecvMsgSizeMB)
+	srv := grpcserver.SetupGRPCServer(engine, cfg.Server.APIKey, cfg.GRPC.MaxRecvMsgSizeMB)
 	grpcAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.GRPC.Port)
 
 	lis, err := net.Listen("tcp", grpcAddr)
@@ -170,30 +170,15 @@ func startGRPCServer(cfg *config.Config, engine index.Engine) (*grpc.Server, err
 	return srv, nil
 }
 
-// runRecovery handles the snapshot loading and WAL replay sequence.
-//
-// A snapshot that exists but can't be loaded is an error, not a warning: the
-// WAL only holds writes since the last save, so replaying it alone would serve
-// a fraction of the data as if it were all of it. A missing snapshot is a
-// fresh start -- LoadFromFile returns nil for it.
-//
-// A WAL that can't be read to the end is an error for the same reason: every
-// write after the failure point would be silently dropped. A missing WAL is a
-// fresh start, and single malformed lines are skipped inside ReplayWAL.
+// runRecovery loads the snapshot and replays the WAL over it (see
+// Engine.Recover for why a damaged one stops startup).
 func runRecovery(cfg *config.Config, engine index.Engine) error {
-	// Step 1: Load the base snapshot from DataPath
-	log.Info().Str("path", cfg.Storage.DataPath).Msg("loading snapshot from disk")
-	if err := engine.LoadFromFile(context.Background(), cfg.Storage.DataPath); err != nil {
-		return fmt.Errorf("load snapshot %s (restore a backup, or delete it to start empty): %w", cfg.Storage.DataPath, err)
+	log.Info().Str("snapshot", cfg.Storage.DataPath).Str("wal", cfg.Storage.WalPath).Msg("recovering index")
+	if err := engine.Recover(context.Background()); err != nil {
+		return err
 	}
-	log.Info().Int("vectors", engine.Len()).Msg("snapshot loaded")
 
-	// Step 2: Replay the WAL from WalPath to recover writes made after the snapshot
-	log.Info().Str("path", cfg.Storage.WalPath).Msg("replaying WAL")
-	if err := engine.ReplayWAL(cfg.Storage.WalPath); err != nil {
-		return fmt.Errorf("replay WAL %s (fix or move it aside to start from the snapshot alone): %w", cfg.Storage.WalPath, err)
-	}
-	log.Info().Int("vectors", engine.Len()).Msg("WAL replay complete")
+	log.Info().Int("vectors", engine.Len()).Msg("index recovered")
 	return nil
 }
 
@@ -219,7 +204,7 @@ func startAutoSave(cfg *config.Config, engine index.Engine) (stop func()) {
 				return
 			case <-ticker.C:
 				log.Info().Msg("auto-saving snapshot")
-				if err := engine.SaveToFile(ctx, cfg.Storage.DataPath); err != nil {
+				if err := engine.Flush(ctx); err != nil {
 					log.Error().Err(err).Msg("failed to save snapshot")
 				} else {
 					log.Info().Msg("snapshot saved")
@@ -288,7 +273,7 @@ func shutdownServer(cfg *config.Config, engine index.Engine, srv, debugSrv *http
 	stopAutoSave()
 
 	log.Info().Msg("saving data to disk")
-	if err := engine.SaveToFile(context.Background(), cfg.Storage.DataPath); err != nil {
+	if err := engine.Flush(context.Background()); err != nil {
 		log.Error().Err(err).Msg("error saving data on shutdown")
 	} else {
 		log.Info().Msg("data saved successfully")

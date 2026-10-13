@@ -19,7 +19,7 @@ import (
 // would silently drop every keyword match after a restart.
 func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 	type hybridIndex interface {
-		Engine
+		FileEngine
 		invertedIndex() *core.InvertedIndex
 	}
 

@@ -271,10 +271,10 @@ func TestSaveToFile_InvalidPath(t *testing.T) {
 func TestSaveToFile_CreatesParentDirectories(t *testing.T) {
 	engines := []struct {
 		name string
-		open func(t *testing.T) Engine
+		open func(t *testing.T) FileEngine
 	}{
-		{"brute", func(t *testing.T) Engine { return newTestIndex(t) }},
-		{"hnsw", func(t *testing.T) Engine { return newTestHNSWIndex(t) }},
+		{"brute", func(t *testing.T) FileEngine { return newTestIndex(t) }},
+		{"hnsw", func(t *testing.T) FileEngine { return newTestHNSWIndex(t) }},
 	}
 	for _, e := range engines {
 		t.Run(e.name, func(t *testing.T) {

@@ -32,7 +32,7 @@ var snapshotFormats = []snapshotFormat{
 
 // startSnapshotEngine opens the WAL at walPath and builds an engine over it.
 // Calling it again with the same paths is a server restart.
-func startSnapshotEngine(t *testing.T, f snapshotFormat, dir, walPath string) (index.Engine, *index.WAL) {
+func startSnapshotEngine(t *testing.T, f snapshotFormat, dir, walPath string) (index.FileEngine, *index.WAL) {
 	t.Helper()
 	wal, err := index.NewWAL(walPath)
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestRecovery_LearnedDimension_SurvivesRestart(t *testing.T) {
 				IndexType:      indexType,
 			}
 
-			start := func() (index.Engine, *index.WAL) {
+			start := func() (index.FileEngine, *index.WAL) {
 				t.Helper()
 				wal, err := index.NewWAL(walPath)
 				require.NoError(t, err)

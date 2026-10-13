@@ -13,13 +13,12 @@ import (
 
 // SystemHandler handles system-level endpoints (stats, info, admin operations).
 type SystemHandler struct {
-	Engine   index.Engine
-	DataPath string
+	Engine index.Engine
 }
 
-// NewSystemHandler creates a SystemHandler with the given engine and data path.
-func NewSystemHandler(engine index.Engine, dataPath string) *SystemHandler {
-	return &SystemHandler{Engine: engine, DataPath: dataPath}
+// NewSystemHandler creates a SystemHandler with the given engine.
+func NewSystemHandler(engine index.Engine) *SystemHandler {
+	return &SystemHandler{Engine: engine}
 }
 
 // StatsResponse is the JSON response for the stats endpoint.
@@ -71,8 +70,8 @@ func (h *SystemHandler) Info(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /api/v1/admin/flush [post]
 func (h *SystemHandler) Flush(c *gin.Context) {
-	if err := h.Engine.SaveToFile(c.Request.Context(), h.DataPath); err != nil {
-		zerolog.Ctx(c.Request.Context()).Error().Err(err).Str("path", h.DataPath).Msg("failed to flush index to disk")
+	if err := h.Engine.Flush(c.Request.Context()); err != nil {
+		zerolog.Ctx(c.Request.Context()).Error().Err(err).Msg("failed to flush index to disk")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -81,9 +80,8 @@ func (h *SystemHandler) Flush(c *gin.Context) {
 
 // Reset handles POST /api/v1/admin/reset
 //
-// Reset wipes all vectors, ID mappings, and the WAL in memory. It does not
-// persist the cleared state to disk -- call Flush afterward if the reset
-// should survive a restart.
+// Reset removes every vector durably: the engine writes an empty snapshot and
+// truncates the WAL before clearing memory, so a restart comes back empty.
 //
 // @Summary      Remove all vectors from the index, durably
 // @Tags         system
@@ -94,7 +92,7 @@ func (h *SystemHandler) Flush(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /api/v1/admin/reset [post]
 func (h *SystemHandler) Reset(c *gin.Context) {
-	if err := h.Engine.Reset(c.Request.Context(), h.DataPath); err != nil {
+	if err := h.Engine.Reset(c.Request.Context()); err != nil {
 		zerolog.Ctx(c.Request.Context()).Error().Err(err).Msg("failed to reset index")
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
