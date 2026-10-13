@@ -176,6 +176,8 @@ func (h *VectorHandler) Insert(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /api/v1/vectors/search [post]
 func (h *VectorHandler) Search(c *gin.Context) {
+	const maxSearchK = 10000
+
 	var req SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
@@ -184,6 +186,10 @@ func (h *VectorHandler) Search(c *gin.Context) {
 
 	if *req.K < 0 {
 		response.Fail(c, http.StatusBadRequest, "k cannot be negative")
+		return
+	}
+	if *req.K > maxSearchK {
+		response.Fail(c, http.StatusBadRequest, "k exceeds maximum allowed value")
 		return
 	}
 
