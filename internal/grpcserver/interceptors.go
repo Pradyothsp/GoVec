@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	pb "github.com/Pradyothsp/govec/gen/govec/v1"
 	"github.com/Pradyothsp/govec/internal/requestid"
 )
 
@@ -62,7 +63,8 @@ func extractOrGenerate(ctx context.Context) string {
 }
 
 // UnaryAuthInterceptor returns a unary interceptor that enforces Bearer token auth.
-// When apiKey is empty the interceptor is a no-op.
+// When apiKey is empty the interceptor is a no-op. Health is always open, as
+// REST's /health is: load balancers and probes check it without credentials.
 func UnaryAuthInterceptor(apiKey string) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -70,7 +72,7 @@ func UnaryAuthInterceptor(apiKey string) grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		if apiKey == "" {
+		if apiKey == "" || info.FullMethod == pb.GoVecService_Health_FullMethodName {
 			return handler(ctx, req)
 		}
 		if err := checkAuth(ctx, apiKey); err != nil {
@@ -141,7 +143,9 @@ func StreamAuthInterceptor(apiKey string) grpc.StreamServerInterceptor {
 	}
 }
 
-// checkAuth reads the "authorization" metadata header and validates the Bearer token.
+// checkAuth reads the "authorization" metadata header and validates the Bearer
+// token. The scheme is required, as REST requires it: a bare token used to
+// pass here, because trimming a prefix that isn't there leaves the token as is.
 func checkAuth(ctx context.Context, apiKey string) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -151,8 +155,8 @@ func checkAuth(ctx context.Context, apiKey string) error {
 	if len(vals) == 0 {
 		return status.Error(codes.Unauthenticated, "missing authorization header")
 	}
-	token := strings.TrimPrefix(vals[0], "Bearer ")
-	if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
+	token, found := strings.CutPrefix(vals[0], "Bearer ")
+	if !found || subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
 		return status.Error(codes.Unauthenticated, "invalid token")
 	}
 	return nil

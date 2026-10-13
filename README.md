@@ -141,7 +141,9 @@ Every REST response uses the same envelope:
   [`proto/govec/v1`](proto/govec/v1). It offers the same operations, plus client-streaming
   `BatchInsert`.
 - **Auth:** set `server.api_key`, and every `/api/v1/*` request must send
-  `Authorization: Bearer <key>`. `/health` stays open for probes.
+  `Authorization: Bearer <key>`; every gRPC call sends the same value as `authorization`
+  metadata. The health check stays open for probes on both: REST `/health` and the gRPC `Health`
+  RPC.
 - **Errors:** an invalid vector (empty, or the wrong dimension for the index) returns HTTP 400 /
   gRPC `InvalidArgument`.
 
