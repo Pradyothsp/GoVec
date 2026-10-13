@@ -33,7 +33,7 @@ func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.FileE
 	}
 	cfg := config.EngineConfig{
 		Quantization:        q,
-		DistanceMetric:      "cosine",
+		DistanceMetric:      config.DistanceMetricCosine,
 		IndexType:           config.IndexTypeHNSW,
 		EnableMetadataIndex: true,
 	}
@@ -195,12 +195,9 @@ func (s *hnswSuiteBase) TestHNSW_Recovery_SnapshotThenWAL() {
 }
 
 // =============================================================================
-// Group G — Batch insert / round-based parallelism
-// Covers HNSWIndex.BatchInsert's restructuring (a single batched
-// graph.Add call instead of one per item -- see internal/index/hnsw_index.go)
-// and the graph-level round-based parallel Prepare/Apply it now feeds
-// (internal/hnsw/graph.go's addRound). These run on both suites through
-// base-struct promotion.
+// Batch insert: HNSWIndex.BatchInsert adds a batch to the graph in one
+// graph.Add call, which builds it in rounds of parallel searches
+// (internal/hnsw/graph.go's addRound).
 // =============================================================================
 
 // TestHNSW_BatchInsert_IntraBatchDuplicateID_LastWins verifies that when the

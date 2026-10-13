@@ -2,10 +2,11 @@
 package heap
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,112 +16,94 @@ func (i Int) Less(j Int) bool {
 	return i < j
 }
 
-func TestHeap_Max_ReturnsTrueMaximum(t *testing.T) {
-	h := Heap[Int]{}
-	h.Init(nil)
+// trickyOrder leaves the maximum outside the last array slot of a min-heap:
+// container/heap only guarantees parent <= children, so Max and PopLast must
+// search for it rather than take data[len-1].
+var trickyOrder = []Int{1, 3, 2, 7, 4, 5, 6}
 
-	// Pushed in an order that produces a min-heap array where the true
-	// maximum does not land in the last array slot (container/heap only
-	// guarantees parent <= children, not that data[len-1] is the max).
-	for _, v := range []Int{1, 3, 2, 7, 4, 5, 6} {
-		h.Push(v)
+func randomInts(n int) []Int {
+	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic test data
+	values := make([]Int, n)
+	for i := range values {
+		values[i] = Int(rng.IntN(100))
 	}
-
-	require.Equal(t, Int(7), h.Max())
-}
-
-func TestHeap_PopLast_RemovesTrueMaximum(t *testing.T) {
-	h := Heap[Int]{}
-	h.Init(nil)
-
-	for _, v := range []Int{1, 3, 2, 7, 4, 5, 6} {
-		h.Push(v)
-	}
-
-	got := h.PopLast()
-
-	require.Equal(t, Int(7), got)
-	require.Equal(t, 6, h.Len())
-
-	var remaining []Int
-	for h.Len() > 0 {
-		remaining = append(remaining, h.Pop())
-	}
-	require.ElementsMatch(t, []Int{1, 2, 3, 4, 5, 6}, remaining)
+	return values
 }
 
 func TestHeap(t *testing.T) {
-	h := Heap[Int]{}
+	t.Run("Max and PopLast find the true maximum", func(t *testing.T) {
+		// Arrange
+		h := Heap[Int]{}
+		h.Init(nil)
+		for _, v := range trickyOrder {
+			h.Push(v)
+		}
 
-	for i := 0; i < 20; i++ {
-		h.Push(Int(rand.Int() % 100))
-	}
+		// Act
+		peeked := h.Max()
+		popped := h.PopLast()
 
-	require.Equal(t, 20, h.Len())
+		// Assert
+		assert.Equal(t, Int(7), peeked)
+		assert.Equal(t, Int(7), popped)
+		remaining := h.Slice()
+		slices.Sort(remaining)
+		assert.Equal(t, []Int{1, 2, 3, 4, 5, 6}, remaining)
+	})
 
-	var inOrder []Int
-	for h.Len() > 0 {
-		inOrder = append(inOrder, h.Pop())
-	}
+	t.Run("Pop drains in ascending order", func(t *testing.T) {
+		// Arrange
+		h := Heap[Int]{}
+		values := randomInts(50)
+		for _, v := range values {
+			h.Push(v)
+		}
 
-	if !slices.IsSorted(inOrder) {
-		t.Errorf("Heap did not return sorted elements: %+v", inOrder)
-	}
-}
+		// Act
+		var drained []Int
+		for h.Len() > 0 {
+			drained = append(drained, h.Pop())
+		}
 
-func TestMaxHeap_Max_ReturnsTrueMaximum(t *testing.T) {
-	h := MaxHeap[Int]{}
-	h.Init(nil)
-
-	// Pushed in an order that would leave the true maximum outside index 0
-	// under a naive "last pushed" or "any leaf" assumption -- container/heap
-	// only guarantees the root beats its children, which Init/Push must
-	// still deliver correctly for every push order.
-	for _, v := range []Int{1, 3, 2, 7, 4, 5, 6} {
-		h.Push(v)
-	}
-
-	require.Equal(t, Int(7), h.Max())
-}
-
-func TestMaxHeap_PopLast_RemovesTrueMaximum(t *testing.T) {
-	h := MaxHeap[Int]{}
-	h.Init(nil)
-
-	for _, v := range []Int{1, 3, 2, 7, 4, 5, 6} {
-		h.Push(v)
-	}
-
-	got := h.PopLast()
-
-	require.Equal(t, Int(7), got)
-	require.Equal(t, 6, h.Len())
-
-	// Popping the max repeatedly should drain the heap in descending order --
-	// the max-heap analogue of TestHeap's ascending-order min-heap check.
-	var descending []Int
-	for h.Len() > 0 {
-		descending = append(descending, h.PopLast())
-	}
-	require.Equal(t, []Int{6, 5, 4, 3, 2, 1}, descending)
+		// Assert
+		slices.Sort(values)
+		require.Equal(t, values, drained)
+	})
 }
 
 func TestMaxHeap(t *testing.T) {
-	h := MaxHeap[Int]{}
+	t.Run("Max finds the true maximum", func(t *testing.T) {
+		// Arrange
+		h := MaxHeap[Int]{}
+		h.Init(nil)
+		for _, v := range trickyOrder {
+			h.Push(v)
+		}
 
-	for i := 0; i < 20; i++ {
-		h.Push(Int(rand.Int() % 100))
-	}
+		// Act
+		got := h.Max()
 
-	require.Equal(t, 20, h.Len())
+		// Assert
+		assert.Equal(t, Int(7), got)
+	})
 
-	var descending []Int
-	for h.Len() > 0 {
-		descending = append(descending, h.PopLast())
-	}
+	t.Run("PopLast drains in descending order", func(t *testing.T) {
+		// Arrange
+		h := MaxHeap[Int]{}
+		values := randomInts(50)
+		for _, v := range values {
+			h.Push(v)
+		}
 
-	slices.Reverse(descending)
-	if !slices.IsSorted(descending) {
-		t.Errorf("MaxHeap did not return elements in descending order: %+v", descending)
-	}
+		// Act
+		var drained []Int
+		for h.Len() > 0 {
+			drained = append(drained, h.PopLast())
+		}
+
+		// Assert
+		slices.Sort(values)
+		slices.Reverse(values)
+		require.Equal(t, values, drained)
+	})
 }

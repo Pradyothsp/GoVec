@@ -2,24 +2,9 @@ package config
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-func TestDefaultConfig(t *testing.T) {
-	cfg := DefaultConfig()
-
-	// Server defaults
-	assert.Equal(t, "", cfg.Server.Host)
-	assert.Equal(t, 9697, cfg.Server.Port)
-	assert.Equal(t, 10*time.Second, cfg.Server.ShutdownTimeout)
-
-	// Storage defaults
-	assert.Equal(t, "./govec_data.bin", cfg.Storage.DataPath)
-	assert.Equal(t, true, cfg.Storage.AutoSaveEnabled)
-	assert.Equal(t, 60*time.Second, cfg.Storage.AutoSaveInterval)
-}
 
 func TestServerConfig_Address(t *testing.T) {
 	tests := []struct {

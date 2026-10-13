@@ -46,3 +46,26 @@ func TestSparseVector_Dot(t *testing.T) {
 		})
 	}
 }
+
+// A sparse vector with no tokens is no sparse part at all, however its
+// slices were made: JSON and protobuf decode an empty list differently.
+func TestSparseVector_IsEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		sv   SparseVector
+		want bool
+	}{
+		{"zero value", SparseVector{}, true},
+		{"empty slices", sv([]uint32{}, []float32{}), true},
+		{"one token", sv([]uint32{3}, []float32{1}), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.sv.IsEmpty()
+
+			// Assert
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

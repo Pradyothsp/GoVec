@@ -7,32 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-func TestEuclideanDistanceFloat32(t *testing.T) {
-	a := []float32{1, 2, 3}
-	b := []float32{4, 5, 6}
-	require.Equal(t, float32(5.196152), EuclideanDistanceFloat32(a, b))
-}
-
-func TestCosineDistanceFloat32(t *testing.T) {
-	var a, b []float32
-	// Same magnitude, same direction.
-	a = []float32{1, 1, 1}
-	b = []float32{0.8, 0.8, 0.8}
-	require.InDelta(t, 0, CosineDistanceFloat32(a, b), 0.000001)
-
-	// Perpendicular vectors.
-	a = []float32{1, 0}
-	b = []float32{0, 1}
-	require.InDelta(t, 1, CosineDistanceFloat32(a, b), 0.000001)
-
-	// Equivalent vectors.
-	a = []float32{1, 0}
-	b = []float32{1, 0}
-	require.InDelta(t, 0, CosineDistanceFloat32(a, b), 0.000001)
-}
 
 // cosineDistanceReference is the textbook formula in float64, the yardstick
 // for the fast float32 kernel.

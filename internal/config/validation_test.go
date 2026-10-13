@@ -5,320 +5,79 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// TestValidate changes one setting of the defaults per case. A rejected
+// setting is reported under its section, with a message that says what is
+// allowed; one at the edge of what is allowed still validates.
 func TestValidate(t *testing.T) {
-	t.Run("valid default config", func(t *testing.T) {
-		cfg := DefaultConfig()
-		err := Validate(cfg)
-		assert.NoError(t, err)
-	})
-
-	t.Run("invalid server config", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Server.Port = 99999
-		err := Validate(cfg)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "server config")
-	})
-
-	t.Run("invalid storage config", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Storage.DataPath = ""
-		err := Validate(cfg)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "storage config")
-	})
-
-	t.Run("invalid engine config", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Engine.Quantization = "invalid"
-		err := Validate(cfg)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "engine config")
-	})
-}
-
-func TestValidateEngineConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		cfg       EngineConfig
-		wantError bool
-		errorMsg  string
+		name    string
+		change  func(c *Config)
+		wantErr string // "" means valid
 	}{
-		{
-			name: "valid none quantization",
-			cfg: EngineConfig{
-				Quantization:   "none",
-				DistanceMetric: "cosine",
-			},
-			wantError: false,
-		},
-		{
-			name: "valid scalar quantization",
-			cfg: EngineConfig{
-				Quantization:   "scalar",
-				DistanceMetric: "cosine",
-			},
-			wantError: false,
-		},
-		{
-			name: "invalid quantization type",
-			cfg: EngineConfig{
-				Quantization:   "invalid",
-				DistanceMetric: "cosine",
-			},
-			wantError: true,
-			errorMsg:  "invalid quantization",
-		},
-		{
-			name: "valid euclidean distance metric",
-			cfg: EngineConfig{
-				Quantization:   "none",
-				DistanceMetric: "euclidean",
-			},
-			wantError: false,
-		},
-		{
-			name: "invalid distance metric",
-			cfg: EngineConfig{
-				Quantization:   "none",
-				DistanceMetric: "manhattan",
-			},
-			wantError: true,
-			errorMsg:  "invalid distance metric",
-		},
-		{
-			name: "empty quantization",
-			cfg: EngineConfig{
-				Quantization:   "",
-				DistanceMetric: "cosine",
-			},
-			wantError: true,
-			errorMsg:  "invalid quantization",
-		},
-		{
-			name: "empty distance metric",
-			cfg: EngineConfig{
-				Quantization:   "none",
-				DistanceMetric: "",
-			},
-			wantError: true,
-			errorMsg:  "invalid distance metric",
-		},
-	}
+		{"the defaults", func(c *Config) {}, ""},
 
+		{"server: port 1", func(c *Config) { c.Server.Port = 1 }, ""},
+		{"server: port 65535", func(c *Config) { c.Server.Port = 65535 }, ""},
+		{"server: port 0", func(c *Config) { c.Server.Port = 0 }, "server config: port must be between 1 and 65535"},
+		{"server: port 65536", func(c *Config) { c.Server.Port = 65536 }, "server config: port must be between 1 and 65535"},
+		{"server: zero shutdown timeout", func(c *Config) { c.Server.ShutdownTimeout = 0 }, ""},
+		{"server: negative shutdown timeout", func(c *Config) { c.Server.ShutdownTimeout = -time.Second }, "server config: shutdown_timeout must be non-negative"},
+		// Zero would disable it, leaving slow-header connections open forever.
+		{"server: zero read_header_timeout", func(c *Config) { c.Server.ReadHeaderTimeout = 0 }, "server config: read_header_timeout must be positive"},
+		{"server: log level in capitals", func(c *Config) { c.Server.LogLevel = "DEBUG" }, ""},
+		{"server: unknown log level", func(c *Config) { c.Server.LogLevel = "verbose" }, "server config: invalid log_level"},
+
+		{"storage: empty data path", func(c *Config) { c.Storage.DataPath = "" }, "storage config: data_path cannot be empty"},
+		{"storage: blank data path", func(c *Config) { c.Storage.DataPath = "   " }, "storage config: data_path cannot be empty"},
+		{"storage: auto-save every second", func(c *Config) { c.Storage.AutoSaveInterval = time.Second }, ""},
+		{"storage: auto-save more often than a second", func(c *Config) { c.Storage.AutoSaveInterval = 500 * time.Millisecond }, "storage config: auto_save_interval must be >= 1s"},
+		{"storage: any interval with auto-save off", func(c *Config) {
+			c.Storage.AutoSaveEnabled, c.Storage.AutoSaveInterval = false, 0
+		}, ""},
+
+		{"engine: no index type means brute", func(c *Config) { c.Engine.IndexType = "" }, ""},
+		{"engine: unknown index type", func(c *Config) { c.Engine.IndexType = "ivf" }, "engine config: invalid index_type"},
+		{"engine: scalar quantization", func(c *Config) { c.Engine.Quantization = QuantizationScalar }, ""},
+		{"engine: unknown quantization", func(c *Config) { c.Engine.Quantization = "pq" }, "engine config: invalid quantization"},
+		{"engine: empty quantization", func(c *Config) { c.Engine.Quantization = "" }, "engine config: invalid quantization"},
+		{"engine: euclidean", func(c *Config) { c.Engine.DistanceMetric = DistanceMetricEuclidean }, ""},
+		{"engine: unknown metric", func(c *Config) { c.Engine.DistanceMetric = "manhattan" }, "engine config: invalid distance metric"},
+		{"engine: empty metric", func(c *Config) { c.Engine.DistanceMetric = "" }, "engine config: invalid distance metric"},
+		// The construction search supplies the pool M neighbours are picked
+		// from; a smaller pool silently under-connects every node.
+		{"engine: hnsw ef_construction below M", func(c *Config) {
+			c.Engine.IndexType, c.Engine.HnswM, c.Engine.HnswEfConstruction = IndexTypeHNSW, 32, 16
+		}, "engine config: hnsw_ef_construction (16) must be >= hnsw_m (32)"},
+		{"engine: hnsw ef_construction equal to M", func(c *Config) {
+			c.Engine.IndexType, c.Engine.HnswM, c.Engine.HnswEfConstruction = IndexTypeHNSW, 32, 32
+		}, ""},
+		{"engine: negative batch parallelism", func(c *Config) { c.Engine.HnswBatchParallelism = -1 }, "engine config: hnsw_batch_parallelism must be >= 0"},
+		{"engine: negative batch threshold", func(c *Config) { c.Engine.HnswBatchParallelThreshold = -1 }, "engine config: hnsw_batch_parallel_threshold must be >= 0"},
+
+		{"grpc: off ignores its settings", func(c *Config) { c.GRPC.Enabled, c.GRPC.Port = false, 0 }, ""},
+		{"grpc: on with its defaults", func(c *Config) { c.GRPC.Enabled = true }, ""},
+		{"grpc: port out of range", func(c *Config) { c.GRPC.Enabled, c.GRPC.Port = true, 70000 }, "grpc config: port must be between 1 and 65535"},
+		{"grpc: same port as http", func(c *Config) { c.GRPC.Enabled, c.GRPC.Port = true, c.Server.Port }, "grpc config: grpc port 9697 must differ from http port 9697"},
+		{"grpc: message size under 1 MB", func(c *Config) { c.GRPC.Enabled, c.GRPC.MaxRecvMsgSizeMB = true, 0 }, "grpc config: max_recv_msg_size_mb must be >= 1"},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateEngineConfig(tt.cfg)
-			if tt.wantError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
+			// Arrange
+			cfg := DefaultConfig()
+			tt.change(cfg)
+
+			// Act
+			err := Validate(cfg)
+
+			// Assert
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
 			}
-		})
-	}
-}
-
-func TestValidateServerConfig(t *testing.T) {
-	tests := []struct {
-		name      string
-		cfg       ServerConfig
-		wantError bool
-		errorMsg  string
-	}{
-		{
-			name: "valid config",
-			cfg: ServerConfig{
-				Host:              "",
-				Port:              9697,
-				ShutdownTimeout:   10 * time.Second,
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "port too low",
-			cfg: ServerConfig{
-				Port: 0,
-			},
-			wantError: true,
-			errorMsg:  "port must be between 1 and 65535",
-		},
-		{
-			name: "port too high",
-			cfg: ServerConfig{
-				Port: 65536,
-			},
-			wantError: true,
-			errorMsg:  "port must be between 1 and 65535",
-		},
-		{
-			name: "negative shutdown timeout",
-			cfg: ServerConfig{
-				Port:              9697,
-				ShutdownTimeout:   -1 * time.Second,
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			wantError: true,
-			errorMsg:  "shutdown_timeout must be non-negative",
-		},
-		{
-			name: "zero shutdown timeout is allowed",
-			cfg: ServerConfig{
-				Port:              9697,
-				ShutdownTimeout:   0,
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "very short shutdown timeout is allowed",
-			cfg: ServerConfig{
-				Port:              9697,
-				ShutdownTimeout:   100 * time.Millisecond,
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "minimum port",
-			cfg: ServerConfig{
-				Port:              1,
-				ShutdownTimeout:   1 * time.Second,
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "maximum port",
-			cfg: ServerConfig{
-				Port:              65535,
-				ShutdownTimeout:   1 * time.Second,
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "zero read_header_timeout is invalid",
-			cfg: ServerConfig{
-				Port:              9697,
-				ReadHeaderTimeout: 0,
-			},
-			wantError: true,
-			errorMsg:  "read_header_timeout must be positive",
-		},
-		{
-			name: "negative read_header_timeout is invalid",
-			cfg: ServerConfig{
-				Port:              9697,
-				ReadHeaderTimeout: -1 * time.Second,
-			},
-			wantError: true,
-			errorMsg:  "read_header_timeout must be positive",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateServerConfig(tt.cfg)
-			if tt.wantError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestValidateStorageConfig(t *testing.T) {
-	tests := []struct {
-		name      string
-		cfg       StorageConfig
-		wantError bool
-		errorMsg  string
-	}{
-		{
-			name: "valid config",
-			cfg: StorageConfig{
-				DataPath:         "./govec_data.bin",
-				AutoSaveEnabled:  true,
-				AutoSaveInterval: 60 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "empty data path",
-			cfg: StorageConfig{
-				DataPath: "",
-			},
-			wantError: true,
-			errorMsg:  "data_path cannot be empty",
-		},
-		{
-			name: "whitespace data path",
-			cfg: StorageConfig{
-				DataPath: "   ",
-			},
-			wantError: true,
-			errorMsg:  "data_path cannot be empty",
-		},
-		{
-			name: "auto-save interval too short",
-			cfg: StorageConfig{
-				DataPath:         "./data.bin",
-				AutoSaveEnabled:  true,
-				AutoSaveInterval: 500 * time.Millisecond,
-			},
-			wantError: true,
-			errorMsg:  "auto_save_interval must be >= 1s",
-		},
-		{
-			name: "auto-save disabled with short interval is allowed",
-			cfg: StorageConfig{
-				DataPath:         "./data.bin",
-				AutoSaveEnabled:  false,
-				AutoSaveInterval: 0,
-			},
-			wantError: false,
-		},
-		{
-			name: "minimum valid auto-save interval",
-			cfg: StorageConfig{
-				DataPath:         "./data.bin",
-				AutoSaveEnabled:  true,
-				AutoSaveInterval: 1 * time.Second,
-			},
-			wantError: false,
-		},
-		{
-			name: "long data path",
-			cfg: StorageConfig{
-				DataPath:         "/very/long/path/to/govec/data/storage/file.bin",
-				AutoSaveEnabled:  true,
-				AutoSaveInterval: 60 * time.Second,
-			},
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateStorageConfig(tt.cfg)
-			if tt.wantError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
+			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
 }
