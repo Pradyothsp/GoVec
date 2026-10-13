@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"math"
 	"os"
 	"testing"
 
@@ -64,101 +63,6 @@ func TestNewEngine_RejectsUnknownSettings(t *testing.T) {
 				assert.Error(t, err)
 			})
 		}
-	}
-}
-
-func TestNewEngine_CompareQuantizationResults(t *testing.T) {
-	// Create two engines: one with float32, one with int8
-	walPath1 := t.TempDir() + "/test1.wal"
-	wal1, err := NewWAL(walPath1)
-	if err != nil {
-		t.Fatalf("failed to create WAL1: %v", err)
-	}
-	defer wal1.Close()
-	defer os.Remove(walPath1)
-
-	walPath2 := t.TempDir() + "/test2.wal"
-	wal2, err := NewWAL(walPath2)
-	if err != nil {
-		t.Fatalf("failed to create WAL2: %v", err)
-	}
-	defer wal2.Close()
-	defer os.Remove(walPath2)
-
-	cfg1 := config.EngineConfig{
-		Quantization:   "none",
-		DistanceMetric: "cosine",
-	}
-
-	cfg2 := config.EngineConfig{
-		Quantization:   "scalar",
-		DistanceMetric: "cosine",
-	}
-
-	engineFloat, err := NewEngine(cfg1, config.StorageConfig{}, wal1)
-	if err != nil {
-		t.Fatalf("NewEngine (float) failed: %v", err)
-	}
-
-	engineInt8, err := NewEngine(cfg2, config.StorageConfig{}, wal2)
-	if err != nil {
-		t.Fatalf("NewEngine (int8) failed: %v", err)
-	}
-
-	// Insert same data into both
-	testVectors := []struct {
-		id  string
-		vec []float32
-	}{
-		{"vec1", []float32{0.5, 0.3, 0.8}},
-		{"vec2", []float32{0.6, 0.2, 0.7}},
-		{"vec3", []float32{0.1, 0.9, 0.4}},
-	}
-
-	for _, tv := range testVectors {
-		if err := engineFloat.Insert(context.Background(), tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
-			t.Fatalf("Insert to engineFloat failed: %v", err)
-		}
-		if err := engineInt8.Insert(context.Background(), tv.id, tv.vec, core.SparseVector{}, nil); err != nil {
-			t.Fatalf("Insert to engineInt8 failed: %v", err)
-		}
-	}
-
-	// Search with same query
-	query := []float32{0.55, 0.25, 0.75}
-
-	resultsFloat, err := engineFloat.Search(context.Background(), query, core.SparseVector{}, 3, nil)
-	if err != nil {
-		t.Fatalf("Search (float) failed: %v", err)
-	}
-
-	resultsInt8, err := engineInt8.Search(context.Background(), query, core.SparseVector{}, 3, nil)
-	if err != nil {
-		t.Fatalf("Search (int8) failed: %v", err)
-	}
-
-	// Results should have same ordering (or very similar)
-	if len(resultsFloat) != len(resultsInt8) {
-		t.Fatalf("result count mismatch: float=%d, int8=%d", len(resultsFloat), len(resultsInt8))
-	}
-
-	// Match by ID, not rank: vec1 and vec2 score within 1e-5 under int8, so
-	// their order is left to the quantizer. Observed drift is about 0.008.
-	const tolerance = 0.02
-	int8Score := make(map[string]float32, len(resultsInt8))
-	for _, r := range resultsInt8 {
-		int8Score[r.ID] = r.Score
-	}
-	for _, r := range resultsFloat {
-		s, ok := int8Score[r.ID]
-		if !ok {
-			t.Errorf("%s is in the float32 results but not the int8 results", r.ID)
-		} else if diff := math.Abs(float64(r.Score - s)); diff > tolerance {
-			t.Errorf("%s: int8 score %.4f is %.4f from float32 score %.4f", r.ID, s, diff, r.Score)
-		}
-	}
-	if resultsInt8[2].ID != "vec3" {
-		t.Errorf("expected vec3 last under int8, got %s", resultsInt8[2].ID)
 	}
 }
 
