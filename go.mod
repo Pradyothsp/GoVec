@@ -4,7 +4,6 @@ go 1.26.6
 
 require (
 	github.com/gin-gonic/gin v1.11.0
-	github.com/google/renameio v1.0.1
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/files v1.0.1

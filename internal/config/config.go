@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"time"
+
+	"github.com/Pradyothsp/govec/internal/core"
 )
 
 // IndexType selects the vector index algorithm.
@@ -25,14 +27,15 @@ const (
 	QuantizationScalar Quantization = "scalar"
 )
 
-// DistanceMetric selects the similarity measure.
-type DistanceMetric string
+// DistanceMetric selects the similarity measure. The metrics themselves are
+// defined in core, so a new one needs no change here.
+type DistanceMetric = core.MetricName
 
 const (
 	// DistanceMetricCosine measures the angle between vectors (ignores magnitude).
-	DistanceMetricCosine DistanceMetric = "cosine"
+	DistanceMetricCosine = core.MetricCosine
 	// DistanceMetricEuclidean measures straight-line distance between vectors (magnitude-sensitive).
-	DistanceMetricEuclidean DistanceMetric = "euclidean"
+	DistanceMetricEuclidean = core.MetricEuclidean
 )
 
 // EngineConfig holds vector engine configuration

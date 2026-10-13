@@ -1,4 +1,4 @@
-package hnsw
+package core
 
 import (
 	"fmt"
@@ -35,22 +35,12 @@ func TestCosineDistanceFloat32(t *testing.T) {
 }
 
 func BenchmarkCosineDistanceFloat32(b *testing.B) {
-	v1 := randFloats(1536)
-	v2 := randFloats(1536)
+	rng := rand.New(rand.NewPCG(1, 1536)) //nolint:gosec // deterministic benchmark data
+	v1, v2 := signedFloats(rng, 1536), signedFloats(rng, 1536)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		CosineDistanceFloat32(v1, v2)
 	}
-}
-
-// signedFloats returns n values centred on zero at the scale of a unit-length
-// 1536-d embedding, so dot products mix signs as real ones do.
-func signedFloats(rng *rand.Rand, n int) []float32 {
-	x := make([]float32, n)
-	for i := range x {
-		x[i] = float32(rng.NormFloat64() * 0.025)
-	}
-	return x
 }
 
 // cosineDistanceReference is the textbook formula in float64, the yardstick

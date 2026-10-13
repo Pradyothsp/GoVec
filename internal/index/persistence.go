@@ -34,9 +34,11 @@ type SnapshotHeader struct {
 }
 
 // snapshotVersion is written into every snapshot header, and a load rejects
-// any other (checkSnapshotVersion). 2: streamed records, HNSW topology only
-// (snapshot_stream.go). 1: each section as one gob value, vectors twice for HNSW.
-const snapshotVersion = 2
+// any other (checkSnapshotVersion). 3: the HNSW topology no longer carries the
+// distance function or ef_search; config supplies both. 2: streamed records,
+// HNSW topology only (snapshot_stream.go). 1: each section as one gob value,
+// vectors twice for HNSW.
+const snapshotVersion = 3
 
 // The inverted index is never written to a snapshot. It is derived data --
 // every posting comes from a node's sparse vector, which the snapshot does

@@ -211,17 +211,3 @@ func TestNewEngine_HNSW_EuclideanMetric(t *testing.T) {
 		t.Errorf("expected closer vector to score higher: near=%f far=%f", results[0].Score, results[1].Score)
 	}
 }
-
-func TestHnswDistanceFuncFloat32_UnsupportedMetric(t *testing.T) {
-	_, err := hnswDistanceFuncFloat32("manhattan")
-	if err == nil {
-		t.Fatal("expected error for unsupported metric, got nil")
-	}
-}
-
-func TestHnswDistanceFuncInt8_UnsupportedMetric(t *testing.T) {
-	_, err := hnswDistanceFuncInt8("manhattan")
-	if err == nil {
-		t.Fatal("expected error for unsupported metric, got nil")
-	}
-}

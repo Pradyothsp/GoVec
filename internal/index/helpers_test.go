@@ -35,3 +35,14 @@ func newTestIndex(t testing.TB) *VectorIndex[[]float32] {
 	identityFunc := func(v []float32) []float32 { return v }
 	return NewVectorIndex[[]float32](wal, nil, idMapper, identityFunc, core.CosineSimilarity, nil)
 }
+
+// testCosineMetric is the cosine metric as an HNSW index built by the factory
+// gets it, for tests that construct one directly.
+var testCosineMetric = func() core.Metric[[]float32] {
+	m, err := core.ResolveMetric[[]float32](core.MetricCosine)
+	if err != nil {
+		panic(err)
+	}
+
+	return m
+}()

@@ -2,6 +2,7 @@ package index
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 
@@ -30,9 +31,10 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 		return nil, fmt.Errorf("engine.dimensions must be set (> 0) when storage.enable_mmap is true")
 	}
 
-	mathBlock, err := core.ResolveMetric(string(engineCfg.DistanceMetric))
-	if err != nil {
-		return nil, err
+	// Checked before the mmap store opens, so a bad metric leaves nothing open.
+	// Each engine then resolves it for its vector type.
+	if !core.IsMetric(engineCfg.DistanceMetric) {
+		return nil, fmt.Errorf("unknown distance metric '%s', must be one of: %s", engineCfg.DistanceMetric, strings.Join(core.MetricNames(), ", "))
 	}
 
 	idMapper := core.NewIDMapper()
@@ -51,6 +53,7 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 	var mmapStore *storage.MmapStore
 	if storageCfg.EnableMmap {
 		isInt8 := engineCfg.Quantization == config.QuantizationScalar
+		var err error
 		mmapStore, err = storage.NewMmapStore(storageCfg.MmapStorePath, engineCfg.Dimensions, isInt8)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create mmap store: %w", err)
@@ -58,29 +61,36 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 	}
 
 	if engineCfg.IndexType == config.IndexTypeHNSW {
-		return newHNSWEngine(engineCfg, wal, invertedIndex, metaIndex, idMapper, mathBlock, mmapStore)
+		return newHNSWEngine(engineCfg, wal, invertedIndex, metaIndex, idMapper, mmapStore)
 	}
 
-	return newBruteEngine(engineCfg, wal, invertedIndex, metaIndex, idMapper, mathBlock, mmapStore)
+	return newBruteEngine(engineCfg, wal, invertedIndex, metaIndex, idMapper, mmapStore)
 }
 
 // newBruteEngine creates a VectorIndex using linear scan search.
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
-func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mathBlock core.MathBlock, mmapStore *storage.MmapStore) (Engine, error) {
+func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mmapStore *storage.MmapStore) (Engine, error) {
 	switch cfg.Quantization {
 	case config.QuantizationScalar:
-		if mathBlock.Int8Func == nil {
-			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
+		metric, err := core.ResolveMetric[[]int8](cfg.DistanceMetric)
+		if err != nil {
+			return nil, err
 		}
-		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, mathBlock.Int8Func, mmapStore)
+
+		idx := NewVectorIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, metric.Similarity, mmapStore)
 		idx.metaIndex = metaIndex
 		idx.configure(&cfg)
 		return idx, nil
 
 	case config.QuantizationNone:
+		metric, err := core.ResolveMetric[[]float32](cfg.DistanceMetric)
+		if err != nil {
+			return nil, err
+		}
+
 		identityFunc := func(v []float32) []float32 { return v }
-		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, mathBlock.FloatFunc, mmapStore)
+		idx := NewVectorIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, metric.Similarity, mmapStore)
 		idx.metaIndex = metaIndex
 		idx.configure(&cfg)
 		return idx, nil
@@ -90,69 +100,10 @@ func newBruteEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32]
 	}
 }
 
-// hnswMetricFuncs bundles the graph-level function slots a configured
-// distance metric populates on hnsw.Graph: Distance is always required.
-// Precompute/CachedDistance and SquaredDistance/FromSquaredDistance are two
-// independent optional pairs (see hnsw.Graph's own doc comments on those
-// fields) -- cosine uses the first (a per-vector cache its ratio-based
-// formula needs), Euclidean uses the second (sqrt is a monotonic transform,
-// so ranking on squared distance is free to skip it), and each metric
-// leaves the other pair nil since it has no use for it.
-type hnswMetricFuncs[V hnsw.VectorType] struct {
-	Distance            hnsw.DistanceFunc[V]
-	Precompute          func(v V) float64
-	CachedDistance      func(aVec V, aCache float64, bVec V, bCache float64) float32
-	SquaredDistance     hnsw.DistanceFunc[V]
-	FromSquaredDistance func(rank float32) float32
-}
-
-// hnswDistanceFuncFloat32 picks the graph-level distance functions matching
-// the configured metric. HNSW needs its own DistanceFunc (lower = closer)
-// separate from core.MathBlock (higher = closer, used by the brute-force
-// engine).
-func hnswDistanceFuncFloat32(metric config.DistanceMetric) (hnswMetricFuncs[[]float32], error) {
-	switch metric {
-	case config.DistanceMetricCosine:
-		return hnswMetricFuncs[[]float32]{
-			Distance:       hnsw.CosineDistanceFloat32,
-			Precompute:     hnsw.PrecomputeSquaredNormFloat32,
-			CachedDistance: hnsw.CachedCosineDistanceFloat32,
-		}, nil
-	case config.DistanceMetricEuclidean:
-		return hnswMetricFuncs[[]float32]{
-			Distance:            hnsw.EuclideanDistanceFloat32,
-			SquaredDistance:     hnsw.SquaredEuclideanDistanceFloat32,
-			FromSquaredDistance: hnsw.FromSquaredEuclideanDistance,
-		}, nil
-	default:
-		return hnswMetricFuncs[[]float32]{}, fmt.Errorf("unsupported distance metric for HNSW: '%s'", metric)
-	}
-}
-
-// hnswDistanceFuncInt8 is the int8 counterpart of hnswDistanceFuncFloat32.
-func hnswDistanceFuncInt8(metric config.DistanceMetric) (hnswMetricFuncs[[]int8], error) {
-	switch metric {
-	case config.DistanceMetricCosine:
-		return hnswMetricFuncs[[]int8]{
-			Distance:       hnsw.CosineDistanceInt8,
-			Precompute:     hnsw.PrecomputeSquaredNormInt8,
-			CachedDistance: hnsw.CachedCosineDistanceInt8,
-		}, nil
-	case config.DistanceMetricEuclidean:
-		return hnswMetricFuncs[[]int8]{
-			Distance:            hnsw.EuclideanDistanceInt8,
-			SquaredDistance:     hnsw.SquaredEuclideanDistanceInt8,
-			FromSquaredDistance: hnsw.FromSquaredEuclideanDistance,
-		}, nil
-	default:
-		return hnswMetricFuncs[[]int8]{}, fmt.Errorf("unsupported distance metric for HNSW: '%s'", metric)
-	}
-}
-
 // newHNSWEngine creates an HNSWIndex using approximate nearest neighbor search.
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
-func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mathBlock core.MathBlock, mmapStore *storage.MmapStore) (Engine, error) {
+func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][]core.Posting, metaIndex *core.MetadataIndex, idMapper *core.IDMapper, mmapStore *storage.MmapStore) (Engine, error) {
 	// Falls back to hnsw's own defaults (not a separate hand-copied literal)
 	// so this and NewGraph()'s standalone-library default can't drift apart.
 	m := cfg.HnswM
@@ -179,16 +130,12 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 	batchParallelThreshold := cfg.HnswBatchParallelThreshold
 
 	if cfg.Quantization == config.QuantizationScalar {
-		if mathBlock.Int8Func == nil {
-			return nil, fmt.Errorf("distance metric '%s' does not support scalar quantization", cfg.DistanceMetric)
-		}
-		graphFuncs, err := hnswDistanceFuncInt8(cfg.DistanceMetric)
+		metric, err := core.ResolveMetric[[]int8](cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
-		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper,
-			core.QuantizeVector, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
-			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
+
+		idx := NewHNSWIndex[[]int8](wal, invertedIndex, idMapper, core.QuantizeVector, metric,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
 		idx.configure(&cfg)
@@ -196,14 +143,13 @@ func newHNSWEngine(cfg config.EngineConfig, wal *WAL, invertedIndex map[uint32][
 	}
 
 	if cfg.Quantization == config.QuantizationNone {
-		graphFuncs, err := hnswDistanceFuncFloat32(cfg.DistanceMetric)
+		metric, err := core.ResolveMetric[[]float32](cfg.DistanceMetric)
 		if err != nil {
 			return nil, err
 		}
+
 		identityFunc := func(v []float32) []float32 { return v }
-		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper,
-			identityFunc, graphFuncs.Distance, graphFuncs.Precompute, graphFuncs.CachedDistance,
-			graphFuncs.SquaredDistance, graphFuncs.FromSquaredDistance,
+		idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, metric,
 			m, efSearch, efConstruction, metaIndex, mmapStore)
 		idx.setBatchParallelism(batchParallelism, batchParallelThreshold)
 		idx.configure(&cfg)

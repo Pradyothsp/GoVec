@@ -23,16 +23,12 @@ type HNSWIndex[T hnsw.VectorType] struct {
 	records[T]
 	graph *hnsw.Graph[uint32, T]
 
-	hnswDistFunc               hnsw.DistanceFunc[T]                                         // stored for the graph rebuilt by Reset
-	hnswPrecompute             func(v T) float64                                            // stored for the graph rebuilt by Reset; nil for metrics with nothing to cache
-	hnswCachedDistance         func(aVec T, aCache float64, bVec T, bCache float64) float32 // stored for the graph rebuilt by Reset; nil alongside hnswPrecompute
-	hnswSquaredDistance        hnsw.DistanceFunc[T]                                         // stored for the graph rebuilt by Reset; nil for metrics with no cheaper ranking equivalent
-	hnswFromSquared            func(rank float32) float32                                   // stored for the graph rebuilt by Reset; nil alongside hnswSquaredDistance
-	hnswM                      int                                                          // stored for the graph rebuilt by Reset
-	hnswEfSearch               int                                                          // stored for the graph rebuilt by Reset
-	hnswEfConstruction         int                                                          // stored for the graph rebuilt by Reset
-	hnswBatchParallelism       int                                                          // stored for the graph rebuilt by Reset
-	hnswBatchParallelThreshold int                                                          // stored for the graph rebuilt by Reset
+	metric                     core.Metric[T] // stored for the graph rebuilt by Reset; Score converts its distances
+	hnswM                      int            // stored for the graph rebuilt by Reset
+	hnswEfSearch               int            // stored for the graph rebuilt by Reset
+	hnswEfConstruction         int            // stored for the graph rebuilt by Reset
+	hnswBatchParallelism       int            // stored for the graph rebuilt by Reset
+	hnswBatchParallelThreshold int            // stored for the graph rebuilt by Reset
 }
 
 // NewHNSWIndex creates an empty HNSWIndex ready for use.
@@ -43,17 +39,7 @@ func NewHNSWIndex[T hnsw.VectorType](
 	invertedIndex map[uint32][]core.Posting,
 	idMapper *core.IDMapper,
 	encodeFunc func([]float32) T,
-	hnswDistFunc hnsw.DistanceFunc[T],
-	// hnswPrecompute/hnswCachedDistance are the optional cache-aware pair
-	// (see hnsw.Graph.Precompute's doc comment) -- nil together for a
-	// metric with nothing worth caching.
-	hnswPrecompute func(v T) float64,
-	hnswCachedDistance func(aVec T, aCache float64, bVec T, bCache float64) float32,
-	// hnswSquaredDistance/hnswFromSquared are the optional ranking-only
-	// pair (see hnsw.Graph.SquaredDistance's doc comment) -- nil together
-	// for a metric with no cheaper ranking equivalent.
-	hnswSquaredDistance hnsw.DistanceFunc[T],
-	hnswFromSquared func(rank float32) float32,
+	metric core.Metric[T],
 	m int,
 	efSearch int,
 	efConstruction int,
@@ -71,14 +57,10 @@ func NewHNSWIndex[T hnsw.VectorType](
 			encodeFunc:    encodeFunc,
 			vectorStore:   vectorStore,
 		},
-		hnswDistFunc:        hnswDistFunc,
-		hnswPrecompute:      hnswPrecompute,
-		hnswCachedDistance:  hnswCachedDistance,
-		hnswSquaredDistance: hnswSquaredDistance,
-		hnswFromSquared:     hnswFromSquared,
-		hnswM:               m,
-		hnswEfSearch:        efSearch,
-		hnswEfConstruction:  efConstruction,
+		metric:             metric,
+		hnswM:              m,
+		hnswEfSearch:       efSearch,
+		hnswEfConstruction: efConstruction,
 	}
 	idx.graph = idx.newGraph()
 	return idx
@@ -90,11 +72,7 @@ func (idx *HNSWIndex[T]) newGraph() *hnsw.Graph[uint32, T] {
 	g.M = idx.hnswM
 	g.EfSearch = idx.hnswEfSearch
 	g.EfConstruction = idx.hnswEfConstruction
-	g.Distance = idx.hnswDistFunc
-	g.Precompute = idx.hnswPrecompute
-	g.CachedDistance = idx.hnswCachedDistance
-	g.SquaredDistance = idx.hnswSquaredDistance
-	g.FromSquaredDistance = idx.hnswFromSquared
+	g.Metric = idx.metric
 	g.BatchParallelism = idx.hnswBatchParallelism
 	g.BatchParallelThreshold = idx.hnswBatchParallelThreshold
 	return g
@@ -252,23 +230,10 @@ func (idx *HNSWIndex[T]) Search(_ context.Context, query []float32, sparseQuery 
 		if !ok || !core.MatchFilter(node.Metadata, filters) {
 			continue
 		}
-		results = append(results, SearchResult{ID: node.ExternalID, Score: score(candidate.Key, idx.distanceToScore(candidate.Distance)), Meta: node.Metadata})
+		results = append(results, SearchResult{ID: node.ExternalID, Score: score(candidate.Key, idx.metric.Score(candidate.Distance)), Meta: node.Metadata})
 	}
 
 	return rankTop(results, k), nil
-}
-
-// distanceToScore converts a graph distance into a "higher = closer" score, matching
-// the convention core.MathBlock funcs use for the brute-force engine (see
-// core.EuclideanSimilarity) so hybrid-search alpha-blending behaves consistently
-// across index types. The conversion is metric-specific: cosine distance is bounded
-// (~[0,2]), so 1-distance works directly; Euclidean distance is unbounded, so it's
-// converted the same way core.EuclideanSimilarity is: 1/(1+distance).
-func (idx *HNSWIndex[T]) distanceToScore(distance float32) float32 {
-	if idx.distanceMetric == "euclidean" {
-		return 1 / (1 + distance)
-	}
-	return 1 - distance
 }
 
 // Delete removes a vector from the index by ID.
@@ -351,10 +316,6 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 		if err := idx.graph.ImportTopology(topology, lookupVec); err != nil {
 			return fmt.Errorf("failed to import HNSW topology: %w", err)
 		}
-		// The import sets EfSearch to the value saved with the snapshot. It only
-		// shapes searches, not the graph, so the configured value wins: otherwise
-		// a changed hnsw_ef_search, or a new default, never reaches existing data.
-		idx.graph.EfSearch = idx.hnswEfSearch
 		return nil
 	})
 	if err != nil || !found {

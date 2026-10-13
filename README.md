@@ -197,9 +197,9 @@ with no latency cost. It isn't set by default because the right value depends on
   a config switch, not a separate code path. Under cosine, vectors are unit-normalized before
   int8 encoding. Under Euclidean, out-of-range vectors are rejected, because normalizing them
   would change the distance.
-- **HNSW.** A fork of [coder/hnsw](https://github.com/coder/hnsw), made generic and extended
-  with `SELECT-NEIGHBORS-HEURISTIC`, a `2×M` base layer, and greedy descent through upper
-  layers on insert. Batch inserts run each round's graph searches in parallel, then apply the
+- **HNSW.** Began as [coder/hnsw](https://github.com/coder/hnsw) and is now GoVec's own: made
+  generic and extended with `SELECT-NEIGHBORS-HEURISTIC`, a `2×M` base layer, and greedy descent
+  through upper layers on insert. Batch inserts run each round's graph searches in parallel, then apply the
   mutations serially, so no read ever overlaps a write.
 - **Durability.** Every write is appended to the WAL (batch inserts share a single fsync).
   Snapshots are written to a temp file and atomically renamed. On startup, GoVec loads the

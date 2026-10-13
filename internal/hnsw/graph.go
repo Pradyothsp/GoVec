@@ -10,15 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw/heap"
 )
 
-// VectorType defines the supported vector storage types for HNSW.
-// This constraint ensures compile-time type safety - only []float32 and []int8 are allowed.
-// Add new types here when implementing additional quantization methods (e.g., []uint8 for binary).
-type VectorType interface {
-	[]float32 | []int8
-}
+// VectorType is the vector types a graph can hold: core's, so a graph and the
+// metric it runs on always agree on them.
+type VectorType = core.VectorType
 
 // Node is a node in the graph.
 // K is the key type (must be comparable/ordered, e.g., uint32, int, string).
@@ -47,8 +45,8 @@ type layerNode[K cmp.Ordered, V VectorType] struct {
 	neighbors []*layerNode[K, V]
 
 	// precomputed is an opaque, metric-supplied value computed once via
-	// Graph.Precompute when this node is created (on insert or persistence
-	// import), and handed back to Graph.CachedDistance on every future
+	// Graph.Metric.Precompute when this node is created (on insert or persistence
+	// import), and handed back to Graph.Metric.CachedDistance on every future
 	// comparison involving this node -- letting the metric skip work that's
 	// otherwise redundantly repeated on every single comparison (e.g.
 	// cosine's per-vector norm: needed on both sides of every distance()
@@ -69,7 +67,7 @@ type layerNode[K cmp.Ordered, V VectorType] struct {
 	// using float64 everywhere -- not worth the complexity.
 	//
 	// Left at its zero value, unused, when the configured metric doesn't
-	// opt in (Graph.Precompute == nil) -- e.g. Euclidean, whose current
+	// opt in (Graph.Metric.Precompute == nil) -- e.g. Euclidean, whose current
 	// single-pass implementation has no redundant per-comparison norm
 	// computation to eliminate in the first place, or any custom-registered
 	// metric that doesn't supply Precompute/CachedDistance.
@@ -250,8 +248,8 @@ func (n *layerNode[K, V]) search(
 	efSearch int,
 	target V,
 	distance distFunc[V],
-	// targetCache is target's precomputed value (see Graph.Precompute's doc
-	// comment), computed once by the caller -- target has no layerNode of
+	// targetCache is target's precomputed value (see core.Metric's
+	// Precompute), computed once by the caller -- target has no layerNode of
 	// its own to carry a cached value on (it's an ephemeral query or
 	// not-yet-inserted vector), so this is search()'s only way to get it. 0
 	// when the configured metric has no cache; distance ignores it in that
@@ -514,65 +512,14 @@ func (l *layer[K, V]) size() int {
 // K is cmp.Ordered instead of of comparable so that they can be sorted.
 // V is the vector type (must satisfy VectorType constraint: []float32 or []int8).
 type Graph[K cmp.Ordered, V VectorType] struct {
-	// Distance is the distance function used to compare embeddings.
-	Distance DistanceFunc[V]
-
-	// Precompute and CachedDistance are an optional, opt-in pair that lets a
-	// metric skip work it would otherwise redundantly repeat on every single
-	// comparison. When both are set, Precompute(v) is called once per node
-	// (on insert or persistence import) and the result is cached on that
-	// node (layerNode.precomputed); CachedDistance is then used instead of
-	// Distance for every comparison involving that node, receiving both
-	// sides' cached values alongside the vectors themselves. Cosine is the
-	// motivating case: its distance formula needs each vector's norm as a
-	// value standalone from the comparison, and that norm never changes
-	// once the vector is stored, so recomputing it on every comparison (as
-	// plain Distance does) is pure waste. See CachedCosineDistanceFloat32.
-	//
-	// nil (the default) means "this metric has nothing worth caching" --
-	// every internal comparison falls back to calling Distance directly,
-	// identical to before this pair existed. Euclidean is the other metric
-	// this package ships, and deliberately leaves these nil: its current
-	// single-pass implementation (sum of squared diffs) never computes a
-	// standalone per-vector norm in the first place, so there's nothing
-	// here for it to cache. Any custom-registered DistanceFunc (see
-	// RegisterDistanceFuncFloat32/Int8) that doesn't set these gets the
-	// same zero-overhead fallback.
-	//
-	// CachedDistance must ignore cacheA/cacheB when Precompute is nil --
-	// though in that case CachedDistance itself is also nil and never
-	// called, so this is enforced by construction, not a runtime check.
-	Precompute     func(v V) float64
-	CachedDistance func(aVec V, aCache float64, bVec V, bCache float64) float32
-
-	// SquaredDistance and FromSquaredDistance are a second, independent
-	// opt-in pair: a cheaper distance-equivalent used only for internal
-	// ranking/comparison (search/addNeighbor/replenish/
-	// selectNeighborsHeuristic -- everywhere except the k results a query
-	// actually returns), paired with a conversion back to the real
-	// distance, applied once to just those k results. Euclidean is the
-	// motivating case: sqrt is a monotonic transform (a < b implies
-	// sqrt(a) < sqrt(b)), so ranking on squared distance produces identical
-	// ordering to ranking on real distance, while skipping sqrt() on every
-	// comparison except the handful that get returned. See
-	// SquaredEuclideanDistanceFloat32/FromSquaredEuclideanDistance.
-	//
-	// nil (the default) means "no cheaper ranking equivalent for this
-	// metric" -- every comparison falls back to Distance/CachedDistance
-	// (distFuncFor's existing behavior), and FromSquaredDistance is never
-	// called. Cosine deliberately leaves these nil: its distance isn't a
-	// monotonic transform of some cheaper quantity the way Euclidean's
-	// sqrt is, so there's no equivalent shortcut here for it to use --
-	// Precompute/CachedDistance above is cosine's own, differently-shaped
-	// optimization.
-	//
-	// FromSquaredDistance must be set whenever SquaredDistance is -- unlike
-	// CachedDistance/Precompute's cache arguments (safely ignorable), a nil
-	// FromSquaredDistance would leave squared values flowing out to a
-	// caller uncorrected, since rankDistFuncFor's whole purpose is to
-	// substitute SquaredDistance in wherever this pair is configured.
-	SquaredDistance     DistanceFunc[V]
-	FromSquaredDistance func(rank float32) float32
+	// Metric is how the graph compares vectors. Distance is required. The
+	// optional pairs are used when set: Precompute/CachedDistance caches a
+	// value per node (layerNode.precomputed) and compares with it, and
+	// SquaredDistance ranks every comparison inside the graph, with
+	// FromSquaredDistance converting just the returned results back (see
+	// rankDistFuncFor). Similarity and Score are the caller's; the graph
+	// doesn't use them.
+	Metric core.Metric[V]
 
 	// Rng is used for level generation. It may be set to a deterministic value
 	// for reproducibility. Note that deterministic number generation can lead to
@@ -648,13 +595,11 @@ func (g *Graph[K, V]) visitedScratch() map[K]bool {
 
 // distFunc computes the distance between two vectors, given each one's
 // precomputed cache value (0 and ignored when the configured metric has no
-// cache -- see Graph.Precompute's doc comment). It replaces passing a bare
-// DistanceFunc[V] to search()/addNeighbor()/replenish()/
+// cache -- see core.Metric's Precompute). It replaces passing a bare
+// core.DistanceFunc[V] to search()/addNeighbor()/replenish()/
 // selectNeighborsHeuristic() below: those need each side's cache, not just
-// its vector. DistanceFunc[V] itself -- the public, name-registered
-// contract used by persistence -- is unchanged; this is purely internal
-// plumbing built fresh (via distFuncFor) for each top-level Add()/search()
-// call.
+// its vector. It is purely internal plumbing built fresh (via distFuncFor)
+// for each top-level Add()/search() call.
 type distFunc[V VectorType] func(aVec V, aCache float64, bVec V, bCache float64) float32
 
 // distFuncFor builds this graph's distFunc[V]: CachedDistance when the
@@ -663,10 +608,10 @@ type distFunc[V VectorType] func(aVec V, aCache float64, bVec V, bCache float64)
 // call and thread the result down, rather than re-branching on every
 // comparison.
 func (g *Graph[K, V]) distFuncFor() distFunc[V] {
-	if g.CachedDistance != nil {
-		return distFunc[V](g.CachedDistance)
+	if g.Metric.CachedDistance != nil {
+		return distFunc[V](g.Metric.CachedDistance)
 	}
-	return noCacheDist(g.Distance)
+	return noCacheDist(g.Metric.Distance)
 }
 
 // noCacheDist adapts a plain DistanceFunc[V] into a distFunc[V] that ignores
@@ -674,25 +619,25 @@ func (g *Graph[K, V]) distFuncFor() distFunc[V] {
 // metric that never populates a cache. Shared by distFuncFor's fallback
 // branch and any caller (e.g. tests) that wants to drive search()/
 // addNeighbor()/etc. directly with a bare DistanceFunc[V] and no caching.
-func noCacheDist[V VectorType](dist DistanceFunc[V]) distFunc[V] {
+func noCacheDist[V VectorType](dist core.DistanceFunc[V]) distFunc[V] {
 	return func(aVec V, _ float64, bVec V, _ float64) float32 {
 		return dist(aVec, bVec)
 	}
 }
 
-// precompute returns g.Precompute(v), or 0 if the configured metric has no
+// precompute returns g.Metric.Precompute(v), or 0 if the configured metric has no
 // cache (Precompute == nil) -- safe because distFuncFor's non-cached branch
 // ignores the cache arguments entirely in that case.
 func (g *Graph[K, V]) precompute(v V) float64 {
-	if g.Precompute == nil {
+	if g.Metric.Precompute == nil {
 		return 0
 	}
-	return g.Precompute(v)
+	return g.Metric.Precompute(v)
 }
 
 // rankDistFuncFor builds a distFunc[V] for internal ranking/comparison use
 // only -- values it produces must never reach a caller as-is; see
-// Graph.SquaredDistance's doc comment. Prefers SquaredDistance when the
+// core.Metric's SquaredDistance. Prefers SquaredDistance when the
 // metric opted in (cheaper: skips a monotonic transform every comparison
 // would otherwise pay for); falls back to distFuncFor's existing behavior
 // (CachedDistance, or plain Distance) when it hasn't. Callers whose
@@ -701,8 +646,8 @@ func (g *Graph[K, V]) precompute(v V) float64 {
 // Graph.search()'s base-layer result needs the real distance, converted
 // back via fromRank at that single boundary.
 func (g *Graph[K, V]) rankDistFuncFor() distFunc[V] {
-	if g.SquaredDistance != nil {
-		return noCacheDist(g.SquaredDistance)
+	if g.Metric.SquaredDistance != nil {
+		return noCacheDist(g.Metric.SquaredDistance)
 	}
 	return g.distFuncFor()
 }
@@ -712,10 +657,10 @@ func (g *Graph[K, V]) rankDistFuncFor() distFunc[V] {
 // metric has no cheaper ranking equivalent (SquaredDistance == nil, so
 // rankDistFuncFor never substituted anything in the first place).
 func (g *Graph[K, V]) fromRank(v float32) float32 {
-	if g.FromSquaredDistance == nil {
+	if g.Metric.FromSquaredDistance == nil {
 		return v
 	}
-	return g.FromSquaredDistance(v)
+	return g.Metric.FromSquaredDistance(v)
 }
 
 // Default HNSW parameters, used by NewGraph() and mirrored by
@@ -966,8 +911,8 @@ func (g *Graph[K, V]) resolveParallelism(n int) int {
 // (an upsert or an intra-round duplicate key -- see addRound's doc comment).
 func (g *Graph[K, V]) addSerial(nodes []Node[K, V], efConstruction int, distFn distFunc[V]) {
 	for _, node := range nodes {
-		// vecCache is this node's precomputed value (see Graph.Precompute's
-		// doc comment) -- computed once here and reused for every layer this
+		// vecCache is this node's precomputed value (see core.Metric's
+		// Precompute) -- computed once here and reused for every layer this
 		// node touches below, instead of recomputing it on every layer.
 		vecCache := g.precompute(node.Value)
 
@@ -1044,8 +989,8 @@ func (g *Graph[K, V]) applyLive(
 		searchPoint = currentLayer.nodes[*elevator]
 	}
 
-	if g.Distance == nil {
-		panic("(*Graph).Distance must be set before adding nodes")
+	if g.Metric.Distance == nil {
+		panic("(*Graph).Metric.Distance must be set before adding nodes")
 	}
 
 	// If the current layer is at or below the node's insertLevel, the node
@@ -1266,8 +1211,8 @@ func (g *Graph[K, V]) prepareInsert(
 			searchPoint = currentLayer.nodes[*elevator]
 		}
 
-		if g.Distance == nil {
-			panic("(*Graph).Distance must be set before adding nodes")
+		if g.Metric.Distance == nil {
+			panic("(*Graph).Metric.Distance must be set before adding nodes")
 		}
 
 		if insertLevel >= i {

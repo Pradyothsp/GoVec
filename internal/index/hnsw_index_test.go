@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/test/fixtures"
 )
 
@@ -29,7 +28,7 @@ func newTestHNSWIndex(t testing.TB) *HNSWIndex[[]float32] {
 
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, core.NewMetadataIndex(), nil)
+	return NewHNSWIndex[[]float32](wal, nil, idMapper, identityFunc, testCosineMetric, 16, 20, 200, core.NewMetadataIndex(), nil)
 }
 
 func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
@@ -43,7 +42,7 @@ func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
 	invertedIndex := make(map[uint32][]core.Posting)
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, core.NewMetadataIndex(), nil)
+	return NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, testCosineMetric, 16, 20, 200, core.NewMetadataIndex(), nil)
 }
 
 // =============================================================================
@@ -272,7 +271,7 @@ func TestHNSWIndex_LoadFromFile_KeepsConfiguredEfSearch(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = wal.Close() })
 	identityFunc := func(v []float32) []float32 { return v }
-	loaded := NewHNSWIndex[[]float32](wal, nil, core.NewIDMapper(), identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 100, 200, core.NewMetadataIndex(), nil)
+	loaded := NewHNSWIndex[[]float32](wal, nil, core.NewIDMapper(), identityFunc, testCosineMetric, 16, 100, 200, core.NewMetadataIndex(), nil)
 
 	// Act
 	err = loaded.LoadFromFile(ctx, path)
@@ -453,7 +452,7 @@ func TestHNSWIndex_WALReplay_HybridRankingSurvives(t *testing.T) {
 	invertedIndex := make(map[uint32][]core.Posting)
 	idMapper := core.NewIDMapper()
 	identityFunc := func(v []float32) []float32 { return v }
-	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, nil, nil)
+	idx := NewHNSWIndex[[]float32](wal, invertedIndex, idMapper, identityFunc, testCosineMetric, 16, 20, 200, nil, nil)
 
 	// Insert with sparse data — WAL entries carry the full SparseVector.
 	require.NoError(t, idx.Insert(context.Background(), "doc1", []float32{1, 0, 0}, core.SparseVector{
@@ -471,7 +470,7 @@ func TestHNSWIndex_WALReplay_HybridRankingSurvives(t *testing.T) {
 
 	invertedIndex2 := make(map[uint32][]core.Posting)
 	idMapper2 := core.NewIDMapper()
-	recovered := NewHNSWIndex[[]float32](wal2, invertedIndex2, idMapper2, identityFunc, hnsw.CosineDistanceFloat32, nil, nil, nil, nil, 16, 20, 200, nil, nil)
+	recovered := NewHNSWIndex[[]float32](wal2, invertedIndex2, idMapper2, identityFunc, testCosineMetric, 16, 20, 200, nil, nil)
 
 	require.NoError(t, recovered.ReplayWAL(walPath))
 	require.Equal(t, 2, recovered.Len(), "both docs must be recovered from WAL")
@@ -536,31 +535,4 @@ func TestHNSWIndex_Metadata_GOBRoundTrip_PreservesFilterability(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1, "float filter must work after GOB round-trip")
 	assert.Equal(t, "doc1", results[0].ID)
-}
-
-// distanceToScore turns a graph distance into a higher-is-closer score on the
-// same scale the brute-force engine uses, so hybrid blending behaves alike.
-func TestHNSWIndex_DistanceToScore(t *testing.T) {
-	tests := []struct {
-		metric   string
-		distance float32
-		want     float32
-	}{
-		{"cosine", 0.25, 0.75},  // 1 - distance
-		{"euclidean", 4, 0.2},   // 1 / (1 + distance)
-		{"euclidean", 99, 0.01}, // farther is lower, never negative
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s/%v", tt.metric, tt.distance), func(t *testing.T) {
-			// Arrange
-			idx := newTestHNSWIndex(t)
-			idx.distanceMetric = tt.metric
-
-			// Act
-			got := idx.distanceToScore(tt.distance)
-
-			// Assert
-			assert.InDelta(t, tt.want, got, 1e-4)
-		})
-	}
 }
