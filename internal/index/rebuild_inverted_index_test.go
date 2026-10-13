@@ -14,15 +14,13 @@ import (
 )
 
 // TestRebuildInvertedIndex_EveryFormat checks that each load path rebuilds the
-// posting lists. Snapshots don't store the inverted index, and search doesn't
-// read it yet (the sparse score scans every node's sparse vector), so a load
-// path that skipped the rebuild would pass every ranking test. Only counting
-// the postings catches it -- this is the guard for the planned work that makes
-// search use them.
+// posting lists. Snapshots don't store the inverted index, and hybrid search
+// reads only it for sparse scores, so a load path that skipped the rebuild
+// would silently drop every keyword match after a restart.
 func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 	type hybridIndex interface {
 		Engine
-		postings() map[uint32][]core.Posting
+		invertedIndex() *core.InvertedIndex
 	}
 
 	formats := []struct {
@@ -61,7 +59,7 @@ func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 			}, nil))
 			require.NoError(t, original.Insert(ctx, "doc3", []float32{0, 0, 1}, core.SparseVector{}, nil))
 
-			require.Len(t, original.postings(), 3, "sanity check before saving")
+			require.Equal(t, 3, original.invertedIndex().Tokens(), "sanity check before saving")
 
 			path := filepath.Join(dir, "snapshot.bin")
 			require.NoError(t, original.SaveToFile(ctx, path))
@@ -69,20 +67,20 @@ func TestRebuildInvertedIndex_EveryFormat(t *testing.T) {
 			loaded := f.open(t, mmapDir)
 			require.NoError(t, loaded.LoadFromFile(ctx, path))
 
-			assert.Len(t, loaded.postings(), 3, "every token must have its posting list back")
-			assert.Equal(t, 4, countPostings(loaded.postings()), "every posting must be rebuilt")
-			assert.Len(t, loaded.postings()[10], 2, "token 10 is in doc1 and doc2")
+			assert.Equal(t, 3, loaded.invertedIndex().Tokens(), "every token must have its posting list back")
+			assert.Equal(t, 4, loaded.invertedIndex().Postings(), "every posting must be rebuilt")
+			assert.Len(t, loaded.invertedIndex().Scores(core.SparseVector{Indices: []uint32{10}, Values: []float32{1}}), 2, "token 10 is in doc1 and doc2")
 		})
 	}
 }
 
 type bruteHybrid struct{ *VectorIndex[[]float32] }
 
-func (b bruteHybrid) postings() map[uint32][]core.Posting { return b.InvertedIndex }
+func (b bruteHybrid) invertedIndex() *core.InvertedIndex { return b.inverted }
 
 type hnswHybrid struct{ *HNSWIndex[[]float32] }
 
-func (h hnswHybrid) postings() map[uint32][]core.Posting { return h.InvertedIndex }
+func (h hnswHybrid) invertedIndex() *core.InvertedIndex { return h.inverted }
 
 func newTestWAL(t *testing.T) *WAL {
 	t.Helper()

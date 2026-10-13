@@ -63,7 +63,7 @@ func (r *records[T]) init(opts Options[T], indexType config.IndexType) {
 	r.Store = make(map[uint32]*core.VectorNode[T])
 	r.IDMapper = core.NewIDMapper()
 	if opts.HybridSearch {
-		r.InvertedIndex = make(map[uint32][]core.Posting)
+		r.inverted = core.NewInvertedIndex()
 	}
 	if opts.MetadataIndex {
 		r.metaIndex = core.NewMetadataIndex()

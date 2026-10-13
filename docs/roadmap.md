@@ -61,14 +61,11 @@ original vectors.
   parallel insert). The payoff ceiling is higher and so is the risk: hnswlib needed a dedicated
   bug-fix PR for this exact design, and its failure mode (deadlock) isn't caught by `-race`,
   only by hitting the wrong interleaving under load.
-- **Inverted-index-backed sparse scoring for hybrid search.** Both engines maintain a sparse
-  `InvertedIndex`, but nothing reads the postings yet: `computeSparseScores` scans every
-  node's sparse vector. Two problems this should solve:
-  - HNSW hybrid search computes sparse scores for all `n` documents and then uses only the
-    graph's ~`k` candidates, so every hybrid query is O(n) despite the O(log n) graph.
-  - HNSW hybrid search only reranks dense candidates. A strong keyword match that isn't close
-    in meaning is never retrieved. Full hybrid systems fetch candidates from both the graph and
-    the inverted index and merge them.
+- **Keyword candidates for HNSW hybrid search.** Sparse scores now come from
+  `core.InvertedIndex`, so a hybrid query reads only the documents that share a token with it,
+  not all `n`. HNSW hybrid search still only reranks the graph's dense candidates, though: a
+  strong keyword match that isn't close in meaning is never retrieved. Full hybrid systems
+  fetch candidates from both the graph and the inverted index and merge them.
 
 ## Declined
 

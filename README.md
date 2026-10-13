@@ -273,8 +273,9 @@ Limitations to know about:
   unless you enable the mmap vector store.
 - **Filtered HNSW search can return fewer than `k` results** when the filter is selective,
   especially with `enable_metadata_index: false`. The brute-force index is always exact.
-- **Hybrid search scans all sparse vectors.** Sparse scoring is O(n) per query, so it suits
-  small and medium collections.
+- **HNSW hybrid search only reranks dense matches.** Keyword scores are added to the candidates
+  the graph returns, so a strong keyword match that isn't close in meaning is never retrieved.
+  The brute-force index scores every document.
 - **Filters are exact-match only.** Keys are ANDed together, with no range or `OR` operators.
 
 Planned work and deliberate non-goals are in [docs/roadmap.md](docs/roadmap.md).

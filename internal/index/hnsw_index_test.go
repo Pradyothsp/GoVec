@@ -402,9 +402,9 @@ func TestHNSWIndex_FilteredSearch_MetaIndex_UpdatedOnDelete(t *testing.T) {
 
 // TestHNSWIndex_SaveLoad_HybridRankingSurvives verifies that each
 // document's sparse vector survives SaveToFile/LoadFromFile, so hybrid search
-// ranks the same after a reload. Sparse scores come from the stored sparse
-// vectors, not the InvertedIndex postings (nothing reads those yet); the
-// postings rebuild is covered by rebuild_inverted_index_test.go.
+// ranks the same after a reload: sparse scores come from the inverted index,
+// rebuilt from the stored sparse vectors on load. The rebuild's posting counts
+// are checked in rebuild_inverted_index_test.go.
 func TestHNSWIndex_SaveLoad_HybridRankingSurvives(t *testing.T) {
 	idx := newTestHNSWIndexWithHybrid(t)
 

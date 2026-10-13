@@ -26,10 +26,10 @@ import (
 // HNSW learned the index's width from a vector it then rejected, and its Info
 // never reported mmap.
 type records[T metric.VectorType] struct {
-	Store         map[uint32]*core.VectorNode[T]
-	InvertedIndex map[uint32][]core.Posting // nil when hybrid search is off
-	IDMapper      *core.IDMapper
-	metaIndex     *core.MetadataIndex // nil when the metadata index is off
+	Store     map[uint32]*core.VectorNode[T]
+	IDMapper  *core.IDMapper
+	metaIndex *core.MetadataIndex // nil when the metadata index is off
+	inverted  *core.InvertedIndex // nil when hybrid search is off
 
 	quantization config.Quantization // follows from T
 	indexType    config.IndexType
@@ -245,11 +245,11 @@ func (r *records[T]) put(id string, vec []float32, sparse core.SparseVector, met
 	}
 
 	old, replaced := r.Store[internalID]
-	if r.InvertedIndex != nil {
+	if r.inverted != nil {
 		if replaced {
-			r.removePostings(internalID, old.Sparse)
+			r.inverted.Remove(internalID, old.Sparse)
 		}
-		r.addPostings(internalID, sparse)
+		r.inverted.Add(internalID, sparse)
 	}
 	if r.metaIndex != nil {
 		if replaced {
@@ -288,8 +288,8 @@ func (r *records[T]) remove(id string, detach func(internalID uint32)) error {
 		return core.ErrNotFound
 	}
 
-	if r.InvertedIndex != nil {
-		r.removePostings(internalID, node.Sparse)
+	if r.inverted != nil {
+		r.inverted.Remove(internalID, node.Sparse)
 	}
 	if r.metaIndex != nil {
 		r.metaIndex.Remove(internalID, node.Metadata)
@@ -343,8 +343,8 @@ func (r *records[T]) emptyContents() snapshotContents[T] {
 // PRECONDITION: r.mu.Lock() held.
 func (r *records[T]) clear() {
 	r.Store = make(map[uint32]*core.VectorNode[T])
-	if r.InvertedIndex != nil {
-		r.InvertedIndex = make(map[uint32][]core.Posting)
+	if r.inverted != nil {
+		r.inverted.Clear()
 	}
 	if r.metaIndex != nil {
 		r.metaIndex.Clear()
@@ -425,24 +425,20 @@ const hybridAlpha = 0.7
 //
 //	final = hybridAlpha*dense + (1-hybridAlpha)*sparse
 //
-// Otherwise it is the dense score.
+// Otherwise it is the dense score. A sparse score below 0 counts as 0: a
+// keyword mismatch never pulls a dense match down.
+//
+// The sparse scores come from the inverted index, so a query reads only the
+// documents sharing a token with it; every other document's sparse score is 0.
 // PRECONDITION: r.mu.RLock() held.
 func (r *records[T]) scorer(sparseQuery core.SparseVector) func(internalID uint32, dense float32) float32 {
-	if r.InvertedIndex == nil || sparseQuery.IsEmpty() {
+	if r.inverted == nil || sparseQuery.IsEmpty() {
 		return func(_ uint32, dense float32) float32 { return dense }
 	}
 
-	sparseScores := make(map[uint32]float32)
-	for id, node := range r.Store {
-		if node.Sparse.IsEmpty() {
-			continue
-		}
-		if score := sparseQuery.Dot(node.Sparse); score > 0 {
-			sparseScores[id] = score
-		}
-	}
+	sparseScores := r.inverted.Scores(sparseQuery)
 	return func(internalID uint32, dense float32) float32 {
-		return hybridAlpha*dense + (1-hybridAlpha)*sparseScores[internalID]
+		return hybridAlpha*dense + (1-hybridAlpha)*max(sparseScores[internalID], 0)
 	}
 }
 
@@ -467,49 +463,10 @@ func (r *records[T]) rebuildIndexes() {
 			r.metaIndex.Add(internalID, node.Metadata)
 		}
 	}
-	r.rebuildInvertedIndex()
-}
-
-// rebuildInvertedIndex recomputes every posting list from the stored sparse
-// vectors, discarding whatever the inverted index held before.
-// PRECONDITION: r.mu.Lock() held.
-func (r *records[T]) rebuildInvertedIndex() {
-	if r.InvertedIndex == nil {
-		return // hybrid search disabled
-	}
-
-	// A fresh map rather than clear(): nothing outside the index should hold
-	// the old one, but a new map makes that not matter.
-	r.InvertedIndex = make(map[uint32][]core.Posting)
-	for internalID, node := range r.Store {
-		r.addPostings(internalID, node.Sparse)
-	}
-}
-
-// addPostings adds a document's sparse vector to the inverted index.
-// PRECONDITION: r.mu.Lock() held.
-func (r *records[T]) addPostings(docID uint32, sparse core.SparseVector) {
-	for i, tokenID := range sparse.Indices {
-		r.InvertedIndex[tokenID] = append(r.InvertedIndex[tokenID], core.Posting{DocID: docID, Weight: sparse.Values[i]})
-	}
-}
-
-// removePostings removes a document's postings from the inverted index,
-// dropping any posting list it leaves empty.
-// PRECONDITION: r.mu.Lock() held.
-func (r *records[T]) removePostings(docID uint32, sparse core.SparseVector) {
-	for _, tokenID := range sparse.Indices {
-		postings := r.InvertedIndex[tokenID]
-		filtered := make([]core.Posting, 0, len(postings))
-		for _, posting := range postings {
-			if posting.DocID != docID {
-				filtered = append(filtered, posting)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(r.InvertedIndex, tokenID)
-		} else {
-			r.InvertedIndex[tokenID] = filtered
+	if r.inverted != nil {
+		r.inverted.Clear()
+		for internalID, node := range r.Store {
+			r.inverted.Add(internalID, node.Sparse)
 		}
 	}
 }

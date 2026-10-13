@@ -191,8 +191,8 @@ func TestSaveAndLoad_Variations(t *testing.T) {
 				// The three fixtures cover 9 distinct tokens with 10 postings
 				// (token 100 appears in both SparseTfIdf and SparseLarge).
 				// NotNil alone passed while every posting was being lost on load.
-				assert.Len(t, idx.InvertedIndex, 9, "every token must have its posting list back")
-				assert.Equal(t, 10, countPostings(idx.InvertedIndex), "every posting must survive the reload")
+				assert.Equal(t, 9, idx.inverted.Tokens(), "every token must have its posting list back")
+				assert.Equal(t, 10, idx.inverted.Postings(), "every posting must survive the reload")
 			},
 			expectLen: 3,
 		},
@@ -478,8 +478,8 @@ func TestLoadFromFile_RebuildsInvertedIndex(t *testing.T) {
 
 	assertSparseBoostWorks := func(t *testing.T, idx *VectorIndex[[]float32]) {
 		t.Helper()
-		assert.Len(t, idx.InvertedIndex, 2, "tokens 10 and 99 must both have posting lists")
-		assert.Equal(t, 2, countPostings(idx.InvertedIndex))
+		assert.Equal(t, 2, idx.inverted.Tokens(), "tokens 10 and 99 must both have posting lists")
+		assert.Equal(t, 2, idx.inverted.Postings())
 
 		sparseQuery := core.SparseVector{Indices: []uint32{10}, Values: []float32{1.0}}
 		results, err := idx.Search(ctx, []float32{1, 0, 0}, sparseQuery, 2, nil)
@@ -512,15 +512,7 @@ func TestLoadFromFile_RebuildsInvertedIndex(t *testing.T) {
 
 		loaded := newTestIndex(t)
 		require.NoError(t, loaded.LoadFromFile(ctx, path))
-		assert.Nil(t, loaded.InvertedIndex, "an index without hybrid search must not grow an inverted index")
+		assert.Nil(t, loaded.inverted, "an index without hybrid search must not grow an inverted index")
 		assert.Len(t, loaded.Store, 3)
 	})
-}
-
-func countPostings(inverted map[uint32][]core.Posting) int {
-	n := 0
-	for _, postings := range inverted {
-		n += len(postings)
-	}
-	return n
 }
