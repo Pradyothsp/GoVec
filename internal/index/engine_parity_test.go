@@ -101,29 +101,43 @@ func recordsOf(t *testing.T, engine Engine) *records[[]int8] {
 	}
 }
 
-// TestSparseVector_LengthMismatch_Rejected: a sparse vector pairs each index
-// with a value, so mismatched lengths are the caller's mistake, for an insert
-// and for a query alike. The transports used to check this themselves, four
-// times and with two different messages.
-func TestSparseVector_LengthMismatch_Rejected(t *testing.T) {
+// TestSparseVector_Malformed_Rejected: a malformed sparse vector is the
+// caller's mistake, for an insert and for a query alike. Each index pairs
+// with a value, and indices must be strictly ascending, since sparse scoring
+// walks them in order: unsorted or repeated ones used to be accepted and then
+// silently miss matches. The transports used to check lengths themselves,
+// four times and with two different messages.
+func TestSparseVector_Malformed_Rejected(t *testing.T) {
 	ctx := context.Background()
-	mismatched := core.SparseVector{Indices: []uint32{0, 1}, Values: []float32{0.5}}
+	malformed := []struct {
+		name   string
+		sparse core.SparseVector
+	}{
+		{"length mismatch", core.SparseVector{Indices: []uint32{0, 1}, Values: []float32{0.5}}},
+		{"unsorted indices", core.SparseVector{Indices: []uint32{5, 2}, Values: []float32{0.5, 0.5}}},
+		{"repeated index", core.SparseVector{Indices: []uint32{3, 3}, Values: []float32{0.5, 0.5}}},
+	}
 	for _, indexType := range parityIndexTypes {
-		t.Run(string(indexType), func(t *testing.T) {
-			engine := newParityEngine(t, config.EngineConfig{
-				IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine, EnableHybridSearch: true,
-			}, config.StorageConfig{})
-			require.NoError(t, engine.Insert(ctx, "stored", []float32{1, 0, 0}, core.SparseVector{}, nil))
+		for _, tt := range malformed {
+			t.Run(string(indexType)+"/"+tt.name, func(t *testing.T) {
+				// Arrange
+				engine := newParityEngine(t, config.EngineConfig{
+					IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine, EnableHybridSearch: true,
+				}, config.StorageConfig{})
+				require.NoError(t, engine.Insert(ctx, "stored", []float32{1, 0, 0}, core.SparseVector{}, nil))
 
-			insertErr := engine.Insert(ctx, "bad", []float32{0, 1, 0}, mismatched, nil)
-			_, searchErr := engine.Search(ctx, []float32{1, 0, 0}, mismatched, 5, nil)
+				// Act
+				insertErr := engine.Insert(ctx, "bad", []float32{0, 1, 0}, tt.sparse, nil)
+				_, searchErr := engine.Search(ctx, []float32{1, 0, 0}, tt.sparse, 5, nil)
 
-			for _, err := range []error{insertErr, searchErr} {
-				require.ErrorIs(t, err, ErrInvalidSparseVector)
-				assert.True(t, IsInvalidVectorError(err), "a caller error, answered with 400 / InvalidArgument")
-			}
-			assert.Equal(t, 1, engine.Len())
-		})
+				// Assert
+				for _, err := range []error{insertErr, searchErr} {
+					require.ErrorIs(t, err, ErrInvalidSparseVector)
+					assert.True(t, IsInvalidVectorError(err), "a caller error, answered with 400 / InvalidArgument")
+				}
+				assert.Equal(t, 1, engine.Len())
+			})
+		}
 	}
 }
 

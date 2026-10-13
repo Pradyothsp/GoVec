@@ -23,6 +23,9 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// SparseVector is a keyword vector for hybrid search: token IDs and their
+// weights. Indices must be strictly ascending, with one value per index;
+// anything else is rejected with InvalidArgument.
 type SparseVector struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Indices       []uint32               `protobuf:"varint,1,rep,packed,name=indices,proto3" json:"indices,omitempty"`

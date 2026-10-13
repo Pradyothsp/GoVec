@@ -10,10 +10,10 @@ func sv(indices []uint32, values []float32) SparseVector {
 	return SparseVector{Indices: indices, Values: values}
 }
 
-// Every case runs with the arguments both ways round: the dot product is
+// Every case runs with the vectors both ways round: the dot product is
 // commutative, and the two-pointer merge must finish correctly whichever
 // vector runs out first.
-func TestSparseDotProduct(t *testing.T) {
+func TestSparseVector_Dot(t *testing.T) {
 	tests := []struct {
 		name string
 		a, b SparseVector
@@ -37,8 +37,8 @@ func TestSparseDotProduct(t *testing.T) {
 			// Arrange: the case's vectors.
 
 			// Act
-			ab := SparseDotProduct(tt.a, tt.b)
-			ba := SparseDotProduct(tt.b, tt.a)
+			ab := tt.a.Dot(tt.b)
+			ba := tt.b.Dot(tt.a)
 
 			// Assert
 			assert.InDelta(t, tt.want, ab, 1e-5)

@@ -6,6 +6,9 @@ option go_package = "github.com/Pradyothsp/govec/gen/govec/v1;govecv1";
 
 import "google/protobuf/struct.proto";
 
+// SparseVector is a keyword vector for hybrid search: token IDs and their
+// weights. Indices must be strictly ascending, with one value per index;
+// anything else is rejected with InvalidArgument.
 message SparseVector {
   repeated uint32 indices = 1 [packed = true];
   repeated float  values  = 2 [packed = true];
