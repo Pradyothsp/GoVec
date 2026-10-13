@@ -46,21 +46,3 @@ func newCosineIndex(t testing.TB, opts index.Options[[]float32]) *index.VectorIn
 	opts.Metric = m
 	return index.NewVectorIndex(opts)
 }
-
-// CreateTestVector generates a deterministic test vector
-//
-//nolint:gocritic // unnamedResult: id parameter name would shadow return name
-func CreateTestVector(id string, dimensions int) (string, []float32, map[string]any) {
-	vec := make([]float32, dimensions)
-	for i := 0; i < dimensions; i++ {
-		vec[i] = float32(i) * 0.1
-	}
-
-	metadata := map[string]any{
-		"id":         id,
-		"dimensions": dimensions,
-		"type":       "test_vector",
-	}
-
-	return id, vec, metadata
-}

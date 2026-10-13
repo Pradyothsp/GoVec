@@ -8,13 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/Pradyothsp/govec/gen/govec/v1"
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/grpcserver"
 	"github.com/Pradyothsp/govec/internal/index"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
 )
@@ -43,14 +39,7 @@ func (c *callCounter) BatchInsert(ctx context.Context, items []index.BatchInsert
 // countingClient serves engine over gRPC and returns a client for it.
 func countingClient(t *testing.T, engine *callCounter) pb.GoVecServiceClient {
 	t.Helper()
-	lis := bufconn.Listen(1024 * 1024)
-	srv := grpcserver.SetupGRPCServer(engine, "", 4)
-	go srv.Serve(lis) //nolint:errcheck // test server
-	t.Cleanup(srv.GracefulStop)
-	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithContextDialer(bufconnDialer(lis)), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	return pb.NewGoVecServiceClient(conn)
+	return newClient(t, engine, "")
 }
 
 // TestBatchInsert_IsOneEngineBatch: a streamed batch goes to the engine as a
