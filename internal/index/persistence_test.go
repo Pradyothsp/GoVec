@@ -2,6 +2,8 @@ package index
 
 import (
 	"context"
+	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -159,6 +161,56 @@ func TestSaveToFile_CreatesParentDirectories(t *testing.T) {
 			// Assert
 			require.NoError(t, err)
 			assert.FileExists(t, path)
+		})
+	}
+}
+
+// A snapshot taken after deletes must load. HNSW used to leave links to a
+// deleted node behind, which the snapshot saved and the load then refused:
+// after a batch insert and a few deletes, the server couldn't restart. The
+// batch is large enough to take HNSW's parallel insert path.
+func TestSaveAndLoad_AfterDeletes(t *testing.T) {
+	ctx := context.Background()
+
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, _ := e.open(t)
+			rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic test data
+
+			items := make([]BatchInsertItem, 300)
+			for i := range items {
+				vec := make([]float32, 16)
+				for d := range vec {
+					vec[d] = rng.Float32()
+				}
+
+				items[i] = BatchInsertItem{ID: fmt.Sprintf("v%d", i), Vector: vec}
+			}
+
+			failures, err := idx.BatchInsert(ctx, items)
+			require.NoError(t, err)
+			require.Empty(t, failures)
+
+			for i := 0; i < len(items); i += 10 {
+				_, err := idx.Delete(ctx, items[i].ID)
+				require.NoError(t, err)
+			}
+
+			path := filepath.Join(t.TempDir(), "snapshot.bin")
+			require.NoError(t, idx.SaveToFile(ctx, path))
+
+			// Act
+			loaded, _ := e.open(t)
+			err = loaded.LoadFromFile(ctx, path)
+
+			// Assert
+			require.NoError(t, err)
+			assert.Equal(t, 270, loaded.Len())
+
+			results, err := loaded.Search(ctx, items[1].Vector, core.SparseVector{}, 10, nil)
+			require.NoError(t, err)
+			assert.Equal(t, items[1].ID, results[0].ID)
 		})
 	}
 }

@@ -1,5 +1,10 @@
 package hnsw
 
+import (
+	"cmp"
+	"slices"
+)
+
 // Delete removes a node from the graph specified by its key.
 // It attempts to preserve the graph's clustering properties by reconnecting
 // affected neighbors, ensuring graph integrity after removal.
@@ -14,8 +19,7 @@ func (h *Graph[K, V]) Delete(key K) bool {
 	dist := h.rankDistFuncFor() // built once, reused across every layer this key appears in; Delete never returns a distance value
 	// Iterate through all layers, from highest to lowest, to remove the node.
 	for i, layer := range h.layers {
-		node, ok := layer.nodes[key]
-		if !ok {
+		if _, ok := layer.nodes[key]; !ok {
 			continue // Node not found in this layer, continue to next.
 		}
 
@@ -31,7 +35,7 @@ func (h *Graph[K, V]) Delete(key K) bool {
 			mCurMax = 2 * h.M // base layer allows up to 2*M connections -- see Add's comment
 		}
 
-		node.isolate(mCurMax, dist) // Disconnect the node and replenish its former neighbors.
+		layer.detach(key, mCurMax, dist)
 		deleted = true
 	}
 
@@ -51,4 +55,31 @@ func (h *Graph[K, V]) Delete(key K) bool {
 	}
 
 	return deleted
+}
+
+// detach removes every link to key left in the layer and repairs each node
+// that lost one. Links are one-way: a node can point at key without key
+// pointing back, so removing only key's own neighbours' links left those
+// dangling. A snapshot then saved a link to a node that no longer existed,
+// and loading it failed: after deletes, the server couldn't restart. Finding
+// them takes a scan of the layer, since nothing records who links to a node.
+func (l *layer[K, V]) detach(key K, m int, dist distFunc[V]) {
+	var lost []*layerNode[K, V]
+
+	for _, n := range l.nodes {
+		if n.indexOfNeighbor(key) >= 0 {
+			n.removeNeighbor(key)
+			lost = append(lost, n)
+		}
+	}
+
+	// Repair in key order: map order is random, and each repair can change
+	// the next one's candidates, so the same deletes must repair the same way.
+	slices.SortFunc(lost, func(a, b *layerNode[K, V]) int {
+		return cmp.Compare(a.Key, b.Key)
+	})
+
+	for _, n := range lost {
+		n.replenish(m, dist)
+	}
 }

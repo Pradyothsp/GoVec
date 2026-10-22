@@ -840,3 +840,44 @@ func TestGraph_SameSeed_BuildsSameGraph(t *testing.T) {
 		})
 	}
 }
+
+// Links are one-way, so a node can point at a deleted one without the deleted
+// one pointing back. Every such link must go: a snapshot that saved one could
+// not be loaded, and the server couldn't restart.
+func TestGraph_Delete_LeavesNoLinkToTheDeletedNode(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	g := NewGraph[uint32, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{
+		M: 8, EfConstruction: 32, BatchParallelThreshold: 1, BatchParallelism: 4, Seed: 9,
+	})
+
+	nodes := make([]Node[uint32, []float32], 300)
+	for i, v := range randomVectors(3, len(nodes), 16) {
+		nodes[i] = MakeNode(uint32(i), v)
+	}
+
+	g.Add(nodes...)
+
+	deleted := map[uint32]bool{}
+	for key := uint32(0); key < 300; key += 7 {
+		deleted[key] = true
+	}
+
+	// Act
+	for key := range deleted {
+		require.True(t, g.Delete(key))
+	}
+
+	// Assert
+	for i, l := range g.layers {
+		for key, n := range l.nodes {
+			for _, nb := range n.neighbors {
+				assert.False(t, deleted[nb.Key], "layer %d: node %d still links to deleted node %d", i, key, nb.Key)
+			}
+		}
+	}
+
+	reloaded := roundTripTopology(t, g)
+	assert.Equal(t, topology(g), topology(reloaded))
+}

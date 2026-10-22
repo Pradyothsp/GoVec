@@ -135,7 +135,7 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist dist
 		// evicted links are simply pruned, relying on HNSW's power-law
 		// small-world connectivity to keep the graph reachable without
 		// active healing on every eviction. replenish() itself is kept for
-		// Delete()/isolate(), where a node's neighbors lose a connection
+		// Delete(), where a node's neighbors lose a connection
 		// permanently (not just to a redistribution the heuristic already
 		// picked a diverse replacement set for) and have no other chance at
 		// repair.
@@ -267,20 +267,5 @@ func (n *layerNode[K, V]) replenish(m int, dist distFunc[V]) {
 		if len(n.neighbors) >= m {
 			return
 		}
-	}
-}
-
-// isolate removes all connections to and from this node within its layer.
-// This is a prerequisite for deleting a node to ensure it's fully disconnected.
-func (n *layerNode[K, V]) isolate(m int, dist distFunc[V]) {
-	// Remove backlinks from its current neighbors.
-	for _, neighbor := range n.neighbors {
-		neighbor.removeNeighbor(n.Key)
-	}
-
-	// After removing 'n', its former neighbors might have lost a connection.
-	// Attempt to replenish their connectivity.
-	for _, neighbor := range n.neighbors {
-		neighbor.replenish(m, dist)
 	}
 }
