@@ -31,25 +31,60 @@ func MakeNode[K Key, V VectorType](key K, vec V) Node[K, V] {
 // Nodes in higher layers are always a subset of nodes in lower layers.
 type layer[K Key, V VectorType] struct {
 	// nodes is a map of node IDs to the actual layerNode instances within this layer.
-	// This map is exported for compatibility with encoding/gob for persistence.
+	// Write it only through put and remove, which keep first in step.
 	nodes map[K]*layerNode[K, V]
+
+	// first is the node with the smallest key, the layer's entry point. It
+	// used to be whichever node a map iteration returned first, which Go
+	// randomizes: the same nodes and seed built a different graph every time,
+	// so benchmarks compared two random graphs. The smallest key depends only
+	// on what the layer holds, so a graph reloaded from a snapshot gets the
+	// same entry points without the snapshot storing them.
+	first *layerNode[K, V]
 }
 
-// entry returns an arbitrary entry node for the layer.
-// The specific choice of entry node doesn't significantly impact the algorithm's
-// correctness, as long as it is consistent within a search path.
-// It returns nil if the layer is empty.
+// entry returns the layer's entry point, or nil if the layer is empty.
 func (l *layer[K, V]) entry() *layerNode[K, V] {
 	if l == nil {
 		return nil
 	}
 
-	// Simply return the first node found in the map.
-	for _, node := range l.nodes {
-		return node
+	return l.first
+}
+
+// put adds n to the layer, replacing any node with the same key.
+func (l *layer[K, V]) put(n *layerNode[K, V]) {
+	if l.nodes == nil {
+		l.nodes = make(map[K]*layerNode[K, V])
 	}
 
-	return nil
+	l.nodes[n.Key] = n
+
+	if l.first == nil || n.Key <= l.first.Key {
+		l.first = n
+	}
+}
+
+// remove deletes key from the layer. Removing the entry point scans the layer
+// for the next smallest key: a full pass, but only when that one node goes.
+func (l *layer[K, V]) remove(key K) {
+	delete(l.nodes, key)
+
+	if l.first != nil && l.first.Key == key {
+		l.findFirst()
+	}
+}
+
+// findFirst sets first to the node with the smallest key, or nil if the
+// layer is empty.
+func (l *layer[K, V]) findFirst() {
+	l.first = nil
+
+	for _, n := range l.nodes {
+		if l.first == nil || n.Key < l.first.Key {
+			l.first = n
+		}
+	}
 }
 
 // size returns the number of nodes currently in this layer.
@@ -97,8 +132,18 @@ type Graph[K Key, V VectorType] struct {
 //
 // Reproducibility can be achieved by seeding the Rng field of the Graph with a fixed source.
 func defaultRand() *rand.Rand {
+	return seededRand(time.Now().UnixNano())
+}
+
+// seededRand returns the generator for Config.Seed: seeded with it, or from
+// the clock when it is 0.
+func seededRand(seed int64) *rand.Rand {
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+
 	//nolint:gosec // G404: Non-crypto RNG acceptable for HNSW layer generation
-	return rand.New(rand.NewSource(time.Now().UnixNano()))
+	return rand.New(rand.NewSource(seed))
 }
 
 // NewGraph returns an empty graph that compares vectors with m and is built
@@ -109,7 +154,7 @@ func NewGraph[K Key, V VectorType](m metric.Metric[V], cfg Config) *Graph[K, V] 
 	return &Graph[K, V]{
 		Metric: m,
 		Config: cfg.withDefaults(),
-		Rng:    defaultRand(),
+		Rng:    seededRand(cfg.Seed),
 	}
 }
 

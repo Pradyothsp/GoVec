@@ -760,3 +760,83 @@ func TestGraph_BatchParallelAdd_StructuralSoundness(t *testing.T) {
 		}
 	}
 }
+
+// topology returns every layer's links as layer -> key -> neighbour keys, in
+// stored order, plus each layer's entry key: everything a search depends on.
+func topology[K Key, V VectorType](g *Graph[K, V]) []map[K][]K {
+	out := make([]map[K][]K, len(g.layers))
+
+	for i, l := range g.layers {
+		out[i] = make(map[K][]K, len(l.nodes))
+
+		for key, node := range l.nodes {
+			links := make([]K, len(node.neighbors))
+			for j, nb := range node.neighbors {
+				links[j] = nb.Key
+			}
+
+			out[i][key] = links
+		}
+
+		if e := l.entry(); e != nil {
+			out[i][e.Key] = append([]K{e.Key}, out[i][e.Key]...) // mark the entry
+		}
+	}
+
+	return out
+}
+
+// The same nodes and seed must build the same graph, link for link, on either
+// insert path and through deletes: benchmarks compare code, not two random
+// graphs, and a restart must search the graph that was saved.
+func TestGraph_SameSeed_BuildsSameGraph(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		threshold int // BatchParallelThreshold: 1 takes the parallel path, n+1 the serial one
+	}{
+		{"serial", 301},
+		{"parallel", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange
+			vectors := randomVectors(3, 300, 16)
+			build := func() *Graph[uint32, []float32] {
+				g := NewGraph[uint32, []float32](metric.Metric[[]float32]{Distance: metric.CosineDistanceFloat32}, Config{
+					M: 8, EfConstruction: 32, BatchParallelThreshold: tt.threshold, BatchParallelism: 4, Seed: 9,
+				})
+
+				nodes := make([]Node[uint32, []float32], len(vectors))
+				for i, v := range vectors {
+					nodes[i] = MakeNode(uint32(i), v)
+				}
+
+				g.Add(nodes...)
+
+				return g
+			}
+			deleteSome := func(g *Graph[uint32, []float32]) {
+				// Key 0 is the smallest, so the entry point of every layer it reached.
+				for _, key := range []uint32{0, 1, 150} {
+					g.Delete(key)
+				}
+			}
+
+			// Act
+			first, second := build(), build()
+			reloaded := roundTripTopology(t, first)
+			deleteSome(first)
+			deleteSome(second)
+
+			// Assert
+			assert.Equal(t, topology(build()), topology(reloaded), "a reloaded graph must keep its entry points")
+			require.Equal(t, 297, first.Len())
+			assert.Equal(t, topology(first), topology(second))
+		})
+	}
+}

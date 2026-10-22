@@ -102,6 +102,7 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 	envInt("GOVEC_HNSW_EF_CONSTRUCTION", &cfg.Engine.HnswEfConstruction)
 	envInt("GOVEC_HNSW_BATCH_PARALLELISM", &cfg.Engine.HnswBatchParallelism)
 	envInt("GOVEC_HNSW_BATCH_PARALLEL_THRESHOLD", &cfg.Engine.HnswBatchParallelThreshold)
+	envInt("GOVEC_HNSW_SEED", &cfg.Engine.HnswSeed)
 
 	// gRPC
 	envBool("GOVEC_GRPC_ENABLED", &cfg.GRPC.Enabled)

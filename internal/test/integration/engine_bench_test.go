@@ -109,6 +109,9 @@ func newBenchEngine(b *testing.B, setup benchSetup) index.FileEngine {
 		IndexType:      setup.indexType,
 		Quantization:   setup.quant,
 		DistanceMetric: config.DistanceMetricCosine,
+		// A fixed seed builds the same graph every run, so two runs differ
+		// only by the code under test.
+		HnswSeed: 1,
 	}, config.StorageConfig{}, walLog)
 	if err != nil {
 		b.Fatal(err)

@@ -115,7 +115,7 @@ func (g *Graph[K, V]) applyLive(
 
 	// If the current layer is empty, the new node becomes the entry point.
 	if currentLayer.entry() == nil {
-		currentLayer.nodes = map[K]*layerNode[K, V]{key: newNode}
+		currentLayer.put(newNode)
 		return elevator
 	}
 
@@ -153,7 +153,7 @@ func (g *Graph[K, V]) applyLive(
 			g.Delete(key) // This handles isolating the old node.
 		}
 
-		currentLayer.nodes[key] = newNode
+		currentLayer.put(newNode)
 		// Select up to M diverse neighbors from the candidate pool, then
 		// create bi-directional connections between the new node and each.
 		// The new node's own outgoing connections are always capped at M,

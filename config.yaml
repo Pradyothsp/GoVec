@@ -41,6 +41,7 @@ engine:
   hnsw_ef_construction: 100   # Build-time search breadth (higher = better graph, slower inserts). Try 200 on large datasets if recall matters
   # hnsw_batch_parallelism: 0        # Concurrent workers for a single Add() call's round-based parallel Prepare phase. 0 = runtime.GOMAXPROCS(0)
   # hnsw_batch_parallel_threshold: 20 # Minimum node count in one Add() call before parallelism kicks in at all; below it, inserts stay fully serial
+  # hnsw_seed: 0                     # Seeds level assignment so the same inserts build the same graph (reproducible benchmarks). 0 = seeded from the clock
 
 grpc:
   enabled: false              # Set to true to start the gRPC server

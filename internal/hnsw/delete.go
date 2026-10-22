@@ -19,7 +19,7 @@ func (h *Graph[K, V]) Delete(key K) bool {
 			continue // Node not found in this layer, continue to next.
 		}
 
-		delete(layer.nodes, key) // Remove the node from the current layer.
+		layer.remove(key)
 
 		if len(layer.nodes) == 0 {
 			deleteLayer[i] = struct{}{} // Mark layer as empty.

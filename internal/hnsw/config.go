@@ -42,6 +42,11 @@ type Config struct {
 	// 0 (the default) resolves to DefaultBatchParallelThreshold -- see
 	// resolveParallelism.
 	BatchParallelThreshold int
+
+	// Seed seeds level assignment, so the same inserts in the same order
+	// build the same graph: benchmarks then compare code, not two random
+	// graphs. 0 (the default) seeds from the clock.
+	Seed int64
 }
 
 // withDefaults fills each zero field that has a package default.

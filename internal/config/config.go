@@ -59,6 +59,9 @@ type EngineConfig struct {
 	// every node runs through the serial path instead. 0 (default)
 	// resolves to hnsw.DefaultBatchParallelThreshold.
 	HnswBatchParallelThreshold int `yaml:"hnsw_batch_parallel_threshold"`
+	// HnswSeed seeds HNSW level assignment, so the same inserts build the
+	// same graph: for reproducible benchmarks. 0 (default) seeds from the clock.
+	HnswSeed int `yaml:"hnsw_seed"`
 }
 
 // GRPCConfig holds gRPC server configuration.

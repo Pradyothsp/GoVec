@@ -245,7 +245,7 @@ func (g *Graph[K, V]) applyInsert(plan *insertPlan[K, V], efConstruction int, di
 		switch step.kind {
 		case stepBecomeEntry:
 			if currentLayer.entry() == nil {
-				currentLayer.nodes = map[K]*layerNode[K, V]{key: step.newNode}
+				currentLayer.put(step.newNode)
 				continue
 			}
 
@@ -255,7 +255,7 @@ func (g *Graph[K, V]) applyInsert(plan *insertPlan[K, V], efConstruction int, di
 			g.applyLive(step.layerIdx, key, plan.node.Value, plan.vecCache, plan.insertLevel, nil, efConstruction, distFn)
 
 		case stepConnect:
-			currentLayer.nodes[key] = step.newNode
+			currentLayer.put(step.newNode)
 			mCurMax := g.M
 			if step.layerIdx == 0 {
 				mCurMax = 2 * g.M

@@ -147,6 +147,7 @@ func TestLoadFromEnv_EveryFieldHasAnOverride(t *testing.T) {
 		"GOVEC_HNSW_EF_CONSTRUCTION":          "400",
 		"GOVEC_HNSW_BATCH_PARALLELISM":        "8",
 		"GOVEC_HNSW_BATCH_PARALLEL_THRESHOLD": "50",
+		"GOVEC_HNSW_SEED":                     "7",
 		"GOVEC_GRPC_ENABLED":                  "true",
 		"GOVEC_GRPC_PORT":                     "50052",
 		"GOVEC_GRPC_MAX_RECV_MSG_SIZE_MB":     "128",

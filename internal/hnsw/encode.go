@@ -281,6 +281,7 @@ func (h *Graph[K, V]) ImportTopology(r io.Reader, lookupVec func(K) (V, bool)) e
 			}
 		}
 		h.layers[i] = &layer[K, V]{nodes: nodes}
+		h.layers[i].findFirst()
 	}
 	return nil
 }

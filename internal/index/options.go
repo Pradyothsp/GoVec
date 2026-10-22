@@ -58,6 +58,7 @@ func graphConfigFrom(cfg config.EngineConfig) hnsw.Config {
 		EfConstruction:         cfg.HnswEfConstruction,
 		BatchParallelism:       cfg.HnswBatchParallelism,
 		BatchParallelThreshold: cfg.HnswBatchParallelThreshold,
+		Seed:                   int64(cfg.HnswSeed),
 	}
 }
 
