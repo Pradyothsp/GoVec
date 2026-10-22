@@ -127,6 +127,12 @@ narrate what the code does line by line.
 - Benchmarks (`task test:benchmark`) must time real work in a `b.Loop` and fail when results are
   wrong, not just log a warning: `BenchmarkSearch` fails below a recall@10 floor, and
   `BenchmarkSnapshot` when int8 isn't stored as int8. Query with vectors that aren't in the index.
+- The engine benchmarks run on synthetic 256-d vectors unless `GOVEC_BENCH_DATA` names a
+  directory written by govec-bench's `task data:export` (DBpedia text embeddings, 1536-d, with
+  an exact answer key). Measure performance work on that data: at 1536 dimensions distance is
+  most of a search, so a change's gain on synthetic data doesn't carry over in size. The
+  dataset's name leads every benchmark name, so results on different data never line up in
+  benchstat.
 
 ## Traps
 
