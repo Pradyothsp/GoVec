@@ -28,8 +28,11 @@ func (s *MmapStore) Sync() error { return errNotSupported }
 // Close is a stub.
 func (s *MmapStore) Close() error { return nil }
 
-// Madvise is a stub.
-func (s *MmapStore) Madvise(_ int) error { return errNotSupported }
+// SetAccessPattern is a stub.
+func (s *MmapStore) SetAccessPattern(_ AccessPattern) error { return errNotSupported }
+
+// AccessPattern returns AccessNormal.
+func (s *MmapStore) AccessPattern() AccessPattern { return AccessNormal }
 
 // Count returns 0.
 func (s *MmapStore) Count() uint64 { return 0 }

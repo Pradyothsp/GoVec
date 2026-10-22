@@ -19,6 +19,10 @@ import (
 // be simulated, but whether the directory was synced can be.
 var syncDirHook = syncDir
 
+// madviseHook is unix.Madvise, replaced in tests to observe the advice given:
+// its effect on the page cache isn't visible from a test.
+var madviseHook = unix.Madvise
+
 // mmapChunk represents one pre-allocated, memory-mapped chunk file.
 type mmapChunk struct {
 	data []byte // mmap-backed slice; len == ChunkFileSize
@@ -42,6 +46,10 @@ type MmapStore struct {
 	mu     sync.RWMutex
 	chunks []*mmapChunk
 	count  atomic.Uint64 // high-water mark: max(id+1) across all Put calls
+
+	// access is the read pattern given to every mapped chunk, kept so a chunk
+	// mapped later gets it too: madvise applies per mapping. Guarded by mu.
+	access AccessPattern
 }
 
 // NewMmapStore opens or creates a chunked mmap store at dir.
@@ -230,6 +238,12 @@ func (s *MmapStore) newChunk(idx int) (*mmapChunk, error) {
 		s.writeHeader(data)
 	}
 
+	if err := s.advise(data); err != nil {
+		_ = unix.Munmap(data) //nolint:errcheck // best-effort cleanup
+		_ = f.Close()         //nolint:errcheck // best-effort cleanup
+		return nil, fmt.Errorf("mmap_store: advise chunk %d: %w", idx, err)
+	}
+
 	return &mmapChunk{data: data, f: f}, nil
 }
 
@@ -368,18 +382,40 @@ func (s *MmapStore) Sync() error {
 	return nil
 }
 
-// Madvise applies an madvise hint to all mapped chunks.
-// Use unix.MADV_SEQUENTIAL for brute-force scan, unix.MADV_RANDOM for HNSW.
-func (s *MmapStore) Madvise(advice int) error {
+// SetAccessPattern tells the OS how the store will be read: now for every
+// mapped chunk, and later for each new one.
+func (s *MmapStore) SetAccessPattern(p AccessPattern) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.access = p
+
+	for i, chunk := range s.chunks {
+		if err := s.advise(chunk.data); err != nil {
+			return fmt.Errorf("mmap_store: advise chunk %d: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+// AccessPattern returns the read pattern the store gives the OS.
+func (s *MmapStore) AccessPattern() AccessPattern {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for i, chunk := range s.chunks {
-		if err := unix.Madvise(chunk.data, advice); err != nil {
-			return fmt.Errorf("mmap_store: madvise chunk %d: %w", i, err)
-		}
+	return s.access
+}
+
+// advise gives one mapping the store's read pattern.
+// PRECONDITION: s.mu is held by caller.
+func (s *MmapStore) advise(data []byte) error {
+	advice := unix.MADV_NORMAL
+	if s.access == AccessRandom {
+		advice = unix.MADV_RANDOM
 	}
-	return nil
+
+	return madviseHook(data, advice)
 }
 
 // Close unmaps all chunks and closes the underlying files.

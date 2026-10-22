@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 // testDims is the width of every test vector: 4 float32s, 16 bytes.
@@ -542,4 +543,34 @@ func TestNewMmapStore_ChunkOfWrongSize_Refused(t *testing.T) {
 	// Assert
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "chunk_1.vec is")
+}
+
+// madvise applies per mapping, so the read pattern must reach the chunks
+// mapped already and every chunk mapped after it was set.
+func TestMmapStore_SetAccessPattern_ReachesEveryChunk(t *testing.T) {
+	// Arrange
+	s := openStore(t, t.TempDir(), false)
+	t.Cleanup(func() { _ = s.Close() })
+
+	_, err := s.Put(0, vectorBytes(0, false))
+	require.NoError(t, err)
+
+	var advice []int
+	madviseHook = func(b []byte, a int) error {
+		advice = append(advice, a)
+		return unix.Madvise(b, a)
+	}
+
+	t.Cleanup(func() { madviseHook = unix.Madvise })
+
+	chunk0, _ := slots(testDims * 4)
+
+	// Act
+	require.NoError(t, s.SetAccessPattern(AccessRandom))
+	_, err = s.Put(uint32(chunk0), vectorBytes(uint32(chunk0), false))
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, []int{unix.MADV_RANDOM, unix.MADV_RANDOM}, advice, "the existing chunk, then the new one")
+	assert.Equal(t, AccessRandom, s.AccessPattern())
 }
