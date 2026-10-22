@@ -90,6 +90,21 @@ func NewMmapStore(dir string, dims int, isInt8 bool) (*MmapStore, error) {
 		}
 
 		s.chunks = append(s.chunks, chunk)
+
+		// The header first: it names a different chunk size outright, where
+		// the size check below would only report a file of the wrong length.
+		if i == 0 && len(chunk.data) >= headerSize {
+			if err := s.validateHeader(chunk.data); err != nil {
+				_ = s.Close() //nolint:errcheck // best-effort cleanup
+				return nil, fmt.Errorf("mmap_store: header validation failed: %w", err)
+			}
+		}
+
+		// Slots are addressed as if every chunk were ChunkFileSize bytes.
+		if int64(len(chunk.data)) != ChunkFileSize {
+			_ = s.Close() //nolint:errcheck // best-effort cleanup
+			return nil, fmt.Errorf("mmap_store: %s is %d bytes, expected %d", filepath.Base(path), len(chunk.data), ChunkFileSize)
+		}
 	}
 
 	// A chunk missing from the middle means vectors were lost. Opening the
@@ -109,12 +124,6 @@ func NewMmapStore(dir string, dims int, isInt8 bool) (*MmapStore, error) {
 	}
 
 	if len(s.chunks) > 0 {
-		// Validate the header in chunk_0 and restore the count.
-		if err := s.validateHeader(s.chunks[0].data); err != nil {
-			_ = s.Close() //nolint:errcheck // best-effort cleanup
-			return nil, fmt.Errorf("mmap_store: header validation failed: %w", err)
-		}
-
 		savedCount := binary.LittleEndian.Uint64(s.chunks[0].data[headerOffCount:])
 		s.count.Store(savedCount)
 	}
@@ -150,6 +159,15 @@ func (s *MmapStore) validateHeader(data []byte) error {
 		return fmt.Errorf("quantization mismatch: store tag=%d, config tag=%d", tag, expectedTag)
 	}
 
+	stored := binary.LittleEndian.Uint64(data[headerOffChunk:])
+	if stored == 0 {
+		stored = legacyChunkFileSize
+	}
+
+	if stored != uint64(ChunkFileSize) {
+		return fmt.Errorf("chunk size mismatch: store uses %d-byte chunks, this build %d", stored, ChunkFileSize)
+	}
+
 	return nil
 }
 
@@ -164,6 +182,7 @@ func (s *MmapStore) writeHeader(data []byte) {
 		quantTag = quantInt8
 	}
 	data[headerOffQuantTag] = quantTag
+	binary.LittleEndian.PutUint64(data[headerOffChunk:], uint64(ChunkFileSize))
 	// count starts at 0 — already zero from ftruncate-zeroed pages.
 }
 
@@ -307,16 +326,24 @@ func (s *MmapStore) Put(id uint32, data []byte) ([]byte, error) {
 	return dst, nil
 }
 
-// Get returns the mmap-backed byte slice for slot id.
-// Returns nil if the slot is beyond the current count.
+// Get returns the mmap-backed byte slice for slot id, or nil if id is at or
+// past Count. Snapshot loading relies on that to notice lost vectors: Sync
+// saves the count before every snapshot is published, so a valid snapshot
+// only names slots below it. Checking only that the slot's chunk existed, as
+// Get used to, let a slot that was never saved load as a zero vector.
 func (s *MmapStore) Get(id uint32) []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if uint64(id) >= s.count.Load() {
+		return nil
+	}
 
 	chunkIdx, offset := s.idToChunkOffset(id)
 	if chunkIdx >= len(s.chunks) {
 		return nil
 	}
+
 	return s.chunks[chunkIdx].data[offset : offset+s.elemSize]
 }
 

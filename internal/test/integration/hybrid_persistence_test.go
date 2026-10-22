@@ -28,15 +28,22 @@ func TestHybridSearch_SurvivesRestart(t *testing.T) {
 		// sharedStore: the restarted engine opens the mmap store the first one
 		// wrote, as a server does; a snapshot in mmap mode holds no vectors.
 		sharedStore bool
-		restart     func(t *testing.T, before, after index.FileEngine, dir string)
+		// restart starts the second engine with start, only once the first is
+		// done writing, as a restarted server opens the store after the old
+		// process stopped: a store reads its slot count when it opens.
+		restart func(t *testing.T, before index.FileEngine, start func() index.FileEngine, dir string) index.FileEngine
 	}{
-		{"from_snapshot", true, func(t *testing.T, before, after index.FileEngine, dir string) {
+		{"from_snapshot", true, func(t *testing.T, before index.FileEngine, start func() index.FileEngine, dir string) index.FileEngine {
 			snapPath := filepath.Join(dir, "snapshot.bin")
 			require.NoError(t, before.SaveToFile(ctx, snapPath))
+			after := start()
 			require.NoError(t, after.LoadFromFile(ctx, snapPath))
+			return after
 		}},
-		{"from_wal", false, func(t *testing.T, _, after index.FileEngine, dir string) {
+		{"from_wal", false, func(t *testing.T, _ index.FileEngine, start func() index.FileEngine, dir string) index.FileEngine {
+			after := start()
 			require.NoError(t, after.ReplayWAL(filepath.Join(dir, "before.wal")))
+			return after
 		}},
 	}
 
@@ -78,10 +85,10 @@ func TestHybridSearch_SurvivesRestart(t *testing.T) {
 				if r.sharedStore {
 					afterStore = "mmap"
 				}
-				after := newEngine("after.wal", afterStore)
+				start := func() index.FileEngine { return newEngine("after.wal", afterStore) }
 
 				// Act
-				r.restart(t, before, after, dir)
+				after := r.restart(t, before, start, dir)
 				results, err := after.Search(ctx, []float32{1, 0, 0}, sparseQuery, 2, nil)
 
 				// Assert

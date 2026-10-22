@@ -16,6 +16,7 @@ package storage
 //
 //	magic "GOVECMM0" (8 bytes) | version (uint32) | bytes per vector (uint32)
 //	| quantization (uint8: 0 float32, 1 int8) | ... | slot count (uint64, at 20)
+//	| chunk size (uint64, at 28; 0 in stores written before it was recorded)
 
 const (
 	headerSize  = 4096       // bytes reserved at the start of every chunk for the header
@@ -26,6 +27,7 @@ const (
 	headerOffElemSize = 12 // uint32
 	headerOffQuantTag = 16 // uint8  (0=float32, 1=int8)
 	headerOffCount    = 20 // uint64 (total vectors ever Put; only in chunk_0)
+	headerOffChunk    = 28 // uint64 (ChunkFileSize; only in chunk_0)
 
 	headerVersion = uint32(1)
 	quantFloat32  = uint8(0)
@@ -33,7 +35,11 @@ const (
 )
 
 // ChunkFileSize is the size in bytes pre-allocated per chunk file. Slots are
-// addressed from it, so it is part of the format too, but the header doesn't
-// record it yet: a store reopened with a different value would be misread.
-// It is a variable only so tests can use smaller chunks.
+// addressed from it, so it is part of the format too: the header records it,
+// and a store written with a different size won't open. It is a variable only
+// so tests can use smaller chunks.
 var ChunkFileSize = int64(1 << 30) // 1 GiB
+
+// legacyChunkFileSize is the chunk size of a store whose header predates the
+// chunk-size field (it reads 0 there). 1 GiB is the only size ever shipped.
+const legacyChunkFileSize = 1 << 30

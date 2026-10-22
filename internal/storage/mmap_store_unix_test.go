@@ -142,21 +142,40 @@ func TestMmapStore_Count_IsHighWaterMark(t *testing.T) {
 	assert.Equal(t, uint64(11), s.Count())
 }
 
-func TestMmapStore_Get_BeyondTheChunks_IsNil(t *testing.T) {
-	// Arrange
-	s := openStore(t, t.TempDir(), false)
-	t.Cleanup(func() { _ = s.Close() })
-
-	_, err := s.Put(0, vectorBytes(0, false))
-	require.NoError(t, err)
-
+// Get answers for slots below the count, the slots ever handed out, and nil
+// at or past it: snapshot loading relies on nil to notice lost vectors.
+func TestMmapStore_Get(t *testing.T) {
 	_, later := slots(testDims * 4)
 
-	// Act
-	got := s.Get(uint32(10 * later))
+	tests := []struct {
+		name string
+		id   uint32
+		want []byte
+	}{
+		{name: "a written slot", id: 2, want: vectorBytes(2, false)},
+		{name: "an unwritten slot below the count reads as zeros", id: 1, want: make([]byte, testDims*4)},
+		{name: "the count itself, inside an existing chunk", id: 3, want: nil},
+		{name: "past every chunk", id: uint32(10 * later), want: nil},
+	}
 
-	// Assert
-	assert.Nil(t, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := openStore(t, t.TempDir(), false)
+			t.Cleanup(func() { _ = s.Close() })
+
+			for _, id := range []uint32{0, 2} {
+				_, err := s.Put(id, vectorBytes(id, false))
+				require.NoError(t, err)
+			}
+
+			// Act
+			got := s.Get(tt.id)
+
+			// Assert
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 // Under mmap the snapshot keeps only slot numbers, so a restart must find
@@ -435,4 +454,92 @@ func TestNewMmapStore_MissingChunk_RefusedAndLaterChunksKept(t *testing.T) {
 	after, err := os.ReadFile(lastChunk)
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
+}
+
+// withChunkFileSize sets ChunkFileSize for one test and puts it back after.
+func withChunkFileSize(t *testing.T, size int64) {
+	t.Helper()
+
+	old := ChunkFileSize
+	ChunkFileSize = size
+	t.Cleanup(func() { ChunkFileSize = old })
+}
+
+// Slots are addressed from the chunk size, so a store written with one size
+// and opened with another would read every later vector from the wrong place.
+func TestNewMmapStore_DifferentChunkSize_Refused(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	s := openStore(t, dir, false)
+
+	_, err := s.Put(0, vectorBytes(0, false))
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+
+	withChunkFileSize(t, 2*ChunkFileSize)
+
+	// Act
+	_, err = NewMmapStore(dir, testDims, false)
+
+	// Assert
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "chunk size mismatch")
+}
+
+// Stores written before the header recorded the chunk size hold 0 there, and
+// were all written with 1 GiB chunks.
+func TestValidateHeader_NoRecordedChunkSize_ReadAsOneGiB(t *testing.T) {
+	tests := []struct {
+		name      string
+		chunkSize int64
+		wantErr   bool
+	}{
+		{name: "this build uses 1 GiB", chunkSize: 1 << 30},
+		{name: "this build uses another size", chunkSize: 1 << 16, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			withChunkFileSize(t, tt.chunkSize)
+
+			s := &MmapStore{elemSize: testDims * 4}
+			header := make([]byte, headerSize)
+			s.writeHeader(header)
+			binary.LittleEndian.PutUint64(header[headerOffChunk:], 0)
+
+			// Act
+			err := s.validateHeader(header)
+
+			// Assert
+			if tt.wantErr {
+				assert.ErrorContains(t, err, "chunk size mismatch")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestNewMmapStore_ChunkOfWrongSize_Refused(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	s := openStore(t, dir, false)
+
+	chunk0, _ := slots(testDims * 4)
+	for _, id := range []uint32{0, uint32(chunk0)} {
+		_, err := s.Put(id, vectorBytes(id, false))
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, s.Sync())
+	require.NoError(t, s.Close())
+	require.NoError(t, os.Truncate(filepath.Join(dir, "chunk_1.vec"), ChunkFileSize/2))
+
+	// Act
+	_, err := NewMmapStore(dir, testDims, false)
+
+	// Assert
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "chunk_1.vec is")
 }
