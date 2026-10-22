@@ -1,12 +1,10 @@
 package hnsw
 
-import "cmp"
-
 // Analyzer is a struct that holds a graph and provides
 // methods for analyzing it. It offers no compatibility guarantee
 // as the methods of measuring the graph's health with change
 // with the implementation.
-type Analyzer[K cmp.Ordered, V VectorType] struct {
+type Analyzer[K Key, V VectorType] struct {
 	Graph *Graph[K, V]
 }
 

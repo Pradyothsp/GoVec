@@ -19,21 +19,21 @@ import (
 type VectorType = metric.VectorType
 
 // Node is a node in the graph.
-// K is the key type (must be comparable/ordered, e.g., uint32, int, string).
+// K is the key type, a non-negative integer (see Key).
 // V is the vector type (must satisfy VectorType constraint: []float32 or []int8).
-type Node[K cmp.Ordered, V VectorType] struct {
+type Node[K Key, V VectorType] struct {
 	Key   K
 	Value V // Generic vector type
 }
 
 // MakeNode creates a new Node with the given key and vector.
-func MakeNode[K cmp.Ordered, V VectorType](key K, vec V) Node[K, V] {
+func MakeNode[K Key, V VectorType](key K, vec V) Node[K, V] {
 	return Node[K, V]{Key: key, Value: vec}
 }
 
 // layerNode is an internal representation of a node within a specific layer of the HNSW graph.
 // It embeds a Node, adding layer-specific details like its neighbor list.
-type layerNode[K cmp.Ordered, V VectorType] struct {
+type layerNode[K Key, V VectorType] struct {
 	Node[K, V]
 
 	// neighbors stores the direct neighbors of this node within the same layer,
@@ -167,7 +167,7 @@ func (n *layerNode[K, V]) addNeighbor(newNode *layerNode[K, V], m int, dist dist
 
 // searchCandidate represents a node considered during the HNSW search process,
 // paired with its calculated distance to the query vector.
-type searchCandidate[K cmp.Ordered, V VectorType] struct {
+type searchCandidate[K Key, V VectorType] struct {
 	node *layerNode[K, V]
 	dist float32
 }
@@ -200,7 +200,7 @@ func (s searchCandidate[K, V]) Less(o searchCandidate[K, V]) bool {
 // nothing to select from. Note this can still return fewer than m even when
 // there are m or more candidates: the heuristic has no backfill step, so
 // highly redundant candidate sets can legitimately prune below m.
-func selectNeighborsHeuristic[K cmp.Ordered, V VectorType](candidates []searchCandidate[K, V], m int, dist distFunc[V]) []*layerNode[K, V] {
+func selectNeighborsHeuristic[K Key, V VectorType](candidates []searchCandidate[K, V], m int, dist distFunc[V]) []*layerNode[K, V] {
 	if len(candidates) < m {
 		selected := make([]*layerNode[K, V], len(candidates))
 		for i, c := range candidates {
@@ -259,16 +259,10 @@ func (n *layerNode[K, V]) search(
 	// nil means no filter (all nodes qualify). An empty map means no nodes qualify.
 	// Non-matching nodes are still explored for graph connectivity.
 	allowlist map[K]struct{},
-	// visited is a caller-supplied, pre-cleared scratch map for dedup-tracking
-	// nodes seen during this call. nil means "allocate a private one internally"
-	// -- required for Graph.search() (the query path), where concurrent calls
-	// share the graph under an RLock and can't safely share a map. Graph.Add()
-	// (the insert path, always under an exclusive Lock, never concurrent with
-	// itself) instead passes a single reused-and-cleared map across every
-	// layer/node it processes, avoiding a fresh map allocation + incremental
-	// bucket growth on every call -- the actual cost this parameter exists to
-	// remove.
-	visited map[K]bool,
+	// visited tracks the nodes this call has reached. search resets it first,
+	// so one set serves every layer of a query or insert. It must be private
+	// to the calling goroutine: take it from Graph.acquireVisited.
+	visited *visitedSet,
 ) []searchCandidate[K, V] {
 	// resultCap is the breadth exploration actually operates at -- matches
 	// hnswlib's searchBaseLayerST exactly: the result/frontier are bounded by
@@ -304,12 +298,9 @@ func (n *layerNode[K, V]) search(
 	result := heap.MaxHeap[searchCandidate[K, V]]{}
 	result.Init(make([]searchCandidate[K, V], 0, resultCap))
 
-	// visited tracks nodes already processed to avoid redundant work and loops.
-	// nil means the caller didn't supply a reusable scratch map -- allocate a
-	// private one (see the visited parameter's doc comment above).
-	if visited == nil {
-		visited = make(map[K]bool)
-	}
+	// A key can sit in several layers, so a mark left by the layer above
+	// would wrongly skip it here.
+	visited.reset()
 
 	// Start with the initial node in the result set only if it passes the allowlist.
 	// It is always in candidates so its neighbors are explored regardless.
@@ -318,7 +309,7 @@ func (n *layerNode[K, V]) search(
 	} else if _, ok := allowlist[n.Key]; ok {
 		result.Push(candidates.Min())
 	}
-	visited[n.Key] = true
+	visited.visit(int(n.Key))
 
 	for candidates.Len() > 0 {
 		// Canonical SEARCH-LAYER termination (Malkov & Yashunin, Algorithm 2):
@@ -346,10 +337,9 @@ func (n *layerNode[K, V]) search(
 		// membership among the tied candidates instead of a fixed winner.
 		for _, neighbor := range current.neighbors {
 			neighborID := neighbor.Key
-			if visited[neighborID] {
+			if !visited.visit(int(neighborID)) {
 				continue
 			}
-			visited[neighborID] = true
 
 			dist := distance(neighbor.Value, neighbor.precomputed, target, targetCache)
 
@@ -478,7 +468,7 @@ func (n *layerNode[K, V]) isolate(m int, dist distFunc[V]) {
 
 // layer represents a single layer within the HNSW graph, holding a collection of nodes.
 // Nodes in higher layers are always a subset of nodes in lower layers.
-type layer[K cmp.Ordered, V VectorType] struct {
+type layer[K Key, V VectorType] struct {
 	// nodes is a map of node IDs to the actual layerNode instances within this layer.
 	// This map is exported for compatibility with encoding/gob for persistence.
 	nodes map[K]*layerNode[K, V]
@@ -571,9 +561,9 @@ func (c Config) withDefaults() Config {
 
 // Graph is a Hierarchical Navigable Small World graph.
 // Build one with NewGraph; set Rng before adding nodes, if at all.
-// K is cmp.Ordered instead of of comparable so that they can be sorted.
+// K is an integer key; see Key.
 // V is the vector type (must satisfy VectorType constraint: []float32 or []int8).
-type Graph[K cmp.Ordered, V VectorType] struct {
+type Graph[K Key, V VectorType] struct {
 	// Metric is how the graph compares vectors. Distance is required. The
 	// optional pairs are used when set: Precompute/CachedDistance caches a
 	// value per node (layerNode.precomputed) and compares with it, and
@@ -594,31 +584,10 @@ type Graph[K cmp.Ordered, V VectorType] struct {
 	// layers is a slice of layers in the graph.
 	layers []*layer[K, V]
 
-	// insertVisited is a reused scratch map for layerNode.search()'s visited
-	// tracking during Add(), cleared and passed down instead of letting
-	// search() allocate a fresh map on every layer/node it processes. Safe to
-	// share across calls (unlike a per-node tag) because Add() always runs
-	// under the caller's exclusive lock -- never concurrently with itself or
-	// with a Search(). Left nil until Add()'s first call; Search() never
-	// touches this field, since concurrent Search() calls (an RLock-permitted
-	// pattern) can't safely share one map -- see visitedScratch's doc comment.
-	insertVisited map[K]bool
-}
-
-// visitedScratch returns g.insertVisited, lazily allocating it on first use
-// and clearing it (not reallocating) on every later call -- the map's
-// backing bucket array is grown once and then reused for the graph's whole
-// lifetime, which is the actual allocation/rehashing cost this exists to
-// remove from Add()'s hot path. Only call this from Add() or its helpers,
-// which run under an exclusive lock; never from Graph.search() (the query
-// path), which must remain safe under concurrent RLock-held calls.
-func (g *Graph[K, V]) visitedScratch() map[K]bool {
-	if g.insertVisited == nil {
-		g.insertVisited = make(map[K]bool)
-		return g.insertVisited
-	}
-	clear(g.insertVisited)
-	return g.insertVisited
+	// visitedPool holds *visitedSet for searches and inserts to reuse, so a
+	// traversal allocates nothing once the pool has warmed up. See
+	// acquireVisited.
+	visitedPool sync.Pool
 }
 
 // distFunc computes the distance between two vectors, given each one's
@@ -742,7 +711,7 @@ func defaultRand() *rand.Rand {
 // and searched as cfg says, with this package's defaults for its zero fields.
 // K is the key type (e.g., uint32).
 // V is the vector type (e.g., []float32, []int8).
-func NewGraph[K cmp.Ordered, V VectorType](m metric.Metric[V], cfg Config) *Graph[K, V] {
+func NewGraph[K Key, V VectorType](m metric.Metric[V], cfg Config) *Graph[K, V] {
 	return &Graph[K, V]{
 		Metric: m,
 		Config: cfg.withDefaults(),
@@ -888,18 +857,12 @@ func (g *Graph[K, V]) Add(nodes ...Node[K, V]) {
 		return
 	}
 
-	// pool is created once per Add() call and reused across every round --
-	// safe because addRound's barrier guarantees the previous round's
-	// goroutine using a given slot has fully returned before the next
-	// round's goroutine for that same slot starts (see visitedScratchPool's
-	// doc comment).
-	pool := newVisitedScratchPool[K](workers)
 	for start := 0; start < len(nodes); start += workers {
 		end := start + workers
 		if end > len(nodes) {
 			end = len(nodes)
 		}
-		g.addRound(nodes[start:end], efConstruction, distFn, pool)
+		g.addRound(nodes[start:end], efConstruction, distFn)
 	}
 }
 
@@ -1021,12 +984,15 @@ func (g *Graph[K, V]) applyLive(
 		panic("(*Graph).Metric.Distance must be set before adding nodes")
 	}
 
+	visited := g.acquireVisited()
+	defer g.releaseVisited(visited)
+
 	// If the current layer is at or below the node's insertLevel, the node
 	// actually connects here: find a real candidate pool, bounded by
 	// EfConstruction (not M) -- selectNeighborsHeuristic below needs a wide
 	// pool to choose diverse connections from, not just the M closest.
 	if insertLevel >= i {
-		candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, g.visitedScratch())
+		candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, visited)
 		if len(candidatePool) == 0 {
 			// This should ideally not happen as the searchPoint itself should be in the result set.
 			panic("search returned no nodes")
@@ -1073,7 +1039,7 @@ func (g *Graph[K, V]) applyLive(
 	// code ran the full EfConstruction-breadth candidate search on
 	// every pass-through layer too -- pure wasted insert cost, worse
 	// the higher EfConstruction or the taller the graph.
-	found := searchPoint.search(1, 1, vec, distFn, vecCache, nil, g.visitedScratch())
+	found := searchPoint.search(1, 1, vec, distFn, vecCache, nil, visited)
 	if len(found) == 0 {
 		return ptr(searchPoint.Key)
 	}
@@ -1102,7 +1068,7 @@ const (
 // by applyInsert. newNode (stepBecomeEntry/stepConnect only) is a freshly
 // allocated *layerNode, private to this plan until applyInsert publishes it
 // into the graph -- no other goroutine can observe or mutate it before then.
-type planStep[K cmp.Ordered, V VectorType] struct {
+type planStep[K Key, V VectorType] struct {
 	layerIdx          int
 	kind              planStepKind
 	newNode           *layerNode[K, V]   // stepBecomeEntry, stepConnect
@@ -1122,43 +1088,11 @@ type planStep[K cmp.Ordered, V VectorType] struct {
 // loss. applyInsert re-checks emptiness at Apply time and falls back to a
 // live, single-layer redo (via applyLive) for every claim after the first;
 // see applyInsert's doc comment.
-type insertPlan[K cmp.Ordered, V VectorType] struct {
+type insertPlan[K Key, V VectorType] struct {
 	node        Node[K, V]
 	vecCache    float64
 	insertLevel int
 	steps       []planStep[K, V] // top-down: highest layer first
-}
-
-// visitedScratchPool hands each concurrent Prepare goroutine within one
-// addRound call its own scratch map for layerNode.search()'s visited
-// tracking -- g.insertVisited (the single shared map addSerial/applyLive
-// use) is only safe because Add() never previously ran concurrently with
-// itself; multiple Prepare goroutines sharing one map would both race and
-// corrupt each other's traversal. Sized once per Add() call (to
-// resolveParallelism's worker count) and reused across every round within
-// that call: safe because addRound's sync.WaitGroup barrier guarantees the
-// previous round's goroutine using a given slot has fully returned before
-// the next round's goroutine for that same slot starts.
-type visitedScratchPool[K cmp.Ordered] struct {
-	maps []map[K]bool
-}
-
-// newVisitedScratchPool allocates size empty maps, one per concurrent slot.
-func newVisitedScratchPool[K cmp.Ordered](size int) *visitedScratchPool[K] {
-	maps := make([]map[K]bool, size)
-	for i := range maps {
-		maps[i] = make(map[K]bool)
-	}
-	return &visitedScratchPool[K]{maps: maps}
-}
-
-// forSlot clears and returns the map for the given slot -- callers must not
-// retain it past the current prepareInsert call, and no two goroutines may
-// ever call forSlot with the same slot concurrently (see the pool's own doc
-// comment for why that's guaranteed).
-func (p *visitedScratchPool[K]) forSlot(slot int) map[K]bool {
-	clear(p.maps[slot])
-	return p.maps[slot]
 }
 
 // prepareInsert computes node's full top-down insert plan by walking the
@@ -1166,22 +1100,17 @@ func (p *visitedScratchPool[K]) forSlot(slot int) map[K]bool {
 // would perform (layer.nodes writes, addNeighbor calls, Delete) is replaced
 // here with plan-step construction instead. Safe to call concurrently with
 // other prepareInsert calls for the same round -- each only reads
-// g.layers/layer.nodes/layerNode.neighbors/.Value/.precomputed/.Key, using
-// its own caller-supplied visited scratch map (never g.insertVisited, which
-// is reserved for the always-serial addSerial/applyLive paths).
-//
-// visited is cleared before each layer's search call, not just once at the
-// top -- matching g.visitedScratch()'s per-call-fresh semantics exactly
-// (see that method's doc comment): a node key can legitimately appear in
-// more than one layer (higher layers are subsets of lower ones), so
-// carrying visited-marks across layers would incorrectly suppress
-// exploration in a later layer's unrelated traversal.
+// g.layers/layer.nodes/layerNode.neighbors/.Value/.precomputed/.Key, and
+// takes its own visited set from the pool.
 func (g *Graph[K, V]) prepareInsert(
 	node Node[K, V], insertLevel int, vecCache float64,
-	efConstruction int, distFn distFunc[V], visited map[K]bool,
+	efConstruction int, distFn distFunc[V],
 ) *insertPlan[K, V] {
 	key := node.Key
 	vec := node.Value
+
+	visited := g.acquireVisited()
+	defer g.releaseVisited(visited)
 
 	plan := &insertPlan[K, V]{
 		node:        node,
@@ -1244,7 +1173,6 @@ func (g *Graph[K, V]) prepareInsert(
 		}
 
 		if insertLevel >= i {
-			clear(visited)
 			candidatePool := searchPoint.search(efConstruction, efConstruction, vec, distFn, vecCache, nil, visited)
 			if len(candidatePool) == 0 {
 				panic("search returned no nodes")
@@ -1266,7 +1194,6 @@ func (g *Graph[K, V]) prepareInsert(
 			})
 			elevator = &newElevator
 		} else {
-			clear(visited)
 			found := searchPoint.search(1, 1, vec, distFn, vecCache, nil, visited)
 			var newElevator K
 			if len(found) == 0 {
@@ -1369,7 +1296,7 @@ func (g *Graph[K, V]) applyInsert(plan *insertPlan[K, V], efConstruction int, di
 // invalidate another round-mate's already-computed plan. See
 // insertPlan's doc comment for why plain new inserts don't have this
 // problem.
-func (g *Graph[K, V]) addRound(nodes []Node[K, V], efConstruction int, distFn distFunc[V], pool *visitedScratchPool[K]) {
+func (g *Graph[K, V]) addRound(nodes []Node[K, V], efConstruction int, distFn distFunc[V]) {
 	n := len(nodes)
 	insertLevels := make([]int, n)
 	vecCaches := make([]float64, n)
@@ -1407,7 +1334,7 @@ func (g *Graph[K, V]) addRound(nodes []Node[K, V], efConstruction int, distFn di
 	for slot, idx := range parallelIdx {
 		go func(slot, idx int) {
 			defer wg.Done()
-			plans[slot] = g.prepareInsert(nodes[idx], insertLevels[idx], vecCaches[idx], efConstruction, distFn, pool.forSlot(slot))
+			plans[slot] = g.prepareInsert(nodes[idx], insertLevels[idx], vecCaches[idx], efConstruction, distFn)
 		}(slot, idx)
 	}
 	wg.Wait() // The barrier: nothing below runs until every Prepare goroutine above has returned.
@@ -1441,7 +1368,7 @@ func (h *Graph[K, V]) SearchWithDistance(near V, k int, allowlist map[K]struct{}
 }
 
 // SearchResult represents a single result from a nearest neighbor search.
-type SearchResult[K cmp.Ordered, V VectorType] struct {
+type SearchResult[K Key, V VectorType] struct {
 	Node[K, V]
 	Distance float32
 }
@@ -1470,6 +1397,9 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 
 	var elevator *K // Key of the node that serves as the entry point to the next lower layer.
 
+	visited := h.acquireVisited()
+	defer h.releaseVisited(visited)
+
 	// Traverse the graph from the highest layer down to the base layer (0).
 	// In higher layers, the search is primarily to find a good starting point (elevator)
 	// for the next lower layer. In the base layer, the full search for 'k' neighbors is performed.
@@ -1484,7 +1414,7 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		// For layers above the base layer, perform a limited search (k=1) to find the best
 		// entry point for the layer below.
 		if layerIdx > 0 {
-			nodes := searchPoint.search(1, efSearch, near, distFn, nearCache, nil, nil)
+			nodes := searchPoint.search(1, efSearch, near, distFn, nearCache, nil, visited)
 			if len(nodes) == 0 {
 				// This implies an issue in graph construction or an empty layer.
 				// For robustness, if no nodes found, try to use the current searchPoint as elevator.
@@ -1496,7 +1426,7 @@ func (h *Graph[K, V]) search(near V, k int, allowlist map[K]struct{}, efSearch i
 		}
 
 		// At the base layer (layerIdx == 0), perform the full search for 'k' nearest neighbors.
-		nodes := searchPoint.search(k, efSearch, near, distFn, nearCache, allowlist, nil)
+		nodes := searchPoint.search(k, efSearch, near, distFn, nearCache, allowlist, visited)
 		out := make([]SearchResult[K, V], 0, len(nodes))
 
 		for _, node := range nodes {
@@ -1545,14 +1475,19 @@ func (h *Graph[K, V]) Delete(key K) bool {
 		if !ok {
 			continue // Node not found in this layer, continue to next.
 		}
+
 		delete(layer.nodes, key) // Remove the node from the current layer.
+
 		if len(layer.nodes) == 0 {
 			deleteLayer[i] = struct{}{} // Mark layer as empty.
 		}
+
 		mCurMax := h.M
+
 		if i == 0 {
 			mCurMax = 2 * h.M // base layer allows up to 2*M connections -- see Add's comment
 		}
+
 		node.isolate(mCurMax, dist) // Disconnect the node and replenish its former neighbors.
 		deleted = true
 	}
@@ -1560,10 +1495,12 @@ func (h *Graph[K, V]) Delete(key K) bool {
 	// If any layers became empty, reconstruct the layers slice to remove them.
 	if len(deleteLayer) > 0 {
 		newLayers := make([]*layer[K, V], 0, len(h.layers)-len(deleteLayer))
+
 		for i, layer := range h.layers {
 			if _, ok := deleteLayer[i]; ok {
 				continue // Skip empty layers.
 			}
+
 			newLayers = append(newLayers, layer)
 		}
 
@@ -1587,5 +1524,6 @@ func (h *Graph[K, V]) Lookup(key K) (V, bool) {
 		var zero V
 		return zero, false
 	}
+
 	return node.Value, ok
 }

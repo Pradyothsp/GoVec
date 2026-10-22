@@ -1,7 +1,6 @@
 package hnsw
 
 import (
-	"cmp"
 	"math/rand"
 	"runtime"
 	"sort"
@@ -75,7 +74,7 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, noCacheDist(metric.EuclideanDistanceFloat32), 0, nil, nil)
+	best := entry.search(2, 4, []float32{4}, noCacheDist(metric.EuclideanDistanceFloat32), 0, nil, &visitedSet{})
 
 	// Node 3 (value 3) and node 5 (value 5) are both exactly distance 1 from
 	// the target (4) -- a genuine tie, so either is a valid second-nearest.
@@ -84,7 +83,7 @@ func Test_layerNode_search(t *testing.T) {
 	require.Contains(t, []int{3, 5}, best[1].node.Key, "second slot is a tie between nodes 3 and 5 (both distance 1 from the target)")
 }
 
-func newTestGraph[K cmp.Ordered]() *Graph[K, []float32] {
+func newTestGraph[K Key]() *Graph[K, []float32] {
 	return &Graph[K, []float32]{
 		Metric: metric.Metric[[]float32]{Distance: metric.EuclideanDistanceFloat32},
 		Rng:    rand.New(rand.NewSource(0)),
@@ -604,7 +603,7 @@ func randomVectors(seed int64, n, dim int) [][]float32 {
 // insertLevel didn't warrant presence in some higher layer nonetheless
 // becoming a permanent (if isolated) entry there, breaking exactly this
 // property. See prepareInsert's doc comment on the entry()==nil branch.
-func assertLayerSubsetInvariant[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) {
+func assertLayerSubsetInvariant[K Key, V VectorType](t *testing.T, g *Graph[K, V]) {
 	t.Helper()
 	for i := len(g.layers) - 1; i > 0; i-- {
 		upper := g.layers[i]

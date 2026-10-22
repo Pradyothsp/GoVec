@@ -2,7 +2,6 @@ package hnsw
 
 import (
 	"bytes"
-	"cmp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,7 +50,7 @@ func Test_binaryWrite_string(t *testing.T) {
 	require.Empty(t, buf.Bytes())
 }
 
-func verifyGraphNodes[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) {
+func verifyGraphNodes[K Key, V VectorType](t *testing.T, g *Graph[K, V]) {
 	for _, layer := range g.layers {
 		for _, node := range layer.nodes {
 			for _, neighbor := range node.neighbors {
@@ -68,7 +67,7 @@ func verifyGraphNodes[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V])
 }
 
 // requireGraphApproxEquals checks that two graphs are equal.
-func requireGraphApproxEquals[K cmp.Ordered, V VectorType](t *testing.T, g1, g2 *Graph[K, V]) {
+func requireGraphApproxEquals[K Key, V VectorType](t *testing.T, g1, g2 *Graph[K, V]) {
 	require.Equal(t, g1.Len(), g2.Len())
 	a1 := Analyzer[K, V]{g1}
 	a2 := Analyzer[K, V]{g2}
@@ -126,7 +125,7 @@ func requireGraphApproxEquals[K cmp.Ordered, V VectorType](t *testing.T, g1, g2 
 // that gets its vectors from g, as GoVec's snapshot load does from its records.
 // The topology carries no search settings, so the fresh graph is given g's,
 // as the caller of a real load does.
-func roundTripTopology[K cmp.Ordered, V VectorType](t *testing.T, g *Graph[K, V]) *Graph[K, V] {
+func roundTripTopology[K Key, V VectorType](t *testing.T, g *Graph[K, V]) *Graph[K, V] {
 	t.Helper()
 
 	buf := &bytes.Buffer{}
