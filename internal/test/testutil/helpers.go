@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/index"
 	"github.com/Pradyothsp/govec/internal/metric"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // NewTestIndex creates an empty VectorIndex backed by a temp WAL, which
@@ -20,20 +21,20 @@ func NewTestIndex(t testing.TB) *index.VectorIndex[[]float32] {
 // NewTestIndexAt is NewTestIndex snapshotting to snapshotPath.
 func NewTestIndexAt(t testing.TB, snapshotPath string) *index.VectorIndex[[]float32] {
 	t.Helper()
-	wal, err := index.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "test.wal"))
 	if err != nil {
 		t.Fatalf("NewTestIndex: failed to create WAL: %v", err)
 	}
-	t.Cleanup(func() { _ = wal.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = walLog.Close() }) //nolint:errcheck // test cleanup
 
-	return newCosineIndex(t, index.Options[[]float32]{WAL: wal, SnapshotPath: snapshotPath})
+	return newCosineIndex(t, index.Options[[]float32]{WAL: walLog, SnapshotPath: snapshotPath})
 }
 
 // NewIndexOnWAL creates an empty brute-force cosine VectorIndex that logs to
 // wal, or logs nothing when wal is nil, and has no snapshot path.
-func NewIndexOnWAL(t testing.TB, wal *index.WAL) *index.VectorIndex[[]float32] {
+func NewIndexOnWAL(t testing.TB, walLog *wal.Log) *index.VectorIndex[[]float32] {
 	t.Helper()
-	return newCosineIndex(t, index.Options[[]float32]{WAL: wal})
+	return newCosineIndex(t, index.Options[[]float32]{WAL: walLog})
 }
 
 // newCosineIndex builds a brute-force VectorIndex from opts with the cosine

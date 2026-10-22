@@ -1,4 +1,4 @@
-package index
+package wal
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 // of 100 as the bench loads them. They use only WriteEntries and replay, so the
 // same benchmarks measure any entry format.
 //
-//	go test ./internal/index/ -run '^$' -bench BenchmarkWAL -benchtime 3x
+//	go test ./internal/wal/ -run '^$' -bench BenchmarkWAL -benchtime 3x
 
 const (
 	walBenchDims  = 1536
@@ -31,16 +31,16 @@ func quietLogs(b *testing.B) {
 	b.Cleanup(func() { zerolog.SetGlobalLevel(level) })
 }
 
-func walBenchEntries(n int) []*WALEntry {
+func walBenchEntries(n int) []*Entry {
 	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic benchmark data
-	entries := make([]*WALEntry, n)
+	entries := make([]*Entry, n)
 	for i := range entries {
 		vec := make([]float32, walBenchDims)
 		for d := range vec {
 			vec[d] = float32(rng.NormFloat64() * 0.025) // the scale of a unit-length 1536-d embedding
 		}
-		entries[i] = &WALEntry{
-			Action: WALActionInsert,
+		entries[i] = &Entry{
+			Action: ActionInsert,
 			ID:     fmt.Sprintf("doc-%d", i),
 			Vector: vec,
 			Meta:   map[string]any{"source": "dbpedia", "chunk": float64(i % 7)},
@@ -59,7 +59,7 @@ func BenchmarkWALWriteEntries(b *testing.B) {
 	for b.Loop() {
 		b.StopTimer()
 		path := filepath.Join(b.TempDir(), "bench.wal")
-		wal, err := NewWAL(path)
+		wal, err := Open(path)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -91,7 +91,7 @@ func BenchmarkWALReplay(b *testing.B) {
 	quietLogs(b)
 	entries := walBenchEntries(1000)
 	path := filepath.Join(b.TempDir(), "bench.wal")
-	wal, err := NewWAL(path)
+	wal, err := Open(path)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func BenchmarkWALReplay(b *testing.B) {
 
 	for b.Loop() {
 		replayed := 0
-		if err := replayWALFile(path, func(WALEntry) error { replayed++; return nil }); err != nil {
+		if err := Replay(path, func(Entry) error { replayed++; return nil }); err != nil {
 			b.Fatal(err)
 		}
 		if replayed != len(entries) {

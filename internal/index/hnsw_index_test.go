@@ -12,28 +12,29 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/test/fixtures"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 func newTestHNSWIndex(t testing.TB) *HNSWIndex[[]float32] {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "hnsw_test.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "hnsw_test.wal"))
 	if err != nil {
 		t.Fatalf("newTestHNSWIndex: failed to create WAL: %v", err)
 	}
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
-	return NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
+	return NewHNSWIndex(Options[[]float32]{WAL: walLog, Metric: testCosineMetric, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 }
 
 func newTestHNSWIndexWithHybrid(t testing.TB) *HNSWIndex[[]float32] {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "hnsw_hybrid_test.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "hnsw_hybrid_test.wal"))
 	if err != nil {
 		t.Fatalf("newTestHNSWIndexWithHybrid: failed to create WAL: %v", err)
 	}
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
-	return NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, HybridSearch: true, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
+	return NewHNSWIndex(Options[[]float32]{WAL: walLog, Metric: testCosineMetric, HybridSearch: true, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
 }
 
 // What HNSW does differently from brute force is tested here; the rules both
@@ -50,10 +51,10 @@ func TestHNSWIndex_LoadFromFile_KeepsConfiguredEfSearch(t *testing.T) {
 	require.NoError(t, saved.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 	require.NoError(t, saved.SaveToFile(ctx, path))
 
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "loaded.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "loaded.wal"))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
-	loaded := NewHNSWIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 100, EfConstruction: 200})
+	t.Cleanup(func() { _ = walLog.Close() })
+	loaded := NewHNSWIndex(Options[[]float32]{WAL: walLog, Metric: testCosineMetric, MetadataIndex: true}, hnsw.Config{M: 16, EfSearch: 100, EfConstruction: 200})
 
 	// Act
 	err = loaded.LoadFromFile(ctx, path)

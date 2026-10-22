@@ -17,6 +17,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // newRecoveryTarget opens the WAL and engine the way main does, for a config
@@ -32,10 +33,10 @@ func newRecoveryTarget(t *testing.T) (*config.Config, index.Engine) {
 
 func openEngine(t *testing.T, cfg *config.Config) index.Engine {
 	t.Helper()
-	wal, err := index.NewWAL(cfg.Storage.WalPath)
+	walLog, err := wal.Open(cfg.Storage.WalPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
-	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
+	t.Cleanup(func() { _ = walLog.Close() })
+	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, walLog)
 	require.NoError(t, err)
 	return engine
 }
@@ -67,7 +68,7 @@ func TestRecoverySequence(t *testing.T) {
 func TestRunRecovery_NoSnapshot_ReplaysWAL(t *testing.T) {
 	ctx := context.Background()
 	cfg, before := newRecoveryTarget(t)
-	require.NoError(t, before.Insert(ctx, "only-in-wal", []float32{1, 2}, core.SparseVector{}, nil))
+	require.NoError(t, before.Insert(ctx, "only-in-walLog", []float32{1, 2}, core.SparseVector{}, nil))
 
 	after := openEngine(t, cfg)
 	require.NoError(t, runRecovery(cfg, after), "a missing snapshot is a fresh start, not an error")
@@ -79,7 +80,7 @@ func TestRunRecovery_NoSnapshot_ReplaysWAL(t *testing.T) {
 func TestRunRecovery_CorruptSnapshot_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	cfg, before := newRecoveryTarget(t)
-	require.NoError(t, before.Insert(ctx, "only-in-wal", []float32{1, 2}, core.SparseVector{}, nil))
+	require.NoError(t, before.Insert(ctx, "only-in-walLog", []float32{1, 2}, core.SparseVector{}, nil))
 	require.NoError(t, os.WriteFile(cfg.Storage.DataPath, []byte("not a snapshot"), 0o600))
 
 	after := openEngine(t, cfg)

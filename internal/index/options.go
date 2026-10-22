@@ -6,6 +6,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // Options is what either engine is built from, besides which engine it is.
@@ -16,7 +17,7 @@ import (
 // for one engine a metadata index assigned and for the other batch settings --
 // so one built without every step quietly ran without part of its config.
 type Options[T metric.VectorType] struct {
-	WAL           *WAL               // nil: writes aren't logged
+	WAL           *wal.Log           // nil: writes aren't logged
 	SnapshotPath  string             // where Flush writes and Recover reads; "" means none
 	Metric        metric.Metric[T]   // how vectors are compared
 	Dimensions    int                // the index's width; 0 learns it from the first insert
@@ -29,14 +30,14 @@ type Options[T metric.VectorType] struct {
 // snapshotting to snapshotPath and keeping vectors in store.
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
-func optionsFrom[T metric.VectorType](cfg config.EngineConfig, wal *WAL, snapshotPath string, store *storage.MmapStore) (Options[T], error) {
+func optionsFrom[T metric.VectorType](cfg config.EngineConfig, walLog *wal.Log, snapshotPath string, store *storage.MmapStore) (Options[T], error) {
 	m, err := metric.Resolve[T](cfg.DistanceMetric)
 	if err != nil {
 		return Options[T]{}, err
 	}
 
 	return Options[T]{
-		WAL:           wal,
+		WAL:           walLog,
 		SnapshotPath:  snapshotPath,
 		Metric:        m,
 		Dimensions:    cfg.Dimensions,

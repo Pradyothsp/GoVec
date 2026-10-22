@@ -51,7 +51,7 @@ func (idx *HNSWIndex[T]) Insert(ctx context.Context, id string, vec []float32, s
 // round-based parallel Prepare (internal/hnsw's addRound) actually kick in;
 // a per-item Add call, one at a time, would never give it a batch to work
 // with. If writing the batch to the WAL fails, no item is applied and the
-// batch aborts entirely — see WAL.WriteEntries for the atomicity this relies on.
+// batch aborts entirely — see wal.Log.WriteEntries for the atomicity this relies on.
 func (idx *HNSWIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertItem) ([]BatchInsertError, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()

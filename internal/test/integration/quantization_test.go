@@ -14,20 +14,21 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // quantEngine builds an engine of indexType storing vectors as quant, logging
 // to the WAL at walPath.
 func quantEngine(t *testing.T, indexType config.IndexType, quant config.Quantization, walPath string) index.FileEngine {
 	t.Helper()
-	wal, err := index.NewWAL(walPath)
+	walLog, err := wal.Open(walPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 	engine, err := index.NewEngine(config.EngineConfig{
 		IndexType:      indexType,
 		Quantization:   quant,
 		DistanceMetric: config.DistanceMetricCosine,
-	}, config.StorageConfig{}, wal)
+	}, config.StorageConfig{}, walLog)
 	require.NoError(t, err)
 	return engine
 }

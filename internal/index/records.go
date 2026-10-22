@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // records is what both engines keep about the vectors they hold, and every
@@ -41,7 +43,7 @@ type records[T metric.VectorType] struct {
 	configuredDimensions int
 
 	mu           sync.RWMutex
-	wal          *WAL
+	wal          *wal.Log
 	snapshotPath string             // "" when the engine has no snapshot
 	encodeFunc   func([]float32) T  // converts input vectors to the stored type
 	vectorStore  *storage.MmapStore // nil when mmap is disabled
@@ -125,7 +127,7 @@ func (r *records[T]) insert(ctx context.Context, id string, vec []float32, spars
 	if err := r.check(vec, sparse, r.dimensions); err != nil {
 		return err
 	}
-	if err := r.wal.WriteEntry(ctx, &WALEntry{Action: WALActionInsert, ID: id, Vector: vec, Sparse: sparse, Meta: meta}); err != nil {
+	if err := r.wal.WriteEntry(ctx, &wal.Entry{Action: wal.ActionInsert, ID: id, Vector: vec, Sparse: sparse, Meta: meta}); err != nil {
 		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return err
 	}
@@ -139,11 +141,11 @@ func (r *records[T]) insert(ctx context.Context, id string, vec []float32, spars
 // logBatch checks each item of a batch insert and writes the ones that pass
 // to the WAL with one fsync, before any is applied. It returns the items to
 // apply and the ones rejected. If the WAL write fails, the caller applies
-// nothing: see WAL.WriteEntries for the atomicity this relies on.
+// nothing: see wal.Log.WriteEntries for the atomicity this relies on.
 // PRECONDITION: r.mu.Lock() held.
 func (r *records[T]) logBatch(ctx context.Context, items []BatchInsertItem) (accepted []BatchInsertItem, failures []BatchInsertError, err error) {
 	accepted = make([]BatchInsertItem, 0, len(items))
-	entries := make([]*WALEntry, 0, len(items))
+	entries := make([]*wal.Entry, 0, len(items))
 	width := r.dimensions
 	for _, item := range items {
 		if err := r.check(item.Vector, item.Sparse, width); err != nil {
@@ -154,7 +156,7 @@ func (r *records[T]) logBatch(ctx context.Context, items []BatchInsertItem) (acc
 			width = len(item.Vector) // the first accepted item sets an empty index's width
 		}
 		accepted = append(accepted, item)
-		entries = append(entries, &WALEntry{Action: WALActionInsert, ID: item.ID, Vector: item.Vector, Sparse: item.Sparse, Meta: item.Meta})
+		entries = append(entries, &wal.Entry{Action: wal.ActionInsert, ID: item.ID, Vector: item.Vector, Sparse: item.Sparse, Meta: item.Meta})
 	}
 
 	if err := r.wal.WriteEntries(ctx, entries); err != nil {
@@ -179,7 +181,7 @@ func (r *records[T]) delete(ctx context.Context, id string, apply func(string) e
 		return false, nil
 	}
 
-	if err := r.wal.WriteEntry(ctx, &WALEntry{Action: WALActionDelete, ID: id}); err != nil {
+	if err := r.wal.WriteEntry(ctx, &wal.Entry{Action: wal.ActionDelete, ID: id}); err != nil {
 		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return false, err
 	}
@@ -191,21 +193,31 @@ func (r *records[T]) delete(ctx context.Context, id string, apply func(string) e
 }
 
 // replay is Engine.ReplayWAL for both engines: each entry is applied with
-// insert or remove, without writing it to the WAL again. See replayWALFile
-// for what counts as a torn write and what stops recovery.
+// insert or remove, without writing it to the WAL again. See wal.Replay for
+// what counts as a torn write and what stops recovery. Deleting an ID that
+// isn't stored is not an error, so replay is idempotent.
 func (r *records[T]) replay(walPath string, insert func(string, []float32, core.SparseVector, map[string]any) error, remove func(string) error) error {
-	return replayWALFile(walPath, func(entry WALEntry) error {
+	return wal.Replay(walPath, func(entry wal.Entry) error {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		switch entry.Action {
-		case WALActionInsert:
+		case wal.ActionInsert:
 			return insert(entry.ID, entry.Vector, entry.Sparse, entry.Meta)
-		case WALActionDelete:
+		case wal.ActionDelete:
 			return ignoreNotFound(remove(entry.ID))
 		default:
 			return fmt.Errorf("unknown WAL action %q", entry.Action)
 		}
 	})
+}
+
+// ignoreNotFound treats deleting a missing ID as success, which keeps WAL
+// replay idempotent.
+func ignoreNotFound(err error) error {
+	if errors.Is(err, core.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // put stores a record, replacing any with the same ID, and keeps the metadata

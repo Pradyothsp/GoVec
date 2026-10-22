@@ -9,6 +9,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // NewEngine creates a new vector engine based on the provided configuration.
@@ -17,7 +18,7 @@ import (
 // EnableMmap is true.
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
-func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, wal *WAL) (FileEngine, error) {
+func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, walLog *wal.Log) (FileEngine, error) {
 	log.Info().
 		Str("index_type", string(engineCfg.IndexType)).
 		Str("quantization", string(engineCfg.Quantization)).
@@ -52,16 +53,16 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 	}
 
 	if engineCfg.Quantization == config.QuantizationScalar {
-		return newEngine[[]int8](engineCfg, wal, storageCfg.DataPath, mmapStore)
+		return newEngine[[]int8](engineCfg, walLog, storageCfg.DataPath, mmapStore)
 	}
-	return newEngine[[]float32](engineCfg, wal, storageCfg.DataPath, mmapStore)
+	return newEngine[[]float32](engineCfg, walLog, storageCfg.DataPath, mmapStore)
 }
 
 // newEngine builds the engine config asks for, storing vectors as T.
 //
 //nolint:gocritic // EngineConfig is passed by value to match existing codebase convention
-func newEngine[T metric.VectorType](cfg config.EngineConfig, wal *WAL, snapshotPath string, mmapStore *storage.MmapStore) (FileEngine, error) {
-	opts, err := optionsFrom[T](cfg, wal, snapshotPath, mmapStore)
+func newEngine[T metric.VectorType](cfg config.EngineConfig, walLog *wal.Log, snapshotPath string, mmapStore *storage.MmapStore) (FileEngine, error) {
+	opts, err := optionsFrom[T](cfg, walLog, snapshotPath, mmapStore)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // A snapshot is one gob stream, written and read as a sequence of small values:
@@ -67,12 +68,12 @@ func (w *snapshotWriter) abort() {
 
 // publish flushes the buffer and makes the snapshot the live one; see
 // publishSnapshot for the ordering that keeps the WAL until then.
-func (w *snapshotWriter) publish(wal *WAL) error {
+func (w *snapshotWriter) publish(walLog *wal.Log) error {
 	if err := w.buf.Flush(); err != nil {
 		w.abort()
 		return err
 	}
-	return publishSnapshot(w.f, w.tmpPath, w.path, wal)
+	return publishSnapshot(w.f, w.tmpPath, w.path, walLog)
 }
 
 // nodeRecord is one node as a snapshot stores it.

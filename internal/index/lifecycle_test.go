@@ -11,20 +11,21 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // openOnDisk opens an engine of indexType on the snapshot and WAL in dir, the
 // way the server does: a second call on the same dir is a restart.
 func openOnDisk(t *testing.T, dir string, indexType config.IndexType) Engine {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(dir, "govec.wal"))
+	walLog, err := wal.Open(filepath.Join(dir, "govec.wal"))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
 	engine, err := NewEngine(
 		config.EngineConfig{IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine},
 		config.StorageConfig{DataPath: filepath.Join(dir, "govec.bin")},
-		wal,
+		walLog,
 	)
 	require.NoError(t, err)
 	return engine

@@ -21,6 +21,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/grpcserver"
 	"github.com/Pradyothsp/govec/internal/index"
 	"github.com/Pradyothsp/govec/internal/release"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // @title           GoVec API
@@ -45,7 +46,7 @@ func main() {
 	debugSrv := startPprofServer(cfg)
 
 	// Initialize WAL
-	wal, err := index.NewWAL(cfg.Storage.WalPath)
+	walLog, err := wal.Open(cfg.Storage.WalPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to open WAL")
 	}
@@ -53,21 +54,21 @@ func main() {
 	log.Info().Str("version", release.Version).Msg("starting server")
 
 	// Create engine via factory
-	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, wal)
+	engine, err := index.NewEngine(cfg.Engine, cfg.Storage, walLog)
 	if err != nil {
-		if closeErr := wal.Close(); closeErr != nil {
+		if closeErr := walLog.Close(); closeErr != nil {
 			log.Error().Err(closeErr).Msg("failed to close WAL after engine creation failure")
 		}
 		log.Fatal().Err(err).Msg("failed to create engine")
 	}
 
 	// Engine and WAL initialized, set up cleanup
-	defer func(wal *index.WAL) {
-		err := wal.Close()
+	defer func(walLog *wal.Log) {
+		err := walLog.Close()
 		if err != nil {
 			log.Error().Err(err).Msg("failed to close WAL")
 		}
-	}(wal)
+	}(walLog)
 
 	// The generated spec carries the static @version annotation; report the running release.
 	swagger.SwaggerInfo.Version = release.Version
@@ -77,7 +78,7 @@ func main() {
 	// RECOVERY SEQUENCE -- before any server starts, so no request (REST or
 	// gRPC) ever sees a partly loaded index.
 	if err := runRecovery(cfg, engine); err != nil {
-		if closeErr := wal.Close(); closeErr != nil {
+		if closeErr := walLog.Close(); closeErr != nil {
 			log.Error().Err(closeErr).Msg("failed to close WAL after recovery failure")
 		}
 		log.Fatal().Err(err).Msg("refusing to start") //nolint:gocritic // exitAfterDefer: WAL is explicitly closed above before fatal exit
@@ -85,7 +86,7 @@ func main() {
 
 	grpcSrv, err := startGRPCServer(cfg, engine)
 	if err != nil {
-		if closeErr := wal.Close(); closeErr != nil {
+		if closeErr := walLog.Close(); closeErr != nil {
 			log.Error().Err(closeErr).Msg("failed to close WAL after gRPC startup failure")
 		}
 		log.Fatal().Err(err).Msg("failed to start gRPC server")

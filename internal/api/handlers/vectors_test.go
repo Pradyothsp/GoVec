@@ -15,6 +15,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
 	"github.com/Pradyothsp/govec/internal/test/testutil"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 func init() {
@@ -122,10 +123,10 @@ func TestVectorRoutes_EngineFailure_Returns500(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: a closed WAL makes every write fail.
-			wal, err := index.NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+			walLog, err := wal.Open(filepath.Join(t.TempDir(), "test.wal"))
 			require.NoError(t, err)
-			idx := testutil.NewIndexOnWAL(t, wal)
-			require.NoError(t, wal.Close())
+			idx := testutil.NewIndexOnWAL(t, walLog)
+			require.NoError(t, walLog.Close())
 
 			// Act
 			rec := serve(newVectorRouter(idx), http.MethodPost, tt.path, tt.body)

@@ -10,6 +10,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // TestHybridSearch_SurvivesRestart checks, for every snapshot format, that a
@@ -46,9 +47,9 @@ func TestHybridSearch_SurvivesRestart(t *testing.T) {
 				dir := t.TempDir()
 				newEngine := func(walName, storeName string) index.FileEngine {
 					t.Helper()
-					wal, err := index.NewWAL(filepath.Join(dir, walName))
+					walLog, err := wal.Open(filepath.Join(dir, walName))
 					require.NoError(t, err)
-					t.Cleanup(func() { _ = wal.Close() })
+					t.Cleanup(func() { _ = walLog.Close() })
 					engine, err := index.NewEngine(
 						config.EngineConfig{
 							Quantization:       config.QuantizationNone,
@@ -58,7 +59,7 @@ func TestHybridSearch_SurvivesRestart(t *testing.T) {
 							EnableHybridSearch: true,
 						},
 						config.StorageConfig{EnableMmap: f.mmap, MmapStorePath: filepath.Join(dir, storeName)},
-						wal,
+						walLog,
 					)
 					require.NoError(t, err)
 					return engine

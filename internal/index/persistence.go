@@ -15,6 +15,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 func init() {
@@ -78,7 +79,7 @@ func ensureParentDir(path string) error {
 //
 // PRECONDITION: the index write lock is held, so no write can land between the
 // snapshot and the truncation.
-func publishSnapshot(f *os.File, tmpPath, path string, wal *WAL) error {
+func publishSnapshot(f *os.File, tmpPath, path string, walLog *wal.Log) error {
 	if err := f.Sync(); err != nil {
 		_ = f.Close()          //nolint:errcheck // best-effort cleanup; sync error takes precedence
 		_ = os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup; sync error takes precedence
@@ -96,10 +97,10 @@ func publishSnapshot(f *os.File, tmpPath, path string, wal *WAL) error {
 		return fmt.Errorf("sync snapshot directory: %w", err)
 	}
 
-	if wal == nil {
+	if walLog == nil {
 		return nil
 	}
-	return wal.Clear()
+	return walLog.Clear()
 }
 
 // syncDir fsyncs a directory, making a rename inside it durable. Windows

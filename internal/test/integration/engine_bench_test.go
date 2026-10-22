@@ -13,6 +13,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // These benchmarks time the engine through its public interface, on every
@@ -99,16 +100,16 @@ func newBenchEngine(b *testing.B, setup benchSetup) index.FileEngine {
 	zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	b.Cleanup(func() { zerolog.SetGlobalLevel(level) })
 
-	wal, err := index.NewWAL(filepath.Join(b.TempDir(), "bench.wal"))
+	walLog, err := wal.Open(filepath.Join(b.TempDir(), "bench.wal"))
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { _ = wal.Close() })
+	b.Cleanup(func() { _ = walLog.Close() })
 	engine, err := index.NewEngine(config.EngineConfig{
 		IndexType:      setup.indexType,
 		Quantization:   setup.quant,
 		DistanceMetric: config.DistanceMetricCosine,
-	}, config.StorageConfig{}, wal)
+	}, config.StorageConfig{}, walLog)
 	if err != nil {
 		b.Fatal(err)
 	}

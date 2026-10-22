@@ -16,6 +16,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // =============================================================================
@@ -24,10 +25,10 @@ import (
 
 // newHNSWEngine creates a fresh HNSW engine backed by a new WAL at dir/test.wal.
 // The caller is responsible for closing the returned WAL.
-func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.FileEngine, *index.WAL) {
+func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.FileEngine, *wal.Log) {
 	t.Helper()
 	walPath := dir + "/test.wal"
-	wal, err := index.NewWAL(walPath)
+	walLog, err := wal.Open(walPath)
 	if err != nil {
 		t.Fatalf("newHNSWEngine: failed to create WAL: %v", err)
 	}
@@ -37,11 +38,11 @@ func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.FileE
 		IndexType:           config.IndexTypeHNSW,
 		EnableMetadataIndex: true,
 	}
-	engine, err := index.NewEngine(cfg, config.StorageConfig{}, wal)
+	engine, err := index.NewEngine(cfg, config.StorageConfig{}, walLog)
 	if err != nil {
 		t.Fatalf("newHNSWEngine: failed to create engine: %v", err)
 	}
-	return engine, wal
+	return engine, walLog
 }
 
 // =============================================================================
@@ -51,7 +52,7 @@ func newHNSWEngine(t testing.TB, dir string, q config.Quantization) (index.FileE
 type hnswSuiteBase struct {
 	suite.Suite
 	engine   index.FileEngine
-	wal      *index.WAL
+	wal      *wal.Log
 	walPath  string
 	snapPath string
 	tmpDir   string
@@ -296,8 +297,8 @@ func (s *hnswSuiteBase) TestHNSW_BatchInsert_LargeAboveThreshold_ViaREST() {
 	gin.SetMode(gin.TestMode)
 
 	dir := s.T().TempDir()
-	engine, wal := newHNSWEngine(s.T(), dir, s.quant)
-	defer wal.Close() //nolint:errcheck // test cleanup
+	engine, walLog := newHNSWEngine(s.T(), dir, s.quant)
+	defer walLog.Close() //nolint:errcheck // test cleanup
 
 	router := api.SetupRouter(engine, "")
 

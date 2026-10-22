@@ -13,6 +13,7 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // The two engines share every rule about what a record is and how it's kept;
@@ -23,11 +24,11 @@ var parityIndexTypes = []config.IndexType{config.IndexTypeBrute, config.IndexTyp
 
 func newParityEngine(t *testing.T, engineCfg config.EngineConfig, storageCfg config.StorageConfig) FileEngine {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "parity.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "parity.wal"))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
-	engine, err := NewEngine(engineCfg, storageCfg, wal)
+	engine, err := NewEngine(engineCfg, storageCfg, walLog)
 	require.NoError(t, err)
 	return engine
 }
@@ -203,7 +204,7 @@ func TestRejectedWrite_NeverReachesTheWAL(t *testing.T) {
 				// Act
 				_ = write(idx) //nolint:errcheck // single inserts are expected to fail
 				restarted, _ := e.open(t)
-				replayErr := restarted.ReplayWAL(r.wal.file.Name())
+				replayErr := restarted.ReplayWAL(r.wal.Path())
 
 				// Assert
 				require.NoError(t, replayErr, "the WAL must replay after a rejected write")
@@ -233,7 +234,7 @@ func TestReset_SurvivesRestart(t *testing.T) {
 			require.NoError(t, idx.Insert(ctx, "new", []float32{0, 1}, core.SparseVector{}, nil))
 			restarted, _ := e.open(t)
 			loadErr := restarted.LoadFromFile(ctx, snapPath)
-			replayErr := restarted.ReplayWAL(r.wal.file.Name())
+			replayErr := restarted.ReplayWAL(r.wal.Path())
 
 			// Assert
 			require.NoError(t, loadErr)
@@ -267,7 +268,7 @@ func TestReset_FailedSnapshot_ChangesNothing(t *testing.T) {
 			// Assert
 			require.Error(t, err)
 			assert.Equal(t, 1, idx.Len(), "a failed reset must not clear memory")
-			info, statErr := os.Stat(r.wal.file.Name())
+			info, statErr := os.Stat(r.wal.Path())
 			require.NoError(t, statErr)
 			assert.Positive(t, info.Size(), "a failed reset must not truncate the WAL")
 		})

@@ -13,6 +13,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // snapshotFormat is one snapshot writer: an engine, with vectors inline or in
@@ -32,11 +33,11 @@ var snapshotFormats = []snapshotFormat{
 
 // startSnapshotEngine opens the WAL at walPath and builds an engine over it.
 // Calling it again with the same paths is a server restart.
-func startSnapshotEngine(t *testing.T, f snapshotFormat, dir, walPath string) (index.FileEngine, *index.WAL) {
+func startSnapshotEngine(t *testing.T, f snapshotFormat, dir, walPath string) (index.FileEngine, *wal.Log) {
 	t.Helper()
-	wal, err := index.NewWAL(walPath)
+	walLog, err := wal.Open(walPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
 	engineCfg := config.EngineConfig{
 		Quantization:   config.QuantizationNone,
@@ -48,9 +49,9 @@ func startSnapshotEngine(t *testing.T, f snapshotFormat, dir, walPath string) (i
 		EnableMmap:    f.mmap,
 		MmapStorePath: filepath.Join(dir, "mmap"),
 	}
-	engine, err := index.NewEngine(engineCfg, storageCfg, wal)
+	engine, err := index.NewEngine(engineCfg, storageCfg, walLog)
 	require.NoError(t, err)
-	return engine, wal
+	return engine, walLog
 }
 
 // TestSaveToFile_FailedSave_KeepsUnsavedWritesRecoverable checks, for every
@@ -75,7 +76,7 @@ func TestSaveToFile_FailedSave_KeepsUnsavedWritesRecoverable(t *testing.T) {
 			snapPath := filepath.Join(dir, "govec_data.bin")
 			walPath := filepath.Join(dir, "govec.wal")
 
-			engine, wal := startSnapshotEngine(t, f, dir, walPath)
+			engine, walLog := startSnapshotEngine(t, f, dir, walPath)
 
 			for i := range savedCount {
 				require.NoError(t, engine.Insert(ctx, fmt.Sprintf("saved-%d", i), []float32{1, float32(i), 0}, core.SparseVector{}, nil))
@@ -91,7 +92,7 @@ func TestSaveToFile_FailedSave_KeepsUnsavedWritesRecoverable(t *testing.T) {
 			require.Error(t, engine.SaveToFile(ctx, snapPath), "the save must fail for this test to mean anything")
 
 			// Restart: the same recovery sequence as cmd/server's runRecovery.
-			require.NoError(t, wal.Close())
+			require.NoError(t, walLog.Close())
 			restarted, _ := startSnapshotEngine(t, f, dir, walPath)
 			require.NoError(t, restarted.LoadFromFile(ctx, snapPath))
 			require.NoError(t, restarted.ReplayWAL(walPath))
@@ -120,7 +121,7 @@ func TestRecovery_WALAlreadyInSnapshot_ReplaysToTheSameState(t *testing.T) {
 			snapPath := filepath.Join(dir, "govec_data.bin")
 			walPath := filepath.Join(dir, "govec.wal")
 
-			engine, wal := startSnapshotEngine(t, f, dir, walPath)
+			engine, walLog := startSnapshotEngine(t, f, dir, walPath)
 
 			require.NoError(t, engine.Insert(ctx, "kept", []float32{1, 0, 0}, core.SparseVector{}, nil))
 			require.NoError(t, engine.Insert(ctx, "updated", []float32{0, 1, 0}, core.SparseVector{}, nil))
@@ -135,7 +136,7 @@ func TestRecovery_WALAlreadyInSnapshot_ReplaysToTheSameState(t *testing.T) {
 			walBeforeSave, err := os.ReadFile(walPath) //nolint:gosec // test temp dir
 			require.NoError(t, err)
 			require.NoError(t, engine.SaveToFile(ctx, snapPath))
-			require.NoError(t, wal.Close())
+			require.NoError(t, walLog.Close())
 			require.NoError(t, os.WriteFile(walPath, walBeforeSave, 0o600))
 
 			restarted, _ := startSnapshotEngine(t, f, dir, walPath)
@@ -178,21 +179,21 @@ func TestRecovery_LearnedDimension_SurvivesRestart(t *testing.T) {
 				IndexType:      indexType,
 			}
 
-			start := func() (index.FileEngine, *index.WAL) {
+			start := func() (index.FileEngine, *wal.Log) {
 				t.Helper()
-				wal, err := index.NewWAL(walPath)
+				walLog, err := wal.Open(walPath)
 				require.NoError(t, err)
-				t.Cleanup(func() { _ = wal.Close() })
-				engine, err := index.NewEngine(engineCfg, config.StorageConfig{}, wal)
+				t.Cleanup(func() { _ = walLog.Close() })
+				engine, err := index.NewEngine(engineCfg, config.StorageConfig{}, walLog)
 				require.NoError(t, err)
-				return engine, wal
+				return engine, walLog
 			}
 
-			engine, wal := start()
+			engine, walLog := start()
 			require.NoError(t, engine.Insert(ctx, "a", []float32{1, 0, 0}, core.SparseVector{}, nil))
 			require.NoError(t, engine.Insert(ctx, "b", []float32{0, 1, 0}, core.SparseVector{}, nil))
 			require.NoError(t, engine.SaveToFile(ctx, snapPath))
-			require.NoError(t, wal.Close())
+			require.NoError(t, walLog.Close())
 
 			restarted, _ := start()
 			require.NoError(t, restarted.LoadFromFile(ctx, snapPath))

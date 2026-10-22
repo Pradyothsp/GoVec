@@ -13,16 +13,21 @@ func putToMmapStore[T any](vs *storage.MmapStore, id uint32, encoded T) (T, erro
 	case []float32:
 		raw := storage.VectorToBytes(v)
 		mmapSlice, err := vs.Put(id, raw)
+
 		if err != nil {
 			return encoded, err
 		}
+
 		return any(storage.BytesToVector[[]float32](mmapSlice)).(T), nil //nolint:errcheck // type assertion is safe: branch only executes when T=[]float32
+
 	case []int8:
 		raw := storage.VectorToBytes(v)
 		mmapSlice, err := vs.Put(id, raw)
+
 		if err != nil {
 			return encoded, err
 		}
+
 		return any(storage.BytesToVector[[]int8](mmapSlice)).(T), nil //nolint:errcheck // type assertion is safe: branch only executes when T=[]int8
 	default:
 		return encoded, fmt.Errorf("mmap: unsupported vector type %T", encoded)

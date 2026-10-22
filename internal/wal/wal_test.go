@@ -1,4 +1,4 @@
-package index
+package wal
 
 import (
 	"context"
@@ -16,27 +16,39 @@ import (
 
 // A nested GOVEC_WAL_PATH must not fail startup just because its directory
 // doesn't exist yet -- the mmap store already creates its own directory.
-func TestNewWAL_CreatesParentDirectories(t *testing.T) {
+func TestOpen_CreatesParentDirectories(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "nested", "deep", "path", "test.wal")
 
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
 	assert.FileExists(t, walPath)
 }
 
-func TestNewWAL_UncreatableParent_ReturnsError(t *testing.T) {
-	_, err := NewWAL(filepath.Join(uncreatableDir(t), "test.wal"))
+// uncreatableDir returns a directory path that can never be created: its
+// parent is a regular file. Unlike "/nonexistent/...", this fails for every
+// user -- including root on a CI runner, who could create /nonexistent.
+func uncreatableDir(t testing.TB) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatalf("uncreatableDir: %v", err)
+	}
+	return filepath.Join(file, "dir")
+}
+
+func TestOpen_UncreatableParent_ReturnsError(t *testing.T) {
+	_, err := Open(filepath.Join(uncreatableDir(t), "test.wal"))
 	assert.Error(t, err)
 }
 
-// readWALEntries reads a WAL back through replay, so tests check what was
+// readEntries reads a WAL back through replay, so tests check what was
 // written rather than how the format spells it.
-func readWALEntries(t *testing.T, path string) []WALEntry {
+func readEntries(t *testing.T, path string) []Entry {
 	t.Helper()
-	var entries []WALEntry
-	require.NoError(t, replayWALFile(path, func(e WALEntry) error {
+	var entries []Entry
+	require.NoError(t, Replay(path, func(e Entry) error {
 		entries = append(entries, e)
 		return nil
 	}))
@@ -47,16 +59,16 @@ func readWALEntries(t *testing.T, path string) []WALEntry {
 func TestWriteEntry_LargeVector_IsCompact(t *testing.T) {
 	// Arrange
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
 	// Act
-	err = wal.WriteEntry(context.Background(), &WALEntry{Action: WALActionInsert, ID: "large", Vector: fixtures.Vec1536d})
+	err = wal.WriteEntry(context.Background(), &Entry{Action: ActionInsert, ID: "large", Vector: fixtures.Vec1536d})
 
 	// Assert
 	require.NoError(t, err)
-	entries := readWALEntries(t, walPath)
+	entries := readEntries(t, walPath)
 	require.Len(t, entries, 1)
 	assert.Equal(t, fixtures.Vec1536d, entries[0].Vector)
 	info, err := os.Stat(walPath)
@@ -66,14 +78,14 @@ func TestWriteEntry_LargeVector_IsCompact(t *testing.T) {
 
 func TestWAL_WriteEntries_WritesAllEntriesInOneSync(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
-	entries := []*WALEntry{
-		{Action: WALActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple},
-		{Action: WALActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
-		{Action: WALActionDelete, ID: "v1"},
+	entries := []*Entry{
+		{Action: ActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple},
+		{Action: ActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
+		{Action: ActionDelete, ID: "v1"},
 	}
 
 	err = wal.WriteEntries(context.Background(), entries)
@@ -81,7 +93,7 @@ func TestWAL_WriteEntries_WritesAllEntriesInOneSync(t *testing.T) {
 
 	// No extra fsync needed to observe the data -- WriteEntries syncs internally,
 	// so it should already be on disk without a Close().
-	got := readWALEntries(t, walPath)
+	got := readEntries(t, walPath)
 	require.Len(t, got, 3, "each entry should be its own record, in order")
 	for i, want := range entries {
 		assert.Equal(t, *want, got[i])
@@ -90,7 +102,7 @@ func TestWAL_WriteEntries_WritesAllEntriesInOneSync(t *testing.T) {
 
 func TestWAL_WriteEntries_EmptySliceIsNoop(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
@@ -108,13 +120,13 @@ func TestWAL_WriteEntries_EmptySliceIsNoop(t *testing.T) {
 // bad one -- should reach disk.
 func TestWAL_WriteEntries_MarshalErrorLeavesFileUntouched(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
-	entries := []*WALEntry{
-		{Action: WALActionInsert, ID: "good-entry-before", Vector: fixtures.Vec3dSimple},
-		{Action: WALActionInsert, ID: "bad-entry", Meta: map[string]any{"unmarshalable": make(chan int)}},
+	entries := []*Entry{
+		{Action: ActionInsert, ID: "good-entry-before", Vector: fixtures.Vec3dSimple},
+		{Action: ActionInsert, ID: "bad-entry", Meta: map[string]any{"unmarshalable": make(chan int)}},
 	}
 
 	err = wal.WriteEntries(context.Background(), entries)
@@ -131,15 +143,15 @@ func TestWAL_WriteEntries_MarshalErrorLeavesFileUntouched(t *testing.T) {
 // everything" or "wrote nothing."
 func TestWAL_WriteEntries_WriteErrorIsAllOrNothing(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 
 	// Close the underlying file out from under the WAL to force the write to fail.
 	require.NoError(t, wal.file.Close())
 
-	entries := []*WALEntry{
-		{Action: WALActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple},
-		{Action: WALActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
+	entries := []*Entry{
+		{Action: ActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple},
+		{Action: ActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
 	}
 
 	err = wal.WriteEntries(context.Background(), entries)
@@ -152,11 +164,11 @@ func TestWAL_WriteEntries_WriteErrorIsAllOrNothing(t *testing.T) {
 
 func TestWAL_Close(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 
 	// Write entry
-	entry := WALEntry{Action: WALActionInsert, ID: "test", Vector: fixtures.Vec3dSimple}
+	entry := Entry{Action: ActionInsert, ID: "test", Vector: fixtures.Vec3dSimple}
 	err = wal.WriteEntry(context.Background(), &entry)
 	require.NoError(t, err)
 
@@ -171,7 +183,7 @@ func TestWAL_Close(t *testing.T) {
 
 func TestWriteEntry_Concurrency(t *testing.T) {
 	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
+	wal, err := Open(walPath)
 	require.NoError(t, err)
 	defer wal.Close() //nolint:errcheck // test cleanup
 
@@ -183,8 +195,8 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func(n int) {
 			defer wg.Done()
-			entry := WALEntry{
-				Action: WALActionInsert,
+			entry := Entry{
+				Action: ActionInsert,
 				ID:     fmt.Sprintf("v%d", n),
 				Vector: []float32{float32(n), float32(n * 2)},
 			}
@@ -200,7 +212,7 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 
 	// -race checks memory, not the file: also check every write landed as its
 	// own record, whole and exactly once.
-	entries := readWALEntries(t, walPath)
+	entries := readEntries(t, walPath)
 	require.Len(t, entries, numGoroutines)
 
 	seen := make(map[string]bool, numGoroutines)
@@ -210,71 +222,4 @@ func TestWriteEntry_Concurrency(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		assert.True(t, seen[fmt.Sprintf("v%d", i)], "entry v%d is missing", i)
 	}
-}
-
-// A missing WAL is a first start, and an empty one a clean shutdown: neither
-// is an error, and neither adds anything.
-func TestReplayWAL_NothingToReplay(t *testing.T) {
-	files := map[string]func(t *testing.T) string{
-		"missing": func(t *testing.T) string { return filepath.Join(t.TempDir(), "none.wal") },
-		"empty":   func(t *testing.T) string { return writeWAL(t, nil) },
-	}
-	for _, e := range bothEngines {
-		for name, path := range files {
-			t.Run(e.name+"/"+name, func(t *testing.T) {
-				// Arrange
-				idx, _ := e.open(t)
-
-				// Act
-				err := idx.ReplayWAL(path(t))
-
-				// Assert
-				require.NoError(t, err)
-				assert.Zero(t, idx.Len())
-			})
-		}
-	}
-}
-
-// TestReplayWAL_ComplexSequence tests insert→update→delete chains
-func TestReplayWAL_ComplexSequence(t *testing.T) {
-	walPath := filepath.Join(t.TempDir(), "test.wal")
-	wal, err := NewWAL(walPath)
-	require.NoError(t, err)
-
-	// Complex sequence: INSERT → UPDATE (overwrite) → DELETE
-	entries := []WALEntry{
-		{Action: WALActionInsert, ID: "v1", Vector: fixtures.Vec3dSimple, Meta: fixtures.MetaSimple},
-		{Action: WALActionInsert, ID: "v2", Vector: fixtures.Vec3dAlternate},
-		{Action: WALActionInsert, ID: "v1", Vector: fixtures.Vec3dThird, Meta: fixtures.MetaNested}, // Overwrite
-		{Action: WALActionDelete, ID: "v2"},
-	}
-
-	for _, e := range entries {
-		err := wal.WriteEntry(context.Background(), &e)
-		require.NoError(t, err)
-	}
-	_ = wal.Close() //nolint:errcheck // test cleanup
-
-	// Replay
-	idx := newTestIndex(t)
-	err = idx.ReplayWAL(walPath)
-	require.NoError(t, err)
-
-	// Verify final state
-	assert.Len(t, idx.nodes, 1, "Should have 1 vector (v1 updated, v2 deleted)")
-
-	internalID, err := idx.ids.ToUint32ID("v1")
-	require.NoError(t, err)
-	assert.Contains(t, idx.nodes, internalID)
-	assert.Equal(t, fixtures.Vec3dThird, idx.nodes[internalID].Vector, "Should have updated vector")
-	// Note: JSON unmarshal changes types (int→float64, []string→[]interface{})
-	// Just verify key fields exist
-	assert.Contains(t, idx.nodes[internalID].Metadata, "category")
-	assert.Contains(t, idx.nodes[internalID].Metadata, "nested")
-	assert.Contains(t, idx.nodes[internalID].Metadata, "tags")
-
-	// v2 should be deleted
-	_, err = idx.ids.ToUint32ID("v2")
-	assert.Error(t, err, "v2 should be deleted")
 }

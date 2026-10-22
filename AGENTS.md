@@ -41,18 +41,18 @@ internal/
   core/                     pure domain: models, quantization, filters, metadata and inverted indexes,
                             ID mapping
   metric/                   vector math: similarity/distance kernels, and the metric table (metric.go)
-  index/                    Engine interface + both engines, WAL, snapshots, input guards
+  index/                    Engine interface + both engines, snapshots, input guards
     engine.go               the Engine interface every transport talks to (path-free), and FileEngine
     factory.go              picks VectorIndex[T] (brute force) or HNSWIndex[T] from config
     options.go              Options: everything an engine is built from, in one call
     records.go              what both engines store and every rule for it: insert, delete, WAL order, scoring
     index.go / hnsw_index.go  the two engines: only how each searches (scan or HNSW graph)
-    wal.go / wal_record.go  write-ahead log: binary records (length + CRC-32C), replay rules
     lifecycle.go            Flush and Recover: persistence on the engine's own paths
     persistence.go          snapshot save/load, publishSnapshot (WAL truncated only after)
     snapshot_stream.go      snapshot layout: streamed records, vectors once, HNSW topology only
     dimension_guard.go      input checks (width, sparse) + sentinels + IsInvalidVectorError
     encode_guard.go         quantization preconditions (prepareForEncode)
+  wal/                      write-ahead log: binary records (length + CRC-32C), replay and torn-tail rules
   hnsw/                     GoVec's HNSW graph (began as coder/hnsw), generic over T, runs on a metric.Metric
   storage/                  mmap-backed store (unix, plus a stub for other platforms)
   api/                      REST layer (Gin): router, handlers/, middleware/, response/
@@ -66,8 +66,8 @@ docs/                       design notes, known issues, roadmap
 ```
 
 Dependencies point inward: transports (`api`, `grpcserver`) → `index` → `core` and `metric`.
-`hnsw` imports only `metric`. `core` and `metric` import no other package from this repo, and
-`index` never imports a transport. Keep it that way.
+`hnsw` imports only `metric`, and `wal` only `core`. `core` and `metric` import no other package
+from this repo, and `index` never imports a transport. Keep it that way.
 
 ## Conventions
 

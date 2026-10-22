@@ -1,10 +1,13 @@
-package index
+// Package wal is GoVec's write-ahead log: an append-only file of binary
+// records, each fsynced before the write it describes is applied, and replayed
+// in order on startup. It knows nothing about engines: what an entry means is
+// up to the caller of Replay.
+package wal
 
 import (
 	"bufio"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -17,79 +20,79 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 )
 
-// WALAction represents the type of operation in a WAL entry
-type WALAction string
+// Action is the kind of operation an entry records.
+type Action string
 
 const (
-	// WALActionInsert represents an insert operation
-	WALActionInsert WALAction = "INSERT"
-	// WALActionDelete represents a delete operation
-	WALActionDelete WALAction = "DELETE"
+	// ActionInsert records an insert or an overwrite.
+	ActionInsert Action = "INSERT"
+	// ActionDelete records a delete.
+	ActionDelete Action = "DELETE"
 )
 
-// WALEntry is one write-ahead log entry, encoded as a binary record by
-// appendWALRecord. Vector is always []float32 (the API's canonical format),
+// Entry is one write-ahead log entry, encoded as a binary record by
+// appendRecord. Vector is always []float32 (the API's canonical format),
 // whatever the index stores internally; Sparse is in canonical format too
 // (uint32 indices + float32 values).
-type WALEntry struct {
-	Action WALAction
+type Entry struct {
+	Action Action
 	ID     string
 	Vector []float32
 	Sparse core.SparseVector
 	Meta   map[string]any
 }
 
-// WAL is a write-ahead log for durability
-type WAL struct {
+// Log is an open write-ahead log file.
+type Log struct {
 	mu   sync.Mutex
 	file *os.File
 }
 
-// NewWAL creates a new WAL instance at the specified path, creating its
-// directory if needed.
-func NewWAL(walPath string) (*WAL, error) {
-	if err := os.MkdirAll(filepath.Dir(walPath), 0o750); err != nil { //nolint:gosec // 0o750 satisfies G301
+// Open opens the log at path for appending, creating it and its directory if
+// needed.
+func Open(path string) (*Log, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // 0o750 satisfies G301
 		return nil, fmt.Errorf("create WAL directory: %w", err)
 	}
 
 	// Open file in Append mode (create if not exists)
-	f, err := os.OpenFile(walPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // WAL file permissions are intentionally 0o644
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // WAL file permissions are intentionally 0o644
 	if err != nil {
 		return nil, err
 	}
-	log.Info().Str("path", walPath).Msg("WAL opened")
-	return &WAL{file: f}, nil
+	log.Info().Str("path", path).Msg("WAL opened")
+	return &Log{file: f}, nil
 }
 
-// Path returns the file the WAL appends to.
-func (w *WAL) Path() string {
-	return w.file.Name()
+// Path returns the file the log appends to.
+func (l *Log) Path() string {
+	return l.file.Name()
 }
 
 // WriteEntry saves an operation to the disk immediately.
 // ctx is accepted for API consistency and future use (e.g. deadline-aware writes).
-func (w *WAL) WriteEntry(_ context.Context, entry *WALEntry) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (l *Log) WriteEntry(_ context.Context, entry *Entry) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	record, err := appendWALRecord(nil, entry)
+	record, err := appendRecord(nil, entry)
 	if err != nil {
 		return err
 	}
 
-	if _, err = w.file.Write(record); err != nil {
+	if _, err = l.file.Write(record); err != nil {
 		return err
 	}
-	return w.file.Sync()
+	return l.file.Sync()
 }
 
 // WriteEntries saves multiple operations to disk as a single durable unit: one
 // buffered write plus one fsync for the whole batch, instead of one fsync per
 // entry. All entries are encoded into memory first, so an encoding failure on
-// any entry aborts before anything touches the file — the WAL is left exactly
+// any entry aborts before anything touches the file — the log is left exactly
 // as it was, never containing a partial batch.
 // ctx is accepted for API consistency and future use (e.g. deadline-aware writes).
-func (w *WAL) WriteEntries(_ context.Context, entries []*WALEntry) error {
+func (l *Log) WriteEntries(_ context.Context, entries []*Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -97,48 +100,47 @@ func (w *WAL) WriteEntries(_ context.Context, entries []*WALEntry) error {
 	var buf []byte
 	for _, entry := range entries {
 		var err error
-		if buf, err = appendWALRecord(buf, entry); err != nil {
+		if buf, err = appendRecord(buf, entry); err != nil {
 			return err
 		}
 	}
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	if _, err := w.file.Write(buf); err != nil {
+	if _, err := l.file.Write(buf); err != nil {
 		return err
 	}
-	return w.file.Sync()
+	return l.file.Sync()
 }
 
-// Clear wipes the WAL, once a snapshot or reset has made its entries redundant.
-func (w *WAL) Clear() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+// Clear wipes the log, once a snapshot or reset has made its entries redundant.
+func (l *Log) Clear() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	// Truncate file to 0 bytes
-	if err := w.file.Truncate(0); err != nil {
+	if err := l.file.Truncate(0); err != nil {
 		return err
 	}
 
 	// Reset file pointer to start (defensive - some platforms may not do this)
-	_, err := w.file.Seek(0, 0)
+	_, err := l.file.Seek(0, 0)
 	if err == nil {
 		log.Info().Msg("WAL cleared")
 	}
 	return err
 }
 
-// Close closes the WAL file handle
-func (w *WAL) Close() error {
-	return w.file.Close()
+// Close closes the log file.
+func (l *Log) Close() error {
+	return l.file.Close()
 }
 
-// replayWALFile reads the WAL at walPath and calls apply for each entry, in
-// order. Recovery keeps the longest valid prefix of the log, as Redis and etcd
-// do:
+// Replay reads the log at path and calls apply for each entry, in order.
+// Recovery keeps the longest valid prefix of the log, as Redis and etcd do:
 //
-//   - A missing file is an empty WAL.
+//   - A missing file is an empty log.
 //   - A bad record -- incomplete, failing its CRC, zero-filled, or garbage --
 //     with no valid record anywhere after it is a write torn by a crash. It
 //     was never acknowledged, so it is cut off the file; otherwise the next
@@ -148,10 +150,8 @@ func (w *WAL) Close() error {
 //   - A bad record with a valid one after it is corruption, as is an entry
 //     apply rejects. Replay stops with an error naming the record, and the
 //     file is left as found.
-//
-// A delete of an ID that doesn't exist is not an error: replay is idempotent.
-func replayWALFile(walPath string, apply func(WALEntry) error) error {
-	f, err := os.Open(walPath) //nolint:gosec // walPath comes from config, not user input
+func Replay(path string, apply func(Entry) error) error {
+	f, err := os.Open(path) //nolint:gosec // path comes from config, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -173,14 +173,14 @@ func replayWALFile(walPath string, apply func(WALEntry) error) error {
 			return fmt.Errorf("WAL read error: %w", err)
 		}
 		if first[0] == '{' {
-			return errLegacyWAL
+			return errLegacyFormat
 		}
 	}
 
 	var (
 		offset int64
 		count  int
-		header = make([]byte, walFrameHeaderLen)
+		header = make([]byte, frameHeaderLen)
 		buf    []byte
 	)
 	for record := 1; offset < size; record++ {
@@ -190,7 +190,7 @@ func replayWALFile(walPath string, apply func(WALEntry) error) error {
 		// every byte after its start. Only this failure path reads the rest of
 		// the file into memory.
 		badRecord := func(reason string) error {
-			rest, err := readFrom(walPath, offset)
+			rest, err := readFrom(path, offset)
 			if err != nil {
 				return fmt.Errorf("WAL read error at record %d: %w", record, err)
 			}
@@ -201,10 +201,10 @@ func replayWALFile(walPath string, apply func(WALEntry) error) error {
 			// like a WAL whose first write was torn (it starts like a record, or
 			// it's zero-filled). Anything else isn't a GoVec WAL -- wal_path may
 			// name the wrong file -- and must not be truncated.
-			if offset == 0 && rest[0] != walRecordVersion && !isAllZero(rest) {
+			if offset == 0 && rest[0] != recordVersion && !isAllZero(rest) {
 				return fmt.Errorf("file doesn't look like a GoVec WAL (first byte 0x%02x); left as found", rest[0])
 			}
-			if err := os.Truncate(walPath, offset); err != nil {
+			if err := os.Truncate(path, offset); err != nil {
 				return fmt.Errorf("cut torn last record %d off the WAL: %w", record, err)
 			}
 			log.Warn().Int("record", record).Int64("bytes", size-offset).Str("reason", reason).
@@ -218,8 +218,8 @@ func replayWALFile(walPath string, apply func(WALEntry) error) error {
 		version := header[0]
 		length := int64(binary.LittleEndian.Uint32(header[1:5]))
 		checksum := binary.LittleEndian.Uint32(header[5:9])
-		end := offset + walFrameHeaderLen + length
-		if version != walRecordVersion || length == 0 || length > maxWALRecord || end > size {
+		end := offset + frameHeaderLen + length
+		if version != recordVersion || length == 0 || length > maxRecord || end > size {
 			return badRecord(fmt.Sprintf("bad record header (version %d, length %d)", version, length))
 		}
 
@@ -230,11 +230,11 @@ func replayWALFile(walPath string, apply func(WALEntry) error) error {
 		if _, err := io.ReadFull(r, payload); err != nil {
 			return fmt.Errorf("WAL read error at record %d: %w", record, err)
 		}
-		if crc32.Checksum(payload, walCRCTable) != checksum {
+		if crc32.Checksum(payload, crcTable) != checksum {
 			return badRecord("CRC mismatch")
 		}
 
-		entry, err := decodeWALPayload(payload)
+		entry, err := decodePayload(payload)
 		if err != nil {
 			return fmt.Errorf("WAL record %d: %w", record, err)
 		}
@@ -278,27 +278,18 @@ func isAllZero(b []byte) bool {
 // containsValidRecord reports whether a complete record with a matching CRC
 // starts at any byte of b.
 func containsValidRecord(b []byte) bool {
-	for i := 0; i+walFrameHeaderLen <= len(b); i++ {
-		if b[i] != walRecordVersion {
+	for i := 0; i+frameHeaderLen <= len(b); i++ {
+		if b[i] != recordVersion {
 			continue
 		}
 		length := int(binary.LittleEndian.Uint32(b[i+1:]))
-		end := i + walFrameHeaderLen + length
-		if length == 0 || length > maxWALRecord || end > len(b) {
+		end := i + frameHeaderLen + length
+		if length == 0 || length > maxRecord || end > len(b) {
 			continue
 		}
-		if crc32.Checksum(b[i+walFrameHeaderLen:end], walCRCTable) == binary.LittleEndian.Uint32(b[i+5:]) {
+		if crc32.Checksum(b[i+frameHeaderLen:end], crcTable) == binary.LittleEndian.Uint32(b[i+5:]) {
 			return true
 		}
 	}
 	return false
-}
-
-// ignoreNotFound treats deleting a missing ID as success, which keeps WAL
-// replay idempotent.
-func ignoreNotFound(err error) error {
-	if errors.Is(err, core.ErrNotFound) {
-		return nil
-	}
-	return err
 }

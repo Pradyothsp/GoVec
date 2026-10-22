@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // errNoSnapshotPath is Flush's error for an engine built without a snapshot
@@ -29,17 +31,17 @@ func flush(ctx context.Context, e FileEngine, snapshotPath string) error {
 //
 // A WAL that can't be read to the end is an error for the same reason: every
 // write after the failure point would be silently dropped. A missing or empty
-// WAL is a fresh start; see replayWALFile for what counts as a torn write.
-func recoverFrom(ctx context.Context, e FileEngine, snapshotPath string, wal *WAL) error {
+// WAL is a fresh start; see wal.Replay for what counts as a torn write.
+func recoverFrom(ctx context.Context, e FileEngine, snapshotPath string, walLog *wal.Log) error {
 	if snapshotPath != "" {
 		if err := e.LoadFromFile(ctx, snapshotPath); err != nil {
 			return fmt.Errorf("load snapshot %s (restore a backup, or delete it to start empty): %w", snapshotPath, err)
 		}
 	}
 
-	if wal != nil {
-		if err := e.ReplayWAL(wal.Path()); err != nil {
-			return fmt.Errorf("replay WAL %s (fix or move it aside to start from the snapshot alone): %w", wal.Path(), err)
+	if walLog != nil {
+		if err := e.ReplayWAL(walLog.Path()); err != nil {
+			return fmt.Errorf("replay WAL %s (fix or move it aside to start from the snapshot alone): %w", walLog.Path(), err)
 		}
 	}
 

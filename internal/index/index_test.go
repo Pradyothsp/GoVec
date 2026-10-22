@@ -184,7 +184,7 @@ func TestReset_ResetsIDMapperAndWAL(t *testing.T) {
 		t.Run(e.name, func(t *testing.T) {
 			// Arrange
 			idx, r := e.open(t)
-			walPath := r.wal.file.Name()
+			walPath := r.wal.Path()
 			require.NoError(t, idx.Insert(ctx, "v1", fixtures.Vec3dSimple, core.SparseVector{}, nil))
 			require.NoError(t, idx.Insert(ctx, "v2", fixtures.Vec3dAlternate, core.SparseVector{}, nil))
 			_, err := idx.Delete(ctx, "v2")

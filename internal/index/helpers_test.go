@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Pradyothsp/govec/internal/metric"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // uncreatableDir returns a directory path that can never be created: its
@@ -24,13 +25,13 @@ func uncreatableDir(t testing.TB) string {
 // The WAL file lives in t.TempDir() and is closed automatically on test cleanup.
 func newTestIndex(t testing.TB) *VectorIndex[[]float32] {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "test.wal"))
 	if err != nil {
 		t.Fatalf("newTestIndex: failed to create WAL: %v", err)
 	}
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
-	return NewVectorIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric})
+	return NewVectorIndex(Options[[]float32]{WAL: walLog, Metric: testCosineMetric})
 }
 
 // testCosineMetric is the cosine metric, for tests that build an index
@@ -47,11 +48,11 @@ var testCosineMetric = func() metric.Metric[[]float32] {
 // newTestIndexWithHybrid creates a VectorIndex with hybrid search enabled.
 func newTestIndexWithHybrid(t testing.TB) *VectorIndex[[]float32] {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "test.wal"))
 	if err != nil {
 		t.Fatalf("newTestIndexWithHybrid: failed to create WAL: %v", err)
 	}
-	t.Cleanup(func() { _ = wal.Close() })
+	t.Cleanup(func() { _ = walLog.Close() })
 
-	return NewVectorIndex(Options[[]float32]{WAL: wal, Metric: testCosineMetric, HybridSearch: true})
+	return NewVectorIndex(Options[[]float32]{WAL: walLog, Metric: testCosineMetric, HybridSearch: true})
 }

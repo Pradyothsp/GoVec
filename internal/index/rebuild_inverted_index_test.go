@@ -11,6 +11,7 @@ import (
 	"github.com/Pradyothsp/govec/internal/core"
 	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/storage"
+	"github.com/Pradyothsp/govec/internal/wal"
 )
 
 // TestRebuildInvertedIndex_EveryFormat checks that each load path rebuilds the
@@ -82,12 +83,12 @@ type hnswHybrid struct{ *HNSWIndex[[]float32] }
 
 func (h hnswHybrid) invertedIndex() *core.InvertedIndex { return h.inverted }
 
-func newTestWAL(t *testing.T) *WAL {
+func newTestWAL(t *testing.T) *wal.Log {
 	t.Helper()
-	wal, err := NewWAL(filepath.Join(t.TempDir(), "test.wal"))
+	walLog, err := wal.Open(filepath.Join(t.TempDir(), "test.wal"))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = wal.Close() })
-	return wal
+	t.Cleanup(func() { _ = walLog.Close() })
+	return walLog
 }
 
 func newTestMmapStore(t *testing.T, dir string) *storage.MmapStore {

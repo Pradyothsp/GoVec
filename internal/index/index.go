@@ -32,7 +32,7 @@ func (idx *VectorIndex[T]) Insert(ctx context.Context, id string, vec []float32,
 
 // BatchInsert adds or updates multiple vectors with a single WAL fsync for the
 // whole batch. If writing the batch to the WAL fails, no item is applied and the
-// batch aborts entirely — see WAL.WriteEntries for the atomicity this relies on.
+// batch aborts entirely — see wal.Log.WriteEntries for the atomicity this relies on.
 func (idx *VectorIndex[T]) BatchInsert(ctx context.Context, items []BatchInsertItem) ([]BatchInsertError, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
