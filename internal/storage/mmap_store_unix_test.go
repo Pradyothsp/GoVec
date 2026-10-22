@@ -331,3 +331,108 @@ func TestMmapStore_ConcurrentPutAndGet(t *testing.T) {
 
 	assert.Equal(t, uint64(n), s.Count())
 }
+
+// recordDirSyncs replaces the directory sync with one that records each call
+// and still syncs.
+func recordDirSyncs(t *testing.T) *[]string {
+	t.Helper()
+
+	var synced []string
+	syncDirHook = func(dir string) error {
+		synced = append(synced, dir)
+		return syncDir(dir)
+	}
+
+	t.Cleanup(func() { syncDirHook = syncDir })
+
+	return &synced
+}
+
+// A new chunk file must be durable by name, not just by contents, before
+// vectors go into it; so must a reset's removal of them. A power cut can't be
+// simulated here, so this checks the directory was synced.
+func TestMmapStore_DirectoryIsSynced(t *testing.T) {
+	chunk0, _ := slots(testDims * 4)
+
+	tests := []struct {
+		name string
+		act  func(t *testing.T, s *MmapStore)
+		want int
+	}{
+		{
+			name: "each new chunk file",
+			act: func(t *testing.T, s *MmapStore) {
+				for _, id := range []uint32{0, 1, uint32(chunk0)} {
+					_, err := s.Put(id, vectorBytes(id, false))
+					require.NoError(t, err)
+				}
+			},
+			want: 2,
+		},
+		{
+			name: "reset",
+			act: func(t *testing.T, s *MmapStore) {
+				require.NoError(t, s.Reset())
+			},
+			want: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			s := openStore(t, dir, false)
+			t.Cleanup(func() { _ = s.Close() })
+
+			synced := recordDirSyncs(t)
+
+			// Act
+			tt.act(t, s)
+
+			// Assert
+			assert.Len(t, *synced, tt.want)
+
+			for _, d := range *synced {
+				assert.Equal(t, dir, d)
+			}
+		})
+	}
+}
+
+// If a chunk in the middle is lost, opening must fail rather than quietly use
+// the chunks before it; and the chunk files after the gap must survive, where
+// growing the store used to recreate, and so empty, them.
+func TestNewMmapStore_MissingChunk_RefusedAndLaterChunksKept(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	s := openStore(t, dir, false)
+
+	chunk0, later := slots(testDims * 4)
+	lastID := uint32(chunk0 + later)
+
+	for _, id := range []uint32{0, uint32(chunk0), lastID} {
+		_, err := s.Put(id, vectorBytes(id, false))
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, s.Sync())
+	require.NoError(t, s.Close())
+
+	lastChunk := filepath.Join(dir, "chunk_2.vec")
+	before, err := os.ReadFile(lastChunk)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(filepath.Join(dir, "chunk_1.vec")))
+
+	// Act
+	_, err = NewMmapStore(dir, testDims, false)
+
+	// Assert
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "chunk_1.vec is missing")
+
+	after, err := os.ReadFile(lastChunk)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}

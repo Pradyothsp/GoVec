@@ -13,24 +13,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const (
-	headerSize  = 4096       // bytes reserved at the start of every chunk for the header
-	headerMagic = "GOVECMM0" // 8-byte magic string identifying the file format
+// The file layout and its constants are in format.go.
 
-	headerOffMagic    = 0  // [8]byte
-	headerOffVersion  = 8  // uint32
-	headerOffElemSize = 12 // uint32
-	headerOffQuantTag = 16 // uint8  (0=float32, 1=int8)
-	headerOffCount    = 20 // uint64 (total vectors ever Put; only in chunk_0)
-
-	headerVersion = uint32(1)
-	quantFloat32  = uint8(0)
-	quantInt8     = uint8(1)
-)
-
-// ChunkFileSize is the size in bytes pre-allocated per chunk file.
-// It can be overridden in tests to use smaller chunks.
-var ChunkFileSize = int64(1 << 30) // 1 GiB
+// syncDirHook is syncDir, replaced in tests to observe it: a power cut can't
+// be simulated, but whether the directory was synced can be.
+var syncDirHook = syncDir
 
 // mmapChunk represents one pre-allocated, memory-mapped chunk file.
 type mmapChunk struct {
@@ -95,12 +82,30 @@ func NewMmapStore(dir string, dims int, isInt8 bool) (*MmapStore, error) {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			break
 		}
+
 		chunk, err := s.openChunk(i)
 		if err != nil {
 			_ = s.Close() //nolint:errcheck // best-effort cleanup
 			return nil, err
 		}
+
 		s.chunks = append(s.chunks, chunk)
+	}
+
+	// A chunk missing from the middle means vectors were lost. Opening the
+	// ones before it would hide that, and growing past it later would collide
+	// with the chunk files that follow.
+	files, err := filepath.Glob(filepath.Join(dir, "chunk_*.vec"))
+	if err != nil {
+		_ = s.Close() //nolint:errcheck // best-effort cleanup
+		return nil, fmt.Errorf("mmap_store: list chunks in %q: %w", dir, err)
+	}
+
+	if len(files) > len(s.chunks) {
+		missing := filepath.Base(s.chunkPath(len(s.chunks)))
+		_ = s.Close() //nolint:errcheck // best-effort cleanup
+
+		return nil, fmt.Errorf("mmap_store: %s is missing, but later chunk files exist in %q; their vectors can't be addressed", missing, dir)
 	}
 
 	if len(s.chunks) > 0 {
@@ -109,6 +114,7 @@ func NewMmapStore(dir string, dims int, isInt8 bool) (*MmapStore, error) {
 			_ = s.Close() //nolint:errcheck // best-effort cleanup
 			return nil, fmt.Errorf("mmap_store: header validation failed: %w", err)
 		}
+
 		savedCount := binary.LittleEndian.Uint64(s.chunks[0].data[headerOffCount:])
 		s.count.Store(savedCount)
 	}
@@ -161,11 +167,20 @@ func (s *MmapStore) writeHeader(data []byte) {
 	// count starts at 0 — already zero from ftruncate-zeroed pages.
 }
 
-// newChunk creates, pre-allocates, and mmaps a new chunk file.
+// newChunk creates, pre-allocates, and mmaps a new chunk file, and makes the
+// file and its size durable before any vector goes into it.
+//
+// The snapshot holds only slot numbers under mmap, and publishing it truncates
+// the WAL once the chunks are msynced. msync writes a file's pages, not the
+// directory entry that names it: after a power cut the snapshot could point
+// into a file that no longer exists, with the WAL copy already gone. So the
+// file is fsynced (its size) and then the directory (its name).
 // PRECONDITION: s.mu.Lock() is held by caller.
 func (s *MmapStore) newChunk(idx int) (*mmapChunk, error) {
 	path := s.chunkPath(idx)
-	f, err := os.Create(path) //nolint:gosec // path constructed from operator config
+
+	// O_EXCL: never truncate a chunk that exists, which os.Create would do.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // path constructed from operator config
 	if err != nil {
 		return nil, fmt.Errorf("mmap_store: create chunk %d: %w", idx, err)
 	}
@@ -173,6 +188,16 @@ func (s *MmapStore) newChunk(idx int) (*mmapChunk, error) {
 	if err := f.Truncate(ChunkFileSize); err != nil {
 		_ = f.Close() //nolint:errcheck // best-effort cleanup
 		return nil, fmt.Errorf("mmap_store: truncate chunk %d: %w", idx, err)
+	}
+
+	if err := f.Sync(); err != nil {
+		_ = f.Close() //nolint:errcheck // best-effort cleanup
+		return nil, fmt.Errorf("mmap_store: sync chunk %d: %w", idx, err)
+	}
+
+	if err := syncDirHook(s.dir); err != nil {
+		_ = f.Close() //nolint:errcheck // best-effort cleanup
+		return nil, fmt.Errorf("mmap_store: sync directory after creating chunk %d: %w", idx, err)
 	}
 
 	data, err := unix.Mmap(int(f.Fd()), 0, int(ChunkFileSize),
@@ -376,5 +401,27 @@ func (s *MmapStore) Reset() error {
 			return fmt.Errorf("mmap_store: remove chunk %d: %w", i, err)
 		}
 	}
+
+	// Make the removal durable too, or a power cut could bring the old
+	// chunks back under the empty snapshot.
+	if err := syncDirHook(s.dir); err != nil {
+		return fmt.Errorf("mmap_store: sync directory after reset: %w", err)
+	}
+
 	return nil
+}
+
+// syncDir fsyncs a directory, making a file created or removed in it durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // dir of the operator-configured mmap store
+	if err != nil {
+		return err
+	}
+
+	if err := d.Sync(); err != nil {
+		_ = d.Close() //nolint:errcheck // best-effort cleanup; sync error takes precedence
+		return err
+	}
+
+	return d.Close()
 }
