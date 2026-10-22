@@ -2,8 +2,6 @@ package hnsw
 
 import (
 	"slices"
-
-	"github.com/Pradyothsp/govec/internal/hnsw/heap"
 )
 
 // searchCandidate represents a node considered during the HNSW search process,
@@ -11,12 +9,6 @@ import (
 type searchCandidate[K Key, V VectorType] struct {
 	node *layerNode[K, V]
 	dist float32
-}
-
-// Less implements the heap.Interface for searchCandidate, ordering by distance.
-// Lower distance means higher priority in the min-heap.
-func (s searchCandidate[K, V]) Less(o searchCandidate[K, V]) bool {
-	return s.dist < o.dist
 }
 
 // search performs a greedy search within the current layer to find the 'k' closest
@@ -67,9 +59,8 @@ func (n *layerNode[K, V]) search(
 	// below). Capping it by raw size (the previous behavior) discarded
 	// genuinely useful not-yet-explored candidates purely because the
 	// frontier got crowded, independent of whether they were worth visiting.
-	candidates := heap.Heap[searchCandidate[K, V]]{}
-	candidates.Init(make([]searchCandidate[K, V], 0, resultCap))
-	candidates.Push(
+	candidates := nearestFirst[K, V]{items: make([]searchCandidate[K, V], 0, resultCap)}
+	candidates.push(
 		searchCandidate[K, V]{
 			node: n,
 			dist: distance(n.Value, n.precomputed, target, targetCache),
@@ -78,8 +69,7 @@ func (n *layerNode[K, V]) search(
 	// result is a max-heap storing the resultCap best (closest) found nodes so far.
 	// The worst-kept candidate sits at the root, so checking/evicting it (the hot
 	// path below) is O(1)/O(log n) instead of the O(n) scan a min-heap would need.
-	result := heap.MaxHeap[searchCandidate[K, V]]{}
-	result.Init(make([]searchCandidate[K, V], 0, resultCap))
+	result := farthestFirst[K, V]{items: make([]searchCandidate[K, V], 0, resultCap)}
 
 	// A key can sit in several layers, so a mark left by the layer above
 	// would wrongly skip it here.
@@ -88,13 +78,13 @@ func (n *layerNode[K, V]) search(
 	// Start with the initial node in the result set only if it passes the allowlist.
 	// It is always in candidates so its neighbors are explored regardless.
 	if allowlist == nil {
-		result.Push(candidates.Min())
+		result.push(candidates.min())
 	} else if _, ok := allowlist[n.Key]; ok {
-		result.Push(candidates.Min())
+		result.push(candidates.min())
 	}
 	visited.visit(int(n.Key))
 
-	for candidates.Len() > 0 {
+	for candidates.len() > 0 {
 		// Canonical SEARCH-LAYER termination (Malkov & Yashunin, Algorithm 2):
 		// candidates is nearest-first, so once the closest remaining candidate
 		// is already farther than our worst kept result, nothing still queued
@@ -102,11 +92,11 @@ func (n *layerNode[K, V]) search(
 		// the *next* candidate, not "did the last expansion help": the last
 		// expansion can be unproductive while an earlier, still-queued
 		// candidate remains genuinely promising.
-		if result.Len() >= resultCap && candidates.Min().dist > result.Max().dist {
+		if result.len() >= resultCap && candidates.min().dist > result.max().dist {
 			break
 		}
 
-		current := candidates.Pop().node // Get the closest node from candidates to explore
+		current := candidates.pop().node // Get the closest node from candidates to explore
 
 		// Iterate neighbors directly in their stored order. This used to clone
 		// and sort by key first "for test consistency" -- but within one
@@ -132,8 +122,8 @@ func (n *layerNode[K, V]) search(
 			// active: a non-matching node can still be a necessary stepping
 			// stone to reach a distant matching one, so its own raw distance
 			// isn't a safe filter for whether to keep exploring past it.
-			if allowlist != nil || result.Len() < resultCap || dist < result.Max().dist {
-				candidates.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
+			if allowlist != nil || result.len() < resultCap || dist < result.max().dist {
+				candidates.push(searchCandidate[K, V]{node: neighbor, dist: dist})
 			}
 
 			// Only add to result if this node passes the allowlist filter.
@@ -143,32 +133,32 @@ func (n *layerNode[K, V]) search(
 				}
 			}
 
-			if result.Len() < resultCap {
-				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist})
-			} else if dist < result.Max().dist { // If new node is better than the worst in result set
-				result.PopLast()                                               // Remove worst
-				result.Push(searchCandidate[K, V]{node: neighbor, dist: dist}) // Add new best
+			if result.len() < resultCap {
+				result.push(searchCandidate[K, V]{node: neighbor, dist: dist})
+			} else if dist < result.max().dist { // If new node is better than the worst in result set
+				result.popMax()                                                // Remove worst
+				result.push(searchCandidate[K, V]{node: neighbor, dist: dist}) // Add new best
 			}
 		}
 	}
 
 	// Trim down from resultCap (the exploration breadth) to the k results the
 	// caller actually asked for -- matches hnswlib's post-search truncation.
-	for result.Len() > k {
-		result.PopLast()
+	for result.len() > k {
+		result.popMax()
 	}
 
 	// Drain into ascending (closest-first) order. result is a max-heap, so
-	// draining it via PopLast() yields descending (worst-first) order in
+	// draining it via popMax() yields descending (worst-first) order in
 	// O(k log k); reverse once. Callers (Graph.search, Graph.Search) return
 	// this slice as-is with no further sort, so this drain is load-bearing,
 	// not cosmetic -- it also fixes a latent gap in the old min-heap
 	// Slice()-return: only index 0 was ever guaranteed to be the true
 	// closest node (the min-heap root), positions 1..k-1 were raw heap-array
 	// order, not actually sorted by distance.
-	sorted := make([]searchCandidate[K, V], 0, result.Len())
-	for result.Len() > 0 {
-		sorted = append(sorted, result.PopLast())
+	sorted := make([]searchCandidate[K, V], 0, result.len())
+	for result.len() > 0 {
+		sorted = append(sorted, result.popMax())
 	}
 	slices.Reverse(sorted)
 	return sorted
