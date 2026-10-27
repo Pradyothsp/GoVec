@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/rs/zerolog"
 
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/hnsw"
 	"github.com/Pradyothsp/govec/internal/index"
+	"github.com/Pradyothsp/govec/internal/metric"
 	"github.com/Pradyothsp/govec/internal/wal"
 )
 
@@ -42,7 +45,30 @@ var benchSetups = []benchSetup{
 }
 
 // newBenchEngine builds an empty engine for setup, with a WAL in a temp dir.
+// Brute force is built from config, as the server builds it. HNSW is built by
+// newBenchHNSW, which is what NewEngine does for it from this config -- the
+// defaults and seed 1 -- so that distancesPerSearch can build its exact twin.
 func newBenchEngine(b *testing.B, setup benchSetup) index.FileEngine {
+	b.Helper()
+	walLog := newBenchWAL(b)
+	if setup.indexType == config.IndexTypeHNSW {
+		return newBenchHNSW(b, setup, walLog, nil)
+	}
+
+	engine, err := index.NewEngine(config.EngineConfig{
+		IndexType:      setup.indexType,
+		Quantization:   setup.quant,
+		DistanceMetric: config.DistanceMetricCosine,
+	}, config.StorageConfig{}, walLog)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return engine
+}
+
+// newBenchWAL opens a WAL in a temp dir, and quiets the engine's info logs
+// for the benchmark.
+func newBenchWAL(b *testing.B) *wal.Log {
 	b.Helper()
 	level := zerolog.GlobalLevel()
 	zerolog.SetGlobalLevel(zerolog.WarnLevel)
@@ -53,18 +79,32 @@ func newBenchEngine(b *testing.B, setup benchSetup) index.FileEngine {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { _ = walLog.Close() })
-	engine, err := index.NewEngine(config.EngineConfig{
-		IndexType:      setup.indexType,
-		Quantization:   setup.quant,
-		DistanceMetric: config.DistanceMetricCosine,
-		// A fixed seed builds the same graph every run, so two runs differ
-		// only by the code under test.
-		HnswSeed: 1,
-	}, config.StorageConfig{}, walLog)
+	return walLog
+}
+
+// newBenchHNSW builds an empty HNSW index for setup on the default graph
+// settings and seed 1: a fixed seed builds the same graph every run, so two
+// runs differ only by the code under test. With calls set, every distance the
+// index computes is counted there.
+func newBenchHNSW(b *testing.B, setup benchSetup, walLog *wal.Log, calls *atomic.Int64) index.FileEngine {
+	b.Helper()
+	if setup.quant == config.QuantizationScalar {
+		return buildHNSW[[]int8](b, walLog, calls)
+	}
+	return buildHNSW[[]float32](b, walLog, calls)
+}
+
+func buildHNSW[T metric.VectorType](b *testing.B, walLog *wal.Log, calls *atomic.Int64) index.FileEngine {
+	b.Helper()
+	m, err := metric.Resolve[T](config.DistanceMetricCosine)
 	if err != nil {
 		b.Fatal(err)
 	}
-	return engine
+	if calls != nil {
+		m = countingMetric(m, calls)
+	}
+
+	return index.NewHNSWIndex(index.Options[T]{WAL: walLog, Metric: m}, hnsw.Config{Seed: 1})
 }
 
 // fill batch-inserts vectors into engine as v0, v1, ...
@@ -107,7 +147,9 @@ func recallAt(b *testing.B, engine index.Engine, queries [][]float32, truth [][]
 }
 
 // BenchmarkSearch times one top-10 query and reports recall@10 against exact
-// results, failing below the setup's floor for the data.
+// results, failing below the setup's floor for the data. HNSW also reports
+// how many distances a search computes: with the graph seeded the count is
+// exact, so it shows a change in the work a search does without timing noise.
 func BenchmarkSearch(b *testing.B) {
 	data := benchDataset(b)
 
@@ -121,6 +163,11 @@ func BenchmarkSearch(b *testing.B) {
 				b.Errorf("recall@10 is %.3f, below the floor of %.2f", recall, floor)
 			}
 
+			var distances float64
+			if setup.indexType == config.IndexTypeHNSW {
+				distances = distancesPerSearch(b, setup, data)
+			}
+
 			i := 0
 			for b.Loop() {
 				if _, err := engine.Search(context.Background(), data.queries[i%len(data.queries)], core.SparseVector{}, benchK, nil); err != nil {
@@ -130,6 +177,9 @@ func BenchmarkSearch(b *testing.B) {
 			}
 			// After the loop: b.Loop clears metrics reported before it starts.
 			b.ReportMetric(recall, "recall@10")
+			if distances > 0 {
+				b.ReportMetric(distances, "distances/op")
+			}
 		})
 	}
 }
@@ -218,4 +268,47 @@ func BenchmarkSnapshot(b *testing.B) {
 			})
 		})
 	}
+}
+
+// distancesPerSearch builds a second HNSW index for setup, newBenchEngine's
+// twin but comparing through a counting metric, and returns the mean number
+// of distances a search computes over data's queries. The count stays out of
+// the timed index: an atomic add on every comparison would slow it, and
+// contend across the parallel build.
+func distancesPerSearch(b *testing.B, setup benchSetup, data benchData) float64 {
+	b.Helper()
+	var calls atomic.Int64
+	engine := newBenchHNSW(b, setup, newBenchWAL(b), &calls)
+	fill(b, engine, data.vectors)
+
+	calls.Store(0)
+	for _, q := range data.queries {
+		if _, err := engine.Search(context.Background(), q, core.SparseVector{}, benchK, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+	return float64(calls.Load()) / float64(len(data.queries))
+}
+
+// countingMetric is m with every distance function counting its calls.
+func countingMetric[T metric.VectorType](m metric.Metric[T], calls *atomic.Int64) metric.Metric[T] {
+	count := func(f metric.DistanceFunc[T]) metric.DistanceFunc[T] {
+		if f == nil {
+			return nil
+		}
+		return func(a, b T) float32 {
+			calls.Add(1)
+			return f(a, b)
+		}
+	}
+
+	m.Distance = count(m.Distance)
+	m.SquaredDistance = count(m.SquaredDistance)
+	if cached := m.CachedDistance; cached != nil {
+		m.CachedDistance = func(a T, ac float64, b T, bc float64) float32 {
+			calls.Add(1)
+			return cached(a, ac, b, bc)
+		}
+	}
+	return m
 }
