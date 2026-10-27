@@ -17,9 +17,14 @@ type VectorType interface {
 type DistanceFunc[V VectorType] func(a, b V) float32
 
 // CosineDistanceFloat32 computes the cosine distance between two float32 vectors.
-// Uses vek32 optimized implementation for float32 performance.
+// Uses vek32 optimized implementation for float32 performance. A zero vector
+// is distance 1 from everything: see CachedCosineDistanceFloat32.
 func CosineDistanceFloat32(a, b []float32) float32 {
-	return 1 - vek32.CosineSimilarity(a, b)
+	similarity := vek32.CosineSimilarity(a, b)
+	if math.IsNaN(float64(similarity)) { // a zero vector: 0/0
+		return 1
+	}
+	return 1 - similarity
 }
 
 // EuclideanDistanceFloat32 computes the Euclidean distance between two float32 vectors.
@@ -99,11 +104,17 @@ func PrecomputeSquaredNormFloat32(v []float32) float64 {
 // counterpart: aCache/bCache are each vector's PrecomputeSquaredNormFloat32
 // result, computed once at insert time rather than recomputed here. Only
 // the dot product -- which genuinely depends on both vectors and can't be
-// cached -- is computed fresh. Deliberately has no zero-vector guard,
-// matching vek32.CosineSimilarity's existing behavior (a zero vector's
-// cache is 0, giving 0/0 -> NaN) exactly: this is a faster path to the same
-// answer, not a place to change what that answer is.
+// cached -- is computed fresh.
+//
+// A zero vector has no direction, so it is distance 1 from everything:
+// similarity 0, as CosineSimilarity (brute force) and the int8 kernels give
+// it. Dividing by its zero norm gave NaN instead, which HNSW returned as a
+// score, and which breaks the search's priority queues: every comparison with
+// NaN is false.
 func CachedCosineDistanceFloat32(aVec []float32, aCache float64, bVec []float32, bCache float64) float32 {
+	if aCache == 0 || bCache == 0 {
+		return 1
+	}
 	magnitude := math.Sqrt(aCache) * math.Sqrt(bCache)
 	return float32(1 - DotFloat32(aVec, bVec)/magnitude)
 }

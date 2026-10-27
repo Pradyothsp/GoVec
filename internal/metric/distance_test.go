@@ -74,6 +74,8 @@ func TestCachedCosineDistanceFloat32_ExactCases(t *testing.T) {
 	assert.InDelta(t, 2, cachedCosine(a, opposite), 1e-6, "opposite")
 	assert.InDelta(t, 1, cachedCosine(a, orthogonal), 1e-6, "orthogonal")
 
-	// No zero-vector guard, matching vek32.CosineSimilarity: 0/0 is NaN.
-	assert.True(t, math.IsNaN(float64(cachedCosine(a, make([]float32, len(a))))))
+	zero := make([]float32, len(a))
+	assert.InDelta(t, 1, cachedCosine(a, zero), 0, "a zero vector has no direction: similarity 0")
+	assert.InDelta(t, 1, cachedCosine(zero, a), 0, "either side")
+	assert.InDelta(t, 1, CosineDistanceFloat32(a, zero), 0, "the uncached kernel agrees")
 }

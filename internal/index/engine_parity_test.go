@@ -300,3 +300,42 @@ func TestSearch_KZero_ReturnsEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestSearch_ZeroVector_ScoresZero: a zero vector has no direction, so under
+// cosine it scores 0 against anything, stored or as the query. Brute force
+// always did; HNSW divided by its zero norm and returned NaN, and a NaN in its
+// priority queues breaks their ordering.
+func TestSearch_ZeroVector_ScoresZero(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		query      []float32
+		wantScores map[string]float32
+	}{
+		{"stored zero vector", []float32{2, 1, 0}, map[string]float32{"x": 0.894, "zero": 0}},
+		{"zero query", []float32{0, 0, 0}, map[string]float32{"x": 0, "zero": 0}},
+	}
+
+	for _, indexType := range parityIndexTypes {
+		for _, tt := range tests {
+			t.Run(string(indexType)+"/"+tt.name, func(t *testing.T) {
+				// Arrange
+				engine := newParityEngine(t,
+					config.EngineConfig{IndexType: indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine},
+					config.StorageConfig{})
+				require.NoError(t, engine.Insert(ctx, "zero", []float32{0, 0, 0}, core.SparseVector{}, nil))
+				require.NoError(t, engine.Insert(ctx, "x", []float32{1, 0, 0}, core.SparseVector{}, nil))
+
+				// Act
+				results, err := engine.Search(ctx, tt.query, core.SparseVector{}, 2, nil)
+
+				// Assert
+				require.NoError(t, err)
+				require.Len(t, results, 2)
+				for _, r := range results {
+					assert.InDelta(t, tt.wantScores[r.ID], r.Score, 1e-3, r.ID)
+				}
+			})
+		}
+	}
+}
