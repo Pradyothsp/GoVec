@@ -2,8 +2,6 @@ package index
 
 import (
 	"context"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,7 +9,6 @@ import (
 
 	"github.com/Pradyothsp/govec/internal/config"
 	"github.com/Pradyothsp/govec/internal/core"
-	"github.com/Pradyothsp/govec/internal/storage"
 )
 
 // TestNewEngine builds every engine and quantization combination and checks
@@ -89,43 +86,6 @@ func TestNewEngine_EuclideanMetric(t *testing.T) {
 			assert.Equal(t, config.DistanceMetricEuclidean, engine.Info().DistanceMetric)
 			assert.Equal(t, []string{"near", "far"}, resultIDs(results))
 			assert.Greater(t, results[0].Score, results[1].Score)
-		})
-	}
-}
-
-// An HNSW search reads one vector at a time, wherever the graph leads, so its
-// mmap store asks the OS not to read ahead; brute force keeps the default.
-func TestNewEngine_MmapAccessPattern(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("mmap store is unix-only")
-	}
-
-	tests := []struct {
-		indexType config.IndexType
-		want      storage.AccessPattern
-	}{
-		{config.IndexTypeBrute, storage.AccessNormal},
-		{config.IndexTypeHNSW, storage.AccessRandom},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.indexType), func(t *testing.T) {
-			// Act
-			engine := newParityEngine(t,
-				config.EngineConfig{IndexType: tt.indexType, Quantization: config.QuantizationNone, DistanceMetric: config.DistanceMetricCosine, Dimensions: 3},
-				config.StorageConfig{EnableMmap: true, MmapStorePath: filepath.Join(t.TempDir(), "mmap")})
-
-			// Assert
-			var store *storage.MmapStore
-			switch e := engine.(type) {
-			case *VectorIndex[[]float32]:
-				store = e.vectorStore
-			case *HNSWIndex[[]float32]:
-				store = e.vectorStore
-			}
-
-			require.NotNil(t, store)
-			assert.Equal(t, tt.want, store.AccessPattern())
 		})
 	}
 }

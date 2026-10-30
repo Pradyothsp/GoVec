@@ -50,15 +50,6 @@ func NewEngine(engineCfg config.EngineConfig, storageCfg config.StorageConfig, w
 		if err != nil {
 			return nil, fmt.Errorf("failed to create mmap store: %w", err)
 		}
-
-		// HNSW reads one vector at a time, wherever the graph leads; brute
-		// force keeps the kernel's default (see storage.AccessPattern).
-		if engineCfg.IndexType == config.IndexTypeHNSW {
-			if err := mmapStore.SetAccessPattern(storage.AccessRandom); err != nil {
-				_ = mmapStore.Close() //nolint:errcheck // best-effort cleanup; the advise error takes precedence
-				return nil, fmt.Errorf("failed to set the mmap store's access pattern: %w", err)
-			}
-		}
 	}
 
 	if engineCfg.Quantization == config.QuantizationScalar {
