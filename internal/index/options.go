@@ -17,7 +17,7 @@ import (
 // for one engine a metadata index assigned and for the other batch settings --
 // so one built without every step quietly ran without part of its config.
 type Options[T metric.VectorType] struct {
-	WAL           *wal.Log           // nil: writes aren't logged
+	WAL           *wal.Log           // nil: writes aren't logged, so only a Flush keeps them across a restart
 	SnapshotPath  string             // where Flush writes and Recover reads; "" means none
 	Metric        metric.Metric[T]   // how vectors are compared
 	Dimensions    int                // the index's width; 0 learns it from the first insert

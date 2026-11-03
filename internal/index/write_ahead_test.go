@@ -12,11 +12,56 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Pradyothsp/govec/internal/core"
+	"github.com/Pradyothsp/govec/internal/hnsw"
 )
 
 // A write is committed only once it is in the WAL: recovery rebuilds the index
 // from the snapshot and the WAL, so anything memory holds that the WAL doesn't
 // would vanish at the next restart.
+
+// TestNoWAL_WritesApplyAndAFlushKeepsThem: Options.WAL nil means writes
+// aren't logged, not that they crash on a nil log.
+func TestNoWAL_WritesApplyAndAFlushKeepsThem(t *testing.T) {
+	ctx := context.Background()
+	engines := map[string]func(snapshotPath string) FileEngine{
+		"brute": func(path string) FileEngine {
+			return NewVectorIndex(Options[[]float32]{Metric: testCosineMetric, SnapshotPath: path})
+		},
+		"hnsw": func(path string) FileEngine {
+			return NewHNSWIndex(Options[[]float32]{Metric: testCosineMetric, SnapshotPath: path}, hnsw.Config{M: 16, EfSearch: 20, EfConstruction: 200})
+		},
+	}
+	for name, open := range engines {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "snapshot.bin")
+			idx := open(path)
+
+			// Act
+			insertErr := idx.Insert(ctx, "a", []float32{1, 0, 0}, core.SparseVector{}, nil)
+			batchFailures, batchErr := idx.BatchInsert(ctx, []BatchInsertItem{
+				{ID: "b", Vector: []float32{0, 1, 0}},
+				{ID: "c", Vector: []float32{0, 0, 1}},
+			})
+			deleted, deleteErr := idx.Delete(ctx, "c")
+			flushErr := idx.Flush(ctx)
+			restarted := open(path)
+			recoverErr := restarted.Recover(ctx)
+
+			// Assert
+			require.NoError(t, insertErr)
+			require.NoError(t, batchErr)
+			assert.Empty(t, batchFailures)
+			require.NoError(t, deleteErr)
+			assert.True(t, deleted)
+			require.NoError(t, flushErr)
+			require.NoError(t, recoverErr)
+			assert.Equal(t, 2, restarted.Len())
+			_, err := restarted.GetByID(ctx, "c")
+			assert.ErrorIs(t, err, core.ErrNotFound)
+		})
+	}
+}
 
 // TestWALWriteFails_ChangesNothing: a write the WAL can't record must not
 // reach memory, for a single insert, a delete and a whole batch alike.

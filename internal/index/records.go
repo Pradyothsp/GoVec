@@ -127,7 +127,7 @@ func (r *records[T]) insert(ctx context.Context, id string, vec []float32, spars
 	if err := r.check(vec, sparse, r.dimensions); err != nil {
 		return err
 	}
-	if err := r.wal.WriteEntry(ctx, &wal.Entry{Action: wal.ActionInsert, ID: id, Vector: vec, Sparse: sparse, Meta: meta}); err != nil {
+	if err := r.log(ctx, &wal.Entry{Action: wal.ActionInsert, ID: id, Vector: vec, Sparse: sparse, Meta: meta}); err != nil {
 		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return err
 	}
@@ -136,6 +136,16 @@ func (r *records[T]) insert(ctx context.Context, id string, vec []float32, spars
 		return err
 	}
 	return nil
+}
+
+// log writes entries to the WAL with one fsync. An engine built without a WAL
+// (Options.WAL nil) logs nothing: its writes last only until a restart, or
+// the next Flush.
+func (r *records[T]) log(ctx context.Context, entries ...*wal.Entry) error {
+	if r.wal == nil {
+		return nil
+	}
+	return r.wal.WriteEntries(ctx, entries)
 }
 
 // logBatch checks each item of a batch insert and writes the ones that pass
@@ -159,7 +169,7 @@ func (r *records[T]) logBatch(ctx context.Context, items []BatchInsertItem) (acc
 		entries = append(entries, &wal.Entry{Action: wal.ActionInsert, ID: item.ID, Vector: item.Vector, Sparse: item.Sparse, Meta: item.Meta})
 	}
 
-	if err := r.wal.WriteEntries(ctx, entries); err != nil {
+	if err := r.log(ctx, entries...); err != nil {
 		zerolog.Ctx(ctx).Error().Err(err).Int("count", len(entries)).Msg("failed to write WAL batch")
 		return nil, nil, err
 	}
@@ -181,7 +191,7 @@ func (r *records[T]) delete(ctx context.Context, id string, apply func(string) e
 		return false, nil
 	}
 
-	if err := r.wal.WriteEntry(ctx, &wal.Entry{Action: wal.ActionDelete, ID: id}); err != nil {
+	if err := r.log(ctx, &wal.Entry{Action: wal.ActionDelete, ID: id}); err != nil {
 		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to write WAL entry")
 		return false, err
 	}
