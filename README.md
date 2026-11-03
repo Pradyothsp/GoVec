@@ -58,8 +58,11 @@ Or from source (Go 1.27+):
 ```bash
 git clone https://github.com/Pradyothsp/govec.git
 cd govec
-go run ./cmd/server
+GOEXPERIMENT=simd go run ./cmd/server
 ```
+
+`GOEXPERIMENT=simd` builds the SIMD distance kernels the release image uses. Without it GoVec
+runs the same, with slower search.
 
 The server listens on `http://localhost:9697`.
 

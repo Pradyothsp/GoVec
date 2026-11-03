@@ -29,6 +29,8 @@ jobs:
 
       # A tag can point at any commit, not only one CI has already passed on.
       - name: Test with race detector
+        env:
+          GOEXPERIMENT: simd
         run: go test -race ./...
 
   image:

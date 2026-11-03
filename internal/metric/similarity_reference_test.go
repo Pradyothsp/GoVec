@@ -12,9 +12,10 @@ import (
 
 // The similarity loops are unrolled, so these check them against the textbook
 // formulas in float64 on every length that can trip an unrolled loop: shorter
-// than one block, exact blocks, and a remainder after them.
+// than one block, exact blocks, and a remainder after them. The SIMD dot
+// product works in 32-element blocks, hence 31-33 and 63-65.
 
-var unrollLengths = []int{1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 127, 128, 129, 1536, 1537, 3072}
+var unrollLengths = []int{1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1536, 1537, 3072}
 
 // signedFloats returns n values centred on zero at the scale of a unit-length
 // 1536-d embedding, so sums mix signs as real ones do.
@@ -48,30 +49,41 @@ func TestCosineSimilarity_MatchesReference(t *testing.T) {
 	}
 }
 
-// DotFloat32 sums in float32, so it is checked in cosine-distance units: the
-// error divided by both norms, which is what it moves a score by. Worst seen
-// at 1536 dimensions is ~3e-7.
+// The dot product sums in float32, so it is checked in cosine-distance units:
+// the error divided by both norms, which is what it moves a score by. Worst
+// seen at 1536 dimensions is ~3e-7. Both kernels are checked: in a SIMD build
+// DotFloat32 is the SIMD one, and dotFloat32Go the fallback for other CPUs.
 func TestDotFloat32_MatchesReference(t *testing.T) {
-	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic test data
-	for _, dims := range unrollLengths {
-		t.Run(fmt.Sprintf("d%d", dims), func(t *testing.T) {
-			for range 50 {
-				// Arrange
-				a, b := signedFloats(rng, dims), signedFloats(rng, dims)
-				var dot, na, nb float64
-				for i := range a {
-					dot += float64(a[i]) * float64(b[i])
-					na += float64(a[i]) * float64(a[i])
-					nb += float64(b[i]) * float64(b[i])
+	kernels := []struct {
+		name string
+		dot  func(a, b []float32) float32
+	}{
+		{"DotFloat32", DotFloat32},
+		{"go", dotFloat32Go},
+	}
+
+	for _, kernel := range kernels {
+		rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic test data
+		for _, dims := range unrollLengths {
+			t.Run(fmt.Sprintf("%s/d%d", kernel.name, dims), func(t *testing.T) {
+				for range 50 {
+					// Arrange
+					a, b := signedFloats(rng, dims), signedFloats(rng, dims)
+					var dot, na, nb float64
+					for i := range a {
+						dot += float64(a[i]) * float64(b[i])
+						na += float64(a[i]) * float64(a[i])
+						nb += float64(b[i]) * float64(b[i])
+					}
+
+					// Act
+					got := kernel.dot(a, b)
+
+					// Assert
+					assert.InDelta(t, dot, float64(got), 1e-6*math.Sqrt(na*nb))
 				}
-
-				// Act
-				got := DotFloat32(a, b)
-
-				// Assert
-				assert.InDelta(t, dot, float64(got), 1e-6*math.Sqrt(na*nb))
-			}
-		})
+			})
+		}
 	}
 }
 

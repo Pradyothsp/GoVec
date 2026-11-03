@@ -152,6 +152,12 @@ narrate what the code does line by line.
 - **`internal/hnsw` is a graph algorithm, nothing more.** It began as coder/hnsw but is GoVec's
   own code now, so change it freely. It must not learn about records, the WAL, config or metadata:
   GoVec-specific logic belongs in `internal/index`.
+- **SIMD needs `GOEXPERIMENT=simd`.** The float32 dot product, most of an HNSW search, has
+  NEON and AVX2 versions (`internal/metric/dot_simd_*.go`) on Go's experimental
+  `simd/archsimd`. The Taskfile, CI, release workflow and Dockerfile set the variable; a plain
+  `go test` or the pre-commit hooks don't, and build and test only the Go kernel (`dot.go`).
+  Check a kernel change both ways, and expect `simd/archsimd`'s API to change between Go
+  releases.
 - **A distance metric lives in one place.** Each metric is one entry in `internal/metric/metric.go`'s
   `metrics` table: brute force's `Similarity`, HNSW's `Distance` and optional pairs, and the
   `Score` that puts a distance on the similarity scale. `TestMetrics_FunctionsAgree` checks they

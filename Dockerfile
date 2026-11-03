@@ -17,7 +17,8 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+# GOEXPERIMENT=simd builds the SIMD dot-product kernels (internal/metric/dot_simd_*.go).
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=simd \
     go build -trimpath -ldflags="-s -w -X github.com/Pradyothsp/govec/internal/release.Version=${VERSION}" -o govec ./cmd/server
 
 # The repo's config.yaml logs at debug for local development; an image should not. Fail the

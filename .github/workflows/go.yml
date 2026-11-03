@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: ["main"]
 
+# Builds the SIMD dot-product kernels (internal/metric/dot_simd_*.go), as the release image does.
+env:
+  GOEXPERIMENT: simd
+
 jobs:
   lint:
     name: Lint
@@ -23,9 +27,13 @@ jobs:
         with:
           version: v2.14.0
 
+  # amd64 runs the AVX2 kernel and arm64 the NEON one, so each is tested on real hardware.
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.runner }})
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +47,12 @@ jobs:
 
       - name: Test with race detector and coverage
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      # A build without the experiment uses the Go kernel everywhere.
+      - name: Test the Go kernel, without GOEXPERIMENT=simd
+        env:
+          GOEXPERIMENT: ""
+        run: go test ./internal/metric/...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

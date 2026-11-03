@@ -1,5 +1,11 @@
 version: "3"
 
+# The dot-product kernels in internal/metric/dot_simd_*.go use Go's experimental
+# simd/archsimd package, which only exists with this set. Without it everything
+# still builds and passes, on the slower Go kernel.
+env:
+  GOEXPERIMENT: simd
+
 vars:
   COVERAGE_FILE: coverage.out
   COVERAGE_HTML: coverage.html
