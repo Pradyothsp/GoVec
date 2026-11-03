@@ -91,13 +91,11 @@ func SquaredEuclideanDistanceInt8(a, b []int8) float32 {
 // that norm never changes once the vector is stored, so computing it once
 // here and caching it (rather than inside every single distance() call, as
 // vek32.CosineSimilarity does today) removes real, measured redundant work
-// from HNSW's hottest loop. float64 accumulation, not float32: see
-// the HNSW graph's layerNode.precomputed doc comment for why (written for []int8's larger
-// magnitudes, but the same headroom argument applies here with room to
-// spare, since float32 inputs are typically much smaller-magnitude than
-// int8's raw +-127 range).
+// from HNSW's hottest loop. Summed by DotFloat32 like the dot products it
+// divides, so both carry the same rounding: a norm summed in float64 against
+// a float32 dot would leave a vector ~1e-7 from itself instead of ~0.
 func PrecomputeSquaredNormFloat32(v []float32) float64 {
-	return DotFloat32(v, v)
+	return float64(DotFloat32(v, v))
 }
 
 // CachedCosineDistanceFloat32 is CosineDistanceFloat32's cache-aware
@@ -116,7 +114,7 @@ func CachedCosineDistanceFloat32(aVec []float32, aCache float64, bVec []float32,
 		return 1
 	}
 	magnitude := math.Sqrt(aCache) * math.Sqrt(bCache)
-	return float32(1 - DotFloat32(aVec, bVec)/magnitude)
+	return float32(1 - float64(DotFloat32(aVec, bVec))/magnitude)
 }
 
 // PrecomputeSquaredNormInt8 computes v's squared L2 norm (sum of squares),

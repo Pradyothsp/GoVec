@@ -48,18 +48,28 @@ func TestCosineSimilarity_MatchesReference(t *testing.T) {
 	}
 }
 
+// DotFloat32 sums in float32, so it is checked in cosine-distance units: the
+// error divided by both norms, which is what it moves a score by. Worst seen
+// at 1536 dimensions is ~3e-7.
 func TestDotFloat32_MatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewPCG(14, 1536)) //nolint:gosec // deterministic test data
 	for _, dims := range unrollLengths {
 		t.Run(fmt.Sprintf("d%d", dims), func(t *testing.T) {
 			for range 50 {
+				// Arrange
 				a, b := signedFloats(rng, dims), signedFloats(rng, dims)
-				var dot float64
+				var dot, na, nb float64
 				for i := range a {
 					dot += float64(a[i]) * float64(b[i])
+					na += float64(a[i]) * float64(a[i])
+					nb += float64(b[i]) * float64(b[i])
 				}
 
-				assert.InDelta(t, dot, DotFloat32(a, b), 1e-12)
+				// Act
+				got := DotFloat32(a, b)
+
+				// Assert
+				assert.InDelta(t, dot, float64(got), 1e-6*math.Sqrt(na*nb))
 			}
 		})
 	}
