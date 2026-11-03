@@ -28,11 +28,15 @@ import (
 // HNSW graph is stored as topology only and gets its vectors from the records
 // on load.
 //
-// A record stores its vector as raw little-endian bytes, not as a gob slice:
-// gob writes each float32 as a byte-reversed float64 varint, about 8-9 bytes
-// for a real-valued embedding instead of 4, which made snapshots 1.5x the
-// vectors. Under mmap a record carries no vector; the vectors are already in
-// the mmap store, which the save syncs first.
+// A node's vector follows its gob record as raw little-endian bytes, outside
+// gob. Inside a gob value each float32 was a byte-reversed float64 varint,
+// about 8-9 bytes for a real-valued embedding instead of 4, which made
+// snapshots 1.5x the vectors. As a []byte field it was the right size but
+// loaded in three copies: gob's buffer for the message, the decoded []byte,
+// then the vector itself, 3x the vectors in garbage. Read raw, it is read once
+// into a reused buffer and copied into the vector. Under mmap there are no
+// vector bytes; the vectors are already in the mmap store, which the save
+// syncs first.
 
 // snapshotChunkSize bounds how much of the graph topology is held in memory
 // while it streams into the snapshot.
@@ -76,23 +80,35 @@ func (w *snapshotWriter) publish(walLog *wal.Log) error {
 	return publishSnapshot(w.f, w.tmpPath, w.path, walLog)
 }
 
-// nodeRecord is one node as a snapshot stores it.
+// snapshotReader reads a snapshot through one buffer that both the gob
+// decoder and the raw vector reads share. gob wraps a reader that isn't an
+// io.ByteReader in its own buffer and reads ahead into it, which would swallow
+// the raw bytes; given a bufio.Reader it reads exactly one message at a time.
+type snapshotReader struct {
+	r   *bufio.Reader
+	dec *gob.Decoder
+}
+
+func newSnapshotReader(f io.Reader) *snapshotReader {
+	r := bufio.NewReaderSize(f, snapshotChunkSize)
+	return &snapshotReader{r: r, dec: gob.NewDecoder(r)}
+}
+
+// nodeRecord is one node as a snapshot stores it, less its vector.
 type nodeRecord struct {
 	InternalID uint32
 	ExternalID string
-	Vector     []byte // appendVectorBytes; empty under mmap
 	Sparse     core.SparseVector
 	Metadata   map[string]any
 }
 
-// writeNodeRecords writes the node count, then one record per node. Under
-// mmap (vectorsInline false) a record leaves the vector out.
-func writeNodeRecords[T any](enc *gob.Encoder, nodes map[uint32]*core.VectorNode[T], vectorsInline bool) error {
-	if err := enc.Encode(len(nodes)); err != nil {
+// writeNodeRecords writes the node count, then each node's record followed by
+// its vector's bytes. Under mmap (vectorsInline false) the bytes are left out.
+func writeNodeRecords[T any](w *snapshotWriter, nodes map[uint32]*core.VectorNode[T], vectorsInline bool) error {
+	if err := w.enc.Encode(len(nodes)); err != nil {
 		return fmt.Errorf("encode node count: %w", err)
 	}
 
-	// Reused for every record: Encode copies it into gob's buffer.
 	var vecBuf []byte
 	for _, node := range nodes {
 		record := nodeRecord{
@@ -101,31 +117,38 @@ func writeNodeRecords[T any](enc *gob.Encoder, nodes map[uint32]*core.VectorNode
 			Sparse:     node.Sparse,
 			Metadata:   node.Metadata,
 		}
+		if err := w.enc.Encode(record); err != nil {
+			return fmt.Errorf("encode node %q: %w", node.ExternalID, err)
+		}
+
 		if vectorsInline {
 			vecBuf = appendVectorBytes(vecBuf[:0], node.Vector)
-			record.Vector = vecBuf
-		}
-		if err := enc.Encode(record); err != nil {
-			return fmt.Errorf("encode node %q: %w", node.ExternalID, err)
+			if _, err := w.buf.Write(vecBuf); err != nil {
+				return fmt.Errorf("write vector of node %q: %w", node.ExternalID, err)
+			}
 		}
 	}
 	return nil
 }
 
-// readNodeRecords reads what writeNodeRecords wrote into nodes. With an mmap
-// store, each record's vector comes from the store instead of the stream.
-func readNodeRecords[T any](dec *gob.Decoder, nodes map[uint32]*core.VectorNode[T], mmapStore *storage.MmapStore) error {
+// readNodeRecords reads what writeNodeRecords wrote into nodes. Each vector
+// takes vectorBytes; with an mmap store it comes from the store instead.
+func readNodeRecords[T any](sr *snapshotReader, nodes map[uint32]*core.VectorNode[T], vectorBytes int, mmapStore *storage.MmapStore) error {
 	var count int
-	if err := dec.Decode(&count); err != nil {
+	if err := sr.dec.Decode(&count); err != nil {
 		return fmt.Errorf("decode node count: %w", err)
 	}
+	if count > 0 && mmapStore == nil && vectorBytes == 0 {
+		return fmt.Errorf("snapshot holds %d nodes but records no vector dimensions", count)
+	}
 
+	vecBuf := make([]byte, vectorBytes)
 	for i := range count {
 		// A fresh record each time: gob leaves fields absent from the stream
 		// (zero values) as they were, so a reused one would carry the previous
 		// node's metadata into the next.
 		var record nodeRecord
-		if err := dec.Decode(&record); err != nil {
+		if err := sr.dec.Decode(&record); err != nil {
 			return fmt.Errorf("decode node %d of %d: %w", i+1, count, err)
 		}
 
@@ -137,8 +160,11 @@ func readNodeRecords[T any](dec *gob.Decoder, nodes map[uint32]*core.VectorNode[
 				return fmt.Errorf("mmap slot missing for internalID %d (externalID %q)", record.InternalID, record.ExternalID)
 			}
 		} else {
+			if _, err := io.ReadFull(sr.r, vecBuf); err != nil {
+				return fmt.Errorf("read vector of node %q: %w", record.ExternalID, err)
+			}
 			var err error
-			vec, err = vectorFromBytes[T](record.Vector)
+			vec, err = vectorFromBytes[T](vecBuf)
 			if err != nil {
 				return fmt.Errorf("decode node %q: %w", record.ExternalID, err)
 			}
@@ -153,6 +179,14 @@ func readNodeRecords[T any](dec *gob.Decoder, nodes map[uint32]*core.VectorNode[
 		}
 	}
 	return nil
+}
+
+// bytesPerElement is how many bytes appendVectorBytes writes per element of T.
+func bytesPerElement[T any]() int {
+	if _, ok := any(*new(T)).([]int8); ok {
+		return 1
+	}
+	return 4
 }
 
 // appendVectorBytes appends vec to dst as little-endian float32s, or as one
@@ -207,8 +241,8 @@ func asVector[T any](vec any) (T, error) {
 
 // gobChunkWriter carries a byte stream inside a gob stream: what's written to
 // it goes out as gob-encoded []byte chunks of up to snapshotChunkSize, and
-// Close writes an empty chunk to end it. Raw bytes can't be interleaved with
-// gob values directly -- the decoder reads ahead of the value it returns.
+// Close writes an empty chunk to end it. Unlike a vector's, the topology's
+// length isn't known before it is written, so it carries its own end.
 type gobChunkWriter struct {
 	enc *gob.Encoder
 	buf []byte

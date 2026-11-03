@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -126,6 +127,39 @@ func TestLoadFromFile_Failures(t *testing.T) {
 				assert.Zero(t, idx.Len())
 			})
 		}
+	}
+}
+
+// TestLoadFromFile_CutOffMidVector: vectors are raw bytes after each record,
+// outside gob, so a short read there is the loader's own check to make.
+func TestLoadFromFile_CutOffMidVector(t *testing.T) {
+	ctx := context.Background()
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, _ := e.open(t)
+			rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic test data
+			for i := range 50 {
+				vec := make([]float32, 64)
+				for j := range vec {
+					vec[j] = rng.Float32()
+				}
+				require.NoError(t, idx.Insert(ctx, fmt.Sprintf("doc-%d", i), vec, core.SparseVector{}, nil))
+			}
+			path := filepath.Join(t.TempDir(), "snapshot.bin")
+			require.NoError(t, idx.SaveToFile(ctx, path))
+			full, err := os.ReadFile(path) //nolint:gosec // test temp dir
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, full[:len(full)/2], 0o600))
+			loaded, _ := e.open(t)
+
+			// Act
+			err = loaded.LoadFromFile(ctx, path)
+
+			// Assert
+			require.ErrorContains(t, err, "read vector of node")
+			assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		})
 	}
 }
 

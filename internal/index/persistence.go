@@ -35,11 +35,12 @@ type SnapshotHeader struct {
 }
 
 // snapshotVersion is written into every snapshot header, and a load rejects
-// any other (checkSnapshotVersion). 3: the HNSW topology no longer carries the
+// any other (checkSnapshotVersion). 4: a vector's bytes follow its record,
+// outside gob. 3: the HNSW topology no longer carries the
 // distance function or ef_search; config supplies both. 2: streamed records,
 // HNSW topology only (snapshot_stream.go). 1: each section as one gob value,
 // vectors twice for HNSW.
-const snapshotVersion = 3
+const snapshotVersion = 4
 
 // The inverted index is never written to a snapshot. It is derived data --
 // every posting comes from a node's sparse vector, which the snapshot does
@@ -197,16 +198,16 @@ func startSnapshot[T metric.VectorType](path string, c snapshotContents[T]) (*sn
 		w.abort()
 		return nil, err
 	}
-	if err := writeNodeRecords(w.enc, c.nodes, c.vectorStore == nil); err != nil {
+	if err := writeNodeRecords(w, c.nodes, c.vectorStore == nil); err != nil {
 		w.abort()
 		return nil, err
 	}
 	return w, nil
 }
 
-// readSnapshotFile opens the snapshot at path and hands its decoder to read.
+// readSnapshotFile opens the snapshot at path and hands it to read.
 // A missing file means there is no snapshot yet: found is false, err nil.
-func readSnapshotFile(path string, read func(*gob.Decoder) error) (found bool, err error) {
+func readSnapshotFile(path string, read func(*snapshotReader) error) (found bool, err error) {
 	f, err := os.Open(path) //nolint:gosec // path from operator config
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -220,13 +221,14 @@ func readSnapshotFile(path string, read func(*gob.Decoder) error) (found bool, e
 		}
 	}()
 
-	return true, read(gob.NewDecoder(f))
+	return true, read(newSnapshotReader(f))
 }
 
 // readSnapshotContents reads what startSnapshot wrote into c.idMapper and
 // c.nodes, after checking the header against c and the build. It returns the
 // index's width after the load (see loadedDimensions).
-func readSnapshotContents[T metric.VectorType](dec *gob.Decoder, c snapshotContents[T], configuredDims int) (int, error) {
+func readSnapshotContents[T metric.VectorType](sr *snapshotReader, c snapshotContents[T], configuredDims int) (int, error) {
+	dec := sr.dec
 	var header SnapshotHeader
 	if err := dec.Decode(&header); err != nil {
 		return 0, fmt.Errorf("failed to decode snapshot header: %w", err)
@@ -262,7 +264,7 @@ func readSnapshotContents[T metric.VectorType](dec *gob.Decoder, c snapshotConte
 	if header.Mmap {
 		mmapStore = c.vectorStore
 	}
-	if err := readNodeRecords(dec, c.nodes, mmapStore); err != nil {
+	if err := readNodeRecords(sr, c.nodes, header.Dimensions*bytesPerElement[T](), mmapStore); err != nil {
 		return 0, err
 	}
 	return dims, nil
@@ -305,8 +307,8 @@ func (idx *VectorIndex[T]) LoadFromFile(ctx context.Context, path string) error 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	found, err := readSnapshotFile(path, func(dec *gob.Decoder) error {
-		dims, err := readSnapshotContents(dec, idx.snapshotContents(), idx.configuredDimensions)
+	found, err := readSnapshotFile(path, func(sr *snapshotReader) error {
+		dims, err := readSnapshotContents(sr, idx.snapshotContents(), idx.configuredDimensions)
 		if err != nil {
 			return err
 		}

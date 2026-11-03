@@ -3,7 +3,6 @@ package index
 import (
 	"bufio"
 	"context"
-	"encoding/gob"
 	"fmt"
 	"time"
 
@@ -250,8 +249,8 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	found, err := readSnapshotFile(path, func(dec *gob.Decoder) error {
-		dims, err := readSnapshotContents(dec, idx.snapshotContents(), idx.configuredDimensions)
+	found, err := readSnapshotFile(path, func(sr *snapshotReader) error {
+		dims, err := readSnapshotContents(sr, idx.snapshotContents(), idx.configuredDimensions)
 		if err != nil {
 			return err
 		}
@@ -265,7 +264,7 @@ func (idx *HNSWIndex[T]) LoadFromFile(ctx context.Context, path string) error {
 			}
 			return node.Vector, true
 		}
-		topology := bufio.NewReaderSize(newGobChunkReader(dec), snapshotChunkSize)
+		topology := bufio.NewReaderSize(newGobChunkReader(sr.dec), snapshotChunkSize)
 		if err := idx.graph.ImportTopology(topology, lookupVec); err != nil {
 			return fmt.Errorf("failed to import HNSW topology: %w", err)
 		}
