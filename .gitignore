@@ -13,3 +13,6 @@
 
 # Task runner cache
 .task/
+
+# Downloaded benchmark results (scripts/kernels-results.sh)
+/bench-results/

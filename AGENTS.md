@@ -20,7 +20,7 @@ production-quality code, not a Pinecone competitor. Use these limits when choosi
 
 | Command | Use |
 |---|---|
-| `task install-tools` | One-time setup: gotestsum, golangci-lint, govulncheck, swag, buf |
+| `task install-tools` | One-time setup: gotestsum, golangci-lint, govulncheck, swag, buf, benchstat |
 | `task test` | Fast test run |
 | `task test:pkg PKG=internal/index` | Tests for one package |
 | `task test:all` | Race detector and coverage. Run before calling work done |
@@ -28,7 +28,7 @@ production-quality code, not a Pinecone competitor. Use these limits when choosi
 | `task fmt:fix` | Auto-fix formatting |
 | `task gen` | Regenerate Swagger (`build/swagger/`) and gRPC stubs (`gen/`) |
 | `task build` / `task run` | Build the binary / run the server on :9697 |
-| `gh workflow run kernels.yml` | Time the distance kernels on amd64 (AVX2), Linux arm64 and macOS arm64 (NEON), with SIMD and with the Go kernel; `-f ref=<branch>` for a change before it merges. Artifacts: `bench.txt` (`benchstat -col kernel`), `machine.txt` |
+| `gh workflow run kernels.yml` | Time the distance kernels on amd64 (AVX2), Linux arm64 and macOS arm64 (NEON), with SIMD and with the Go kernel; `-f ref=<branch>` for a change before it merges. Artifacts: `bench.txt` (`benchstat -col kernel`), `machine.txt`. `task bench:kernels:results` downloads the latest run into `bench-results/` (gitignored) and prints the comparison per runner |
 
 `task run` writes `govec.wal` and `govec_data.bin` into the repo root, and `task clean` removes
 them. Don't commit them.
@@ -71,6 +71,12 @@ Dependencies point inward: transports (`api`, `grpcserver`) → `index` → `cor
 from this repo, and `index` never imports a transport. Keep it that way.
 
 ## Conventions
+
+**Every engine gets every improvement.** Brute force and HNSW (and any engine added later) are
+held to the same standard: a speed-up, kernel or fix made for one is made for all, or the work
+isn't done. Measure each engine before calling the change finished. Example of the gap this rule
+closes: 0.3.0's SIMD dot product speeds up HNSW's distance, but brute force scores with its own
+loops (`metric.CosineSimilarity`, `cosineSums`) and gets none of it.
 
 **Transports are thin and must agree.** REST and gRPC are two wire formats over one `Engine`. An
 operation must return the same result and status string over either one.

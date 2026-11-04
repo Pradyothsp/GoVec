@@ -91,6 +91,10 @@ tasks:
     cmds:
       - go test -bench=. -run=^$ -v ./...
 
+  bench:kernels:results:
+    desc: Download a Kernels workflow run and compare SIMD with the Go kernel per runner (latest, or -- <run id>)
+    cmd: scripts/kernels-results.sh {{.CLI_ARGS}}
+
   # Run linters with golangci-lint
   lint:
     desc: Run linters (golangci-lint)
@@ -235,7 +239,7 @@ tasks:
 
   # Install all development tools
   install-tools:
-    desc: Install all development tools (gotestsum, golangci-lint, govulncheck, swag, buf)
+    desc: Install all development tools (gotestsum, golangci-lint, govulncheck, swag, buf, benchstat)
     vars:
       GOLANGCI_LINT_VERSION: v2.14.0
     cmds:
@@ -253,4 +257,6 @@ tasks:
       - go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
       - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
       - go install golang.org/x/tools/cmd/goimports@latest
+      - echo "==> Installing benchstat..."
+      - go install golang.org/x/perf/cmd/benchstat@latest
       - echo "All tools installed."
