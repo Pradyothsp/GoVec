@@ -1,16 +1,24 @@
 name: Kernels
 
 # Times the distance kernels (internal/metric's BenchmarkDistance and BenchmarkSimilarity) on real
-# hardware: amd64 runs the AVX2 kernel, Linux and macOS arm64 the NEON one. Each benchmark runs
-# with GOEXPERIMENT=simd and without it (the Go kernel), labelled "kernel: simd" and "kernel: go",
-# so `benchstat -col kernel bench.txt` compares them. Started by hand; `ref` times another branch
-# or commit, such as a kernel change before it merges. Each runner is its own machine: compare
-# within one runner's results, and machine.txt names its CPU.
+# hardware: amd64 runs the AVX2 kernel, Linux and macOS arm64 the NEON one. Started by hand.
+#
+# `ref` against `base` on the same runner: GitHub hands out a different CPU from run to run (a Xeon
+# one day, an EPYC the next), so a change is only measured against its base inside one job. Each
+# runner builds `base` and `ref` with GOEXPERIMENT=simd, and `base` without it (the Go kernel), then
+# runs them in turn, one count at a time, so drift on the runner lands on all of them alike. The
+# runs are labelled "kernel: <base>/simd", "kernel: <ref>/simd" and "kernel: <base>/go";
+# `benchstat -col kernel bench.txt` compares them. With `ref` equal to `base`, only base and the Go
+# kernel run. machine.txt names the CPU and both commits.
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: "Branch, tag or commit to time"
+        required: false
+        default: main
+      base:
+        description: "What to compare it with, on the same runner"
         required: false
         default: main
       count:
@@ -29,22 +37,48 @@ jobs:
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      BASE: ${{ inputs.base }}
+      REF: ${{ inputs.ref }}
+      COUNT: ${{ inputs.count }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
+      - name: Build base and ref
+        run: |
+          # A branch exists only as origin/<name> in this checkout; a tag or commit as itself.
+          resolve() {
+            git rev-parse --verify --quiet "origin/$1^{commit}" || git rev-parse --verify "$1^{commit}"
+          }
+          build() { # name, commit, GOEXPERIMENT
+            git worktree add --detach --quiet "$RUNNER_TEMP/$1" "$2"
+            (cd "$RUNNER_TEMP/$1" && GOEXPERIMENT="$3" go test -c -o "$RUNNER_TEMP/$1.test" ./internal/metric/)
+          }
+
+          base_sha=$(resolve "$BASE")
+          ref_sha=$(resolve "$REF")
+          build base-simd "$base_sha" simd
+          build base-go "$base_sha" ""
+          if [ "$ref_sha" != "$base_sha" ]; then
+            build ref-simd "$ref_sha" simd
+          fi
+          echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
+          echo "REF_SHA=$ref_sha" >> "$GITHUB_ENV"
+
       - name: Record the machine
         run: |
           {
             echo "runner: ${{ matrix.runner }}"
-            echo "commit: $(git rev-parse --short HEAD)"
+            echo "base: $BASE $(git rev-parse --short "$BASE_SHA")"
+            echo "ref: $REF $(git rev-parse --short "$REF_SHA")"
             go version
             if command -v lscpu > /dev/null; then
               lscpu
@@ -54,14 +88,26 @@ jobs:
             fi
           } | tee machine.txt
 
-      - name: Benchmark with the SIMD kernels and with the Go kernel
-        env:
-          COUNT: ${{ inputs.count }}
+      - name: Benchmark, base and ref in turn
         run: |
-          for kernel in simd go; do
-            echo "kernel: $kernel"
-            if [ "$kernel" = simd ]; then experiment=simd; else experiment=""; fi
-            GOEXPERIMENT="$experiment" go test -run '^$' -bench 'Distance|Similarity' -count "$COUNT" ./internal/metric/
+          # Test binary and its label, side by side.
+          binaries="base-simd base-go"
+          if [ "$REF_SHA" != "$BASE_SHA" ]; then
+            binaries="base-simd ref-simd base-go"
+          fi
+          label() {
+            case "$1" in
+              base-simd) echo "$BASE/simd" ;;
+              ref-simd) echo "$REF/simd" ;;
+              base-go) echo "$BASE/go" ;;
+            esac
+          }
+
+          for _ in $(seq "$COUNT"); do
+            for binary in $binaries; do
+              echo "kernel: $(label "$binary")"
+              "$RUNNER_TEMP/$binary.test" -test.run '^$' -test.bench 'Distance|Similarity' -test.count 1
+            done
           done | tee bench.txt
 
       - uses: actions/upload-artifact@v4

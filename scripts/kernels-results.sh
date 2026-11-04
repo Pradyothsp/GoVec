@@ -41,10 +41,11 @@ fi
     if [ -z "$cpu" ]; then
       cpu=$(grep -A1 '^go version' "$dir/machine.txt" | tail -1)
     fi
-    commit=$(sed -n -e 's/^commit: //p' "$dir/machine.txt" | head -1)
+    # Runs before base/ref existed recorded one "commit:" line.
+    commits=$(grep -E '^(base|ref|commit): ' "$dir/machine.txt" | paste -sd ';' - | sed 's/;/; /g')
 
     echo
-    echo "== $runner: $cpu (commit $commit)"
+    echo "== $runner: $cpu ($commits)"
     benchstat -col kernel "$dir/bench.txt"
   done
 } | tee "$out/summary.txt"
