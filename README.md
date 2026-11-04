@@ -224,7 +224,9 @@ neighbours. Every change the harness makes to a database's or client's defaults 
 the reason, in govec-bench's README.
 
 Medians of three rounds in one session (November 3, 2026, GoVec 0.3.0) on a GitHub-hosted runner:
-AMD EPYC, 4 vCPUs, Docker on Linux.
+AMD EPYC 9V45 (Zen 5), 4 vCPUs, Docker on Linux. The runner's processor isn't fixed (another
+session got a Zen 3 EPYC 7763, and every database ran 1.5–1.6x slower), so the milliseconds
+are this machine's; the ratios between databases carry over far better.
 
 | | GoVec | GoVec (int8) | GoVec (mmap)† | Chroma | Qdrant |
 |---|---:|---:|---:|---:|---:|
