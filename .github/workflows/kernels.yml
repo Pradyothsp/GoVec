@@ -1,0 +1,73 @@
+name: Kernels
+
+# Times the distance kernels (internal/metric's BenchmarkDistance and BenchmarkSimilarity) on real
+# hardware: amd64 runs the AVX2 kernel, Linux and macOS arm64 the NEON one. Each benchmark runs
+# with GOEXPERIMENT=simd and without it (the Go kernel), labelled "kernel: simd" and "kernel: go",
+# so `benchstat -col kernel bench.txt` compares them. Started by hand; `ref` times another branch
+# or commit, such as a kernel change before it merges. Each runner is its own machine: compare
+# within one runner's results, and machine.txt names its CPU.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to time"
+        required: false
+        default: main
+      count:
+        description: "Runs of each benchmark, for benchstat"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: Kernels (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Record the machine
+        run: |
+          {
+            echo "runner: ${{ matrix.runner }}"
+            echo "commit: $(git rev-parse --short HEAD)"
+            go version
+            if command -v lscpu > /dev/null; then
+              lscpu
+            else
+              sysctl -n machdep.cpu.brand_string
+              sysctl hw.ncpu hw.memsize hw.l1dcachesize hw.l2cachesize
+            fi
+          } | tee machine.txt
+
+      - name: Benchmark with the SIMD kernels and with the Go kernel
+        env:
+          COUNT: ${{ inputs.count }}
+        run: |
+          for kernel in simd go; do
+            echo "kernel: $kernel"
+            if [ "$kernel" = simd ]; then experiment=simd; else experiment=""; fi
+            GOEXPERIMENT="$experiment" go test -run '^$' -bench 'Distance|Similarity' -count "$COUNT" ./internal/metric/
+          done | tee bench.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernels-${{ matrix.runner }}
+          path: |
+            machine.txt
+            bench.txt

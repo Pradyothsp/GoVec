@@ -28,6 +28,7 @@ production-quality code, not a Pinecone competitor. Use these limits when choosi
 | `task fmt:fix` | Auto-fix formatting |
 | `task gen` | Regenerate Swagger (`build/swagger/`) and gRPC stubs (`gen/`) |
 | `task build` / `task run` | Build the binary / run the server on :9697 |
+| `gh workflow run kernels.yml` | Time the distance kernels on amd64 (AVX2), Linux arm64 and macOS arm64 (NEON), with SIMD and with the Go kernel; `-f ref=<branch>` for a change before it merges. Artifacts: `bench.txt` (`benchstat -col kernel`), `machine.txt` |
 
 `task run` writes `govec.wal` and `govec_data.bin` into the repo root, and `task clean` removes
 them. Don't commit them.
