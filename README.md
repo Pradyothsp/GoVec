@@ -270,7 +270,25 @@ without a SIMD kernel its search is slower than float32's.
 
 Against GoVec 0.2.1 in the same session, 0.3.0 cut query latency by 43% (48% over gRPC), batch
 inserts by 47%, single inserts by 36% and restarts with data by 30%, at the same recall and memory.
-SIFT results, an ef sweep, the method and how to reproduce are in the govec-bench repo.
+
+**Under concurrent queries** (a separate session, on an AMD EPYC 7763 runner, Zen 3, where every
+database answers one query 1.5–1.6x slower than above; medians of three rounds), 1 to 32 Python
+client processes queried the same 100k index at once:
+
+| | GoVec | Chroma | Qdrant |
+|---|---:|---:|---:|
+| Most queries/s, REST (at clients) | 482 (4) | 480 (2) | **539** (32) |
+| Most queries/s, gRPC (at clients) | 592 (32) | | **723** (16) |
+| Database CPU at that point, REST (cap 2) | 1.97 | 1.46 | 1.71 |
+
+GoVec is the first to use its whole 2 CPUs, at 4 clients; past that more clients add mostly
+latency. Its peak is 0.89x Qdrant's over REST and 0.82x over gRPC, about the gap in its
+single-query latency, now as a throughput ceiling. Chroma stops gaining at 2 clients while
+under its CPU cap. Qdrant's peak is a lower bound: its client is the heaviest, and the runner was
+close to out of CPU. Every database kept its recall at every level.
+
+SIFT results, an ef sweep, the concurrency details, the method and how to reproduce are in the
+govec-bench repo.
 
 ## Status and limitations
 
