@@ -1,0 +1,7 @@
+version: 1
+skills_dir: .agents/skills
+skills:
+  Pradyoth/commit-message-conventions:
+    copied_at: '2026-09-30T21:14:01.185862'
+    copied_hash: 
+      1c446bf074b558a1e73c157da5e8fa4fbb4f6fe7f9b0c58c3126af9c923c96d4

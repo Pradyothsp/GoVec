@@ -44,6 +44,6 @@ engine:
   # hnsw_seed: 0                     # Seeds level assignment so the same inserts build the same graph (reproducible benchmarks). 0 = seeded from the clock
 
 grpc:
-  enabled: false              # Set to true to start the gRPC server
+  enabled: true              # Set to true to start the gRPC server
   port: 9698                 # gRPC listen port (must differ from HTTP port)
   max_recv_msg_size_mb: 64    # Max incoming message size in MB
