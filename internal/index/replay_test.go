@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -54,6 +55,26 @@ func TestReplayWAL_EntryThatCannotBeApplied_ReturnsError(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Writes refuse NaN now, but a log written before they did may hold one. It
+// was acknowledged then, so it must still replay rather than stop the server.
+func TestReplayWAL_NonFiniteEntryFromAnOlderServer_StillLoads(t *testing.T) {
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, _ := e.open(t)
+			old := wal.Entry{Action: wal.ActionInsert, ID: "old", Vector: []float32{1, float32(math.NaN()), 0}}
+			path := writeLog(t, goodEntry, old)
+
+			// Act
+			err := idx.ReplayWAL(path)
+
+			// Assert
+			require.NoError(t, err)
+			assert.Equal(t, 2, idx.Len())
+		})
 	}
 }
 

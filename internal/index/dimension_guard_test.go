@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,6 +58,78 @@ func TestValidateVectorDims_ErrorsAreClassifiable(t *testing.T) {
 	assert.False(t, IsInvalidVectorError(nil), "no error is not a client error")
 	assert.False(t, IsInvalidVectorError(errors.New("disk on fire")),
 		"an unrelated failure must still read as a server fault")
+}
+
+func TestValidateFinite(t *testing.T) {
+	nan, inf := float32(math.NaN()), float32(math.Inf(1))
+	tests := []struct {
+		name    string
+		vec     []float32
+		sparse  core.SparseVector
+		meta    map[string]any
+		wantErr string
+	}{
+		{name: "all_finite", vec: []float32{1, -2}, sparse: core.SparseVector{Indices: []uint32{1}, Values: []float32{0.5}},
+			meta: map[string]any{"year": 2024.0, "tags": []any{"a", 1.0}, "range": map[string]any{"$gt": 1.0}}},
+		{name: "nan_in_vector", vec: []float32{1, nan}, wantErr: "vector[1]"},
+		{name: "negative_infinity_in_vector", vec: []float32{float32(math.Inf(-1))}, wantErr: "vector[0]"},
+		{name: "infinity_in_sparse_value", vec: []float32{1}, sparse: core.SparseVector{Indices: []uint32{7}, Values: []float32{inf}}, wantErr: "sparse_vector value 0"},
+		{name: "nan_in_metadata", vec: []float32{1}, meta: map[string]any{"score": math.NaN()}, wantErr: `"score"`},
+		{name: "infinity_in_a_list", vec: []float32{1}, meta: map[string]any{"tags": []any{"a", math.Inf(1)}}, wantErr: `"tags"`},
+		{name: "nan_in_a_filter_operator", vec: []float32{1}, meta: map[string]any{"year": map[string]any{"$gt": math.NaN()}}, wantErr: `"year"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := validateFinite(tt.vec, tt.sparse, tt.meta)
+
+			// Assert
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrNonFinite)
+			assert.True(t, IsInvalidVectorError(err), "transports must answer 400 / InvalidArgument")
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// A NaN used to be stored and then score NaN against every query; in metadata
+// it failed the WAL write instead, as a server fault. Both are now refused
+// before the WAL, on insert, per batch item, and on search.
+func TestNonFinite_IsRejectedOnEveryWriteAndQuery(t *testing.T) {
+	ctx := context.Background()
+	nan := float32(math.NaN())
+	for _, e := range bothEngines {
+		t.Run(e.name, func(t *testing.T) {
+			// Arrange
+			idx, r := e.open(t)
+			require.NoError(t, idx.Insert(ctx, "good", []float32{1, 2, 3}, core.SparseVector{}, nil))
+
+			// Act
+			insertErr := idx.Insert(ctx, "nan", []float32{1, nan, 3}, core.SparseVector{}, nil)
+			metaErr := idx.Insert(ctx, "meta", []float32{1, 2, 3}, core.SparseVector{}, map[string]any{"score": math.NaN()})
+			failures, batchErr := idx.BatchInsert(ctx, []BatchInsertItem{
+				{ID: "a", Vector: []float32{3, 2, 1}},
+				{ID: "inf", Vector: []float32{float32(math.Inf(1)), 2, 3}},
+			})
+			_, searchErr := idx.Search(ctx, []float32{nan, 2, 3}, core.SparseVector{}, 1, nil)
+			_, filterErr := idx.Search(ctx, []float32{1, 2, 3}, core.SparseVector{}, 1, map[string]any{"score": math.Inf(-1)})
+
+			// Assert
+			assert.ErrorIs(t, insertErr, ErrNonFinite)
+			assert.ErrorIs(t, metaErr, ErrNonFinite)
+			require.NoError(t, batchErr, "one bad item must not abort the whole batch")
+			require.Len(t, failures, 1)
+			assert.Equal(t, "inf", failures[0].ID)
+			assert.ErrorIs(t, failures[0].Err, ErrNonFinite)
+			assert.ErrorIs(t, searchErr, ErrNonFinite)
+			assert.ErrorIs(t, filterErr, ErrNonFinite)
+			assert.Len(t, r.nodes, 2, "only good and a are stored")
+		})
+	}
 }
 
 // bothEngines opens each engine over a float32 cosine index, along with the

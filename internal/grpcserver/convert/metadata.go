@@ -41,11 +41,36 @@ func MetaToProto(in map[string]interface{}) (map[string]*structpb.Value, error) 
 
 // protoValueToInterface recursively converts a *structpb.Value to a Go native type.
 // Numbers are always float64 to match JSON unmarshal behaviour.
+//
+// Not structpb's AsInterface: that turns NaN and infinity into the strings
+// "NaN" and "Infinity", so a NaN in metadata was stored as text and a NaN
+// filter matched it. Kept as float64, they reach the index's finite check and
+// are refused there, as on every other path.
 func protoValueToInterface(v *structpb.Value) interface{} {
-	if v == nil {
+	switch k := v.GetKind().(type) {
+	case *structpb.Value_NumberValue:
+		return k.NumberValue
+	case *structpb.Value_StringValue:
+		return k.StringValue
+	case *structpb.Value_BoolValue:
+		return k.BoolValue
+	case *structpb.Value_StructValue:
+		fields := k.StructValue.GetFields()
+		out := make(map[string]interface{}, len(fields))
+		for key, item := range fields {
+			out[key] = protoValueToInterface(item)
+		}
+		return out
+	case *structpb.Value_ListValue:
+		values := k.ListValue.GetValues()
+		out := make([]interface{}, len(values))
+		for i, item := range values {
+			out[i] = protoValueToInterface(item)
+		}
+		return out
+	default: // nil, NullValue, or no kind set
 		return nil
 	}
-	return v.AsInterface()
 }
 
 // interfaceToProtoValue converts a Go value to a *structpb.Value.

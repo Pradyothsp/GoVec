@@ -3,6 +3,7 @@ package index
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/Pradyothsp/govec/internal/core"
 )
@@ -18,17 +19,80 @@ var (
 	// ErrInvalidSparseVector is returned when a sparse vector's indices and
 	// values differ in length, or its indices aren't strictly ascending.
 	ErrInvalidSparseVector = errors.New("invalid sparse_vector")
+
+	// ErrNonFinite is returned when a vector, a sparse weight, metadata or a
+	// filter holds NaN or infinity.
+	ErrNonFinite = errors.New("NaN and infinity are not allowed")
 )
 
 // IsInvalidVectorError reports whether err means the caller supplied an
-// unusable vector, as opposed to the server failing.
+// unusable vector -- or metadata or a filter that can't go with one -- as
+// opposed to the server failing.
 //
 // Transports use this to answer with a client-error status -- HTTP 400, gRPC
 // InvalidArgument -- rather than reporting a 500 for a request the server
 // correctly rejected. Keeping the classification here means the transports do
 // not each need to know which sentinels the index layer defines.
 func IsInvalidVectorError(err error) bool {
-	return errors.Is(err, ErrEmptyVector) || errors.Is(err, ErrDimensionMismatch) || errors.Is(err, ErrInvalidSparseVector)
+	return errors.Is(err, ErrEmptyVector) || errors.Is(err, ErrDimensionMismatch) || errors.Is(err, ErrInvalidSparseVector) || errors.Is(err, ErrNonFinite)
+}
+
+// validateFinite rejects NaN and infinity anywhere in a write or a query.
+//
+// None of it fails on its own: a NaN compares false against every bound, so
+// it passed the quantization range check, was stored, and scored NaN against
+// every query, landing anywhere in the ranking. JSON can't carry NaN, so in
+// practice it arrives over gRPC; the check sits here so both transports, and
+// any later one, refuse it alike. A float NaN reaching the WAL in metadata
+// would also fail its JSON encoding, a caller's mistake reported as a 500.
+func validateFinite(vec []float32, sparse core.SparseVector, meta map[string]any) error {
+	for i, v := range vec {
+		if !isFinite(float64(v)) {
+			return fmt.Errorf("%w: vector[%d] is %v", ErrNonFinite, i, v)
+		}
+	}
+
+	for i, v := range sparse.Values {
+		if !isFinite(float64(v)) {
+			return fmt.Errorf("%w: sparse_vector value %d is %v", ErrNonFinite, i, v)
+		}
+	}
+
+	for k, v := range meta {
+		if !finiteValue(v) {
+			return fmt.Errorf("%w: metadata or filter key %q", ErrNonFinite, k)
+		}
+	}
+
+	return nil
+}
+
+// finiteValue walks a decoded JSON or protobuf value: both decode numbers as
+// float64, and nest them in maps and lists.
+func finiteValue(v any) bool {
+	switch v := v.(type) {
+	case float64:
+		return isFinite(v)
+	case float32:
+		return isFinite(float64(v))
+	case map[string]any:
+		for _, item := range v {
+			if !finiteValue(item) {
+				return false
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if !finiteValue(item) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 // validateSparse rejects a sparse vector whose indices and values don't pair

@@ -65,7 +65,7 @@ func (idx *VectorIndex[T]) Search(_ context.Context, query []float32, sparseQuer
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	encodedQuery, skip, err := idx.prepareSearch(query, sparseQuery, limit)
+	encodedQuery, skip, err := idx.prepareSearch(query, sparseQuery, filters, limit)
 	if err != nil || skip {
 		return nil, err
 	}
