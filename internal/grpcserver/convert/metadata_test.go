@@ -1,6 +1,7 @@
 package convert_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,26 @@ func TestMetadata_RoundTrip(t *testing.T) {
 			assert.Equal(t, tt.meta, back)
 		})
 	}
+}
+
+// structpb's own AsInterface turns NaN into the string "NaN", which the index
+// then stored as text. A number must stay a number, so the index's finite
+// check sees it.
+func TestProtoToMeta_NonFiniteNumber_StaysAFloat(t *testing.T) {
+	// Arrange
+	in := map[string]*structpb.Value{
+		"nan":    structpb.NewNumberValue(math.NaN()),
+		"nested": structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{structpb.NewNumberValue(math.Inf(-1))}}),
+	}
+
+	// Act
+	out := convert.ProtoToMeta(in)
+
+	// Assert
+	nan, ok := out["nan"].(float64)
+	require.True(t, ok, "got %T", out["nan"])
+	assert.True(t, math.IsNaN(nan))
+	assert.Equal(t, []any{math.Inf(-1)}, out["nested"])
 }
 
 // Metadata stored from REST or the engine can hold any Go number type; every

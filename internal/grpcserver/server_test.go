@@ -2,6 +2,7 @@ package grpcserver_test
 
 import (
 	"context"
+	"math"
 	"net"
 	"testing"
 
@@ -163,6 +164,24 @@ func TestGRPC_BadRequests(t *testing.T) {
 			_, err := c.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 2, 3}, K: proto.Int32(-1)})
 			return err
 		}, codes.InvalidArgument, ""},
+		{"insert: NaN in vector", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Insert(ctx, &pb.InsertRequest{Id: "x", Vector: []float32{1, float32(math.NaN()), 3}})
+			return err
+		}, codes.InvalidArgument, "vector[1] is NaN"},
+		{"insert: infinity in metadata", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Insert(ctx, &pb.InsertRequest{Id: "x", Vector: []float32{1, 2, 3},
+				Metadata: map[string]*structpb.Value{"score": structpb.NewNumberValue(math.Inf(1))}})
+			return err
+		}, codes.InvalidArgument, `"score"`},
+		{"search: NaN in query", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Search(ctx, &pb.SearchRequest{QueryVector: []float32{float32(math.NaN()), 2, 3}, K: proto.Int32(1)})
+			return err
+		}, codes.InvalidArgument, "vector[0] is NaN"},
+		{"search: NaN in filter", func(ctx context.Context, c pb.GoVecServiceClient) error {
+			_, err := c.Search(ctx, &pb.SearchRequest{QueryVector: []float32{1, 2, 3}, K: proto.Int32(1),
+				Filters: map[string]*structpb.Value{"score": structpb.NewNumberValue(math.NaN())}})
+			return err
+		}, codes.InvalidArgument, `"score"`},
 		{"get: missing id", func(ctx context.Context, c pb.GoVecServiceClient) error {
 			_, err := c.GetByID(ctx, &pb.GetByIDRequest{})
 			return err

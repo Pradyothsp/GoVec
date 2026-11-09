@@ -107,11 +107,18 @@ func (r *records[T]) Info() EngineInfo {
 // Replay treats an intact record it can't apply as corruption, so a rejected
 // write that was logged anyway stopped the next restart. width is the index's
 // width as of this write: a batch passes the width its earlier items set.
-func (r *records[T]) check(vec []float32, sparse core.SparseVector, width int) error {
+//
+// The finite check runs here and in prepareSearch, not in put: put also
+// replays the WAL, and a log an older server wrote with NaN in it must still
+// load.
+func (r *records[T]) check(vec []float32, sparse core.SparseVector, meta map[string]any, width int) error {
 	if err := validateVectorDims(vec, width); err != nil {
 		return err
 	}
 	if err := validateSparse(sparse); err != nil {
+		return err
+	}
+	if err := validateFinite(vec, sparse, meta); err != nil {
 		return err
 	}
 	return checkEncodable(vec, r.quantization, r.metric.Name)
@@ -124,7 +131,7 @@ func (r *records[T]) insert(ctx context.Context, id string, vec []float32, spars
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if err := r.check(vec, sparse, r.dimensions); err != nil {
+	if err := r.check(vec, sparse, meta, r.dimensions); err != nil {
 		return err
 	}
 	if err := r.log(ctx, &wal.Entry{Action: wal.ActionInsert, ID: id, Vector: vec, Sparse: sparse, Meta: meta}); err != nil {
@@ -158,7 +165,7 @@ func (r *records[T]) logBatch(ctx context.Context, items []BatchInsertItem) (acc
 	entries := make([]*wal.Entry, 0, len(items))
 	width := r.dimensions
 	for _, item := range items {
-		if err := r.check(item.Vector, item.Sparse, width); err != nil {
+		if err := r.check(item.Vector, item.Sparse, item.Meta, width); err != nil {
 			failures = append(failures, BatchInsertError{ID: item.ID, Err: err})
 			continue
 		}
@@ -400,8 +407,8 @@ func (r *records[T]) encode(vec []float32) (T, error) {
 	return r.encodeFunc(input), nil
 }
 
-// prepareSearch checks a query -- its width, and its sparse part -- and
-// encodes it as stored vectors are. A query of the wrong width can't be
+// prepareSearch checks a query -- its width, its sparse part, and that neither
+// it nor its filters hold NaN or infinity -- and encodes it as stored vectors are. A query of the wrong width can't be
 // compared against anything stored, and the comparison functions report that
 // as a bare "vector dimensions mismatch" from deep inside the search. Checking
 // here names the required width, classifies the failure as the caller's, and
@@ -413,11 +420,14 @@ func (r *records[T]) encode(vec []float32) (T, error) {
 // transports reject a negative k; here it is skipped too, rather than reach
 // the graph search, which panicked on it.
 // PRECONDITION: r.mu.RLock() held.
-func (r *records[T]) prepareSearch(query []float32, sparseQuery core.SparseVector, k int) (encoded T, skip bool, err error) {
+func (r *records[T]) prepareSearch(query []float32, sparseQuery core.SparseVector, filters map[string]any, k int) (encoded T, skip bool, err error) {
 	if err := validateVectorDims(query, r.dimensions); err != nil {
 		return encoded, false, err
 	}
 	if err := validateSparse(sparseQuery); err != nil {
+		return encoded, false, err
+	}
+	if err := validateFinite(query, sparseQuery, filters); err != nil {
 		return encoded, false, err
 	}
 	if k <= 0 {
